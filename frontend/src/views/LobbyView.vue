@@ -88,7 +88,8 @@ watch(() => store.status, (val) => {
 
 onMounted(() => {
   const name = sessionStorage.getItem('playerName') || 'Trainer'
-  if (!store.playerId) {
+  // Reconecta se: sem identidade ainda OU WebSocket não está aberto
+  if (!store.playerId || store.wsStatus !== 'connected') {
     store.connect(roomCode.value, name)
   }
 })

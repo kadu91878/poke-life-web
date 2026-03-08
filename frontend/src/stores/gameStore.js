@@ -74,7 +74,9 @@ export const useGameStore = defineStore('game', () => {
     socket.onopen = () => {
       wsStatus.value = 'connected'
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
-      send('join_game', { player_name: name })
+      // Envia player_id salvo (se houver) para reconexão confiável por ID
+      const savedId = sessionStorage.getItem(`playerId_${code}`) || ''
+      send('join_game', { player_name: name, player_id: savedId })
     }
 
     socket.onmessage = (event) => {
@@ -121,6 +123,10 @@ export const useGameStore = defineStore('game', () => {
       case 'joined':
         playerId.value = msg.player_id
         gameState.value = msg.state
+        // Persiste o player_id por sala no sessionStorage para sobreviver a reloads
+        if (msg.player_id && roomCode.value) {
+          sessionStorage.setItem(`playerId_${roomCode.value}`, msg.player_id)
+        }
         break
 
       case 'state_update':
@@ -141,6 +147,10 @@ export const useGameStore = defineStore('game', () => {
       case 'player_disconnected':
         _showNotification({ type: 'player_disconnected', player_id: msg.player_id })
         break
+
+      case 'player_reconnected':
+        _showNotification({ type: 'player_reconnected', player_id: msg.player_id })
+        break
     }
   }
 
@@ -152,7 +162,7 @@ export const useGameStore = defineStore('game', () => {
       player_left:         () => 'Um jogador saiu',
       player_removed:      () => 'Um jogador foi removido',
       player_disconnected: () => 'Um jogador desconectou',
-      player_reconnected:  () => 'Um jogador reconectou!',
+      player_reconnected:  (e) => `${e.player_name || 'Um jogador'} reconectou!`,
       game_started:        () => 'A partida começou!',
       starter_selected:    () => 'Pokémon inicial escolhido!',
       dice_rolled:         (e) => `Dado rolado: ${e.result}`,
