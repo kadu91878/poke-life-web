@@ -14,6 +14,7 @@ export const useGameStore = defineStore('game', () => {
   const notification = ref(null)
 
   let socket = null
+  let reconnectTimer = null
 
   // ── Computed ─────────────────────────────────────────────────────────────
   const me = computed(() =>
@@ -39,6 +40,10 @@ export const useGameStore = defineStore('game', () => {
   )
 
   const phase = computed(() => turn.value?.phase ?? '')
+
+  const finalScores = computed(() => gameState.value?.final_scores ?? null)
+
+  const board = computed(() => gameState.value?.board ?? null)
 
   // ── API REST ─────────────────────────────────────────────────────────────
   async function createRoom() {
@@ -68,6 +73,7 @@ export const useGameStore = defineStore('game', () => {
 
     socket.onopen = () => {
       wsStatus.value = 'connected'
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
       send('join_game', { player_name: name })
     }
 
@@ -83,10 +89,19 @@ export const useGameStore = defineStore('game', () => {
 
     socket.onclose = () => {
       wsStatus.value = 'disconnected'
+      // Auto-reconnect after 3s if we have credentials
+      if (code && name) {
+        reconnectTimer = setTimeout(() => {
+          if (wsStatus.value === 'disconnected') {
+            connect(code, name)
+          }
+        }, 3000)
+      }
     }
   }
 
   function disconnect() {
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
     socket?.close()
     socket = null
   }
@@ -119,6 +134,10 @@ export const useGameStore = defineStore('game', () => {
         setTimeout(() => { errorMsg.value = null }, 4000)
         break
 
+      case 'event':
+        _showNotification(msg.event)
+        break
+
       case 'player_disconnected':
         _showNotification({ type: 'player_disconnected', player_id: msg.player_id })
         break
@@ -130,16 +149,22 @@ export const useGameStore = defineStore('game', () => {
 
     const messages = {
       player_joined:       (e) => `${e.player_name} entrou na sala!`,
-      player_left:         () => `Um jogador saiu`,
-      player_removed:      () => `Um jogador foi removido`,
-      player_disconnected: () => `Um jogador desconectou`,
-      game_started:        () => `A partida começou!`,
-      starter_selected:    () => `Pokémon inicial escolhido!`,
+      player_left:         () => 'Um jogador saiu',
+      player_removed:      () => 'Um jogador foi removido',
+      player_disconnected: () => 'Um jogador desconectou',
+      player_reconnected:  () => 'Um jogador reconectou!',
+      game_started:        () => 'A partida começou!',
+      starter_selected:    () => 'Pokémon inicial escolhido!',
       dice_rolled:         (e) => `Dado rolado: ${e.result}`,
       pokemon_captured:    (e) => `Capturou ${e.result?.pokemon?.name ?? 'Pokémon'}!`,
-      battle_resolved:     (e) => `Batalha resolvida! Vencedor: ${e.result?.winner_id === playerId.value ? 'Você!' : 'Oponente'}`,
-      duel_started:        () => `Duelo iniciado!`,
-      action_skipped:      () => `Ação ignorada`,
+      battle_resolved:     (e) => {
+        const isWinner = e.result?.winner_id === playerId.value
+        return `Batalha resolvida! ${isWinner ? 'Você venceu!' : 'Adversário venceu.'}`
+      },
+      duel_started:        () => 'Duelo iniciado!',
+      action_skipped:      () => 'Ação pulada',
+      event_resolved:      () => 'Evento resolvido!',
+      ability_used:        () => 'Habilidade usada!',
     }
 
     const fn = messages[event.type]
@@ -151,16 +176,22 @@ export const useGameStore = defineStore('game', () => {
 
   // ── Ações do jogo ────────────────────────────────────────────────────────
   const actions = {
-    startGame:        ()              => send('start_game'),
-    selectStarter:    (id)            => send('select_starter',   { starter_id: id }),
-    rollDice:         ()              => send('roll_dice'),
-    capturePokemon:   ()              => send('capture_pokemon'),
-    skipAction:       ()              => send('skip_action'),
-    challengePlayer:  (targetId)      => send('challenge_player', { target_player_id: targetId }),
-    skipChallenge:    ()              => send('skip_challenge'),
-    battleChoice:     (index)         => send('battle_choice',    { pokemon_index: index }),
-    removePlayer:     (targetId)      => send('remove_player',    { player_id: targetId }),
-    leaveGame:        ()              => send('leave_game'),
+    startGame:        ()                          => send('start_game'),
+    selectStarter:    (id)                        => send('select_starter',   { starter_id: id }),
+    rollDice:         ()                          => send('roll_dice'),
+    capturePokemon:   (useFullRestore = false)    => send('capture_pokemon',  { use_full_restore: useFullRestore }),
+    skipAction:       ()                          => send('skip_action'),
+    passTurn:         ()                          => send('pass_turn'),
+    challengePlayer:  (targetId)                  => send('challenge_player', { target_player_id: targetId }),
+    skipChallenge:    ()                          => send('skip_action'),
+    battleChoice:     (index)                     => send('battle_choice',    { pokemon_index: index }),
+    removePlayer:     (targetId)                  => send('remove_player',    { player_id: targetId }),
+    leaveGame:        ()                          => send('leave_game'),
+    resolveEvent:     (useRunAway = false)        => send('resolve_event',    { use_run_away: useRunAway }),
+    useAbility:       (abilityAction, targetId, targetPosition) =>
+      send('use_ability', { ability_action: abilityAction, target_id: targetId, target_position: targetPosition }),
+    saveState:        ()                          => send('save_state'),
+    restoreState:     (state)                     => send('restore_state',    { state }),
   }
 
   function $reset() {
@@ -182,6 +213,7 @@ export const useGameStore = defineStore('game', () => {
     wsStatus, lastEvent, errorMsg, notification,
     // computed
     me, players, status, turn, isMyTurn, isHost, currentPlayer, phase,
+    finalScores, board,
     // methods
     createRoom, fetchRoom, deleteRoom,
     connect, disconnect, send, handleMessage,

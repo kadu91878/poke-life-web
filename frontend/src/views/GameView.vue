@@ -33,11 +33,43 @@
 
     <!-- Toast de log de eventos -->
     <EventLog />
+
+    <!-- Tela de resultado final -->
+    <div v-if="status === 'finished'" class="finish-overlay">
+      <div class="finish-modal">
+        <h1 class="finish-title">🏆 Jogo Encerrado!</h1>
+        <p class="finish-subtitle">Ranking Final</p>
+
+        <div class="scores-list">
+          <div v-for="(score, index) in finalScores" :key="score.player_id"
+               class="score-row" :class="{ 'score-winner': index === 0 }">
+            <span class="score-rank">{{ rankEmoji(index) }}</span>
+            <span class="score-name">{{ score.player_name }}</span>
+            <div class="score-breakdown">
+              <span title="Pokémon Master Points">🐾 {{ score.pokemon_mp }}</span>
+              <span title="Badge Points">🏅 {{ score.badge_mp }}</span>
+              <span title="League Bonus">👑 {{ score.league_bonus }}</span>
+              <strong class="score-total">= {{ score.total }} MP</strong>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="finalScores?.length" class="champion-banner">
+          🎉 Campeão: <strong>{{ finalScores[0]?.player_name }}</strong>
+          com {{ finalScores[0]?.total }} Master Points!
+        </div>
+
+        <div class="finish-actions">
+          <button class="btn-primary" @click="handleLeave">Voltar ao Início</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from '@/stores/gameStore'
 
@@ -52,25 +84,26 @@ const route  = useRoute()
 const router = useRouter()
 const store  = useGameStore()
 
-const roomCode   = computed(() => route.params.roomCode)
-const players    = computed(() => store.players)
-const turn       = computed(() => store.turn)
-const phase      = computed(() => store.phase)
-const errorMsg   = computed(() => store.errorMsg)
-const notification = computed(() => store.notification)
+const roomCode    = computed(() => route.params.roomCode)
+const players     = computed(() => store.players)
+const turn        = computed(() => store.turn)
+const phase       = computed(() => store.phase)
+const errorMsg    = computed(() => store.errorMsg)
+const notification= computed(() => store.notification)
+const status      = computed(() => store.status)
+const finalScores = computed(() => store.finalScores)
+
+function rankEmoji(index) {
+  return ['🥇','🥈','🥉'][index] ?? `#${index + 1}`
+}
 
 function handleLeave() {
-  store.actions.leaveGame()
+  if (store.wsStatus === 'connected') {
+    store.actions.leaveGame()
+  }
   store.$reset()
   router.push({ name: 'home' })
 }
-
-// Redireciona para home se o jogo terminou
-watch(() => store.status, (val) => {
-  if (val === 'finished') {
-    // Exibe tela de fim aqui ou redireciona
-  }
-})
 
 onMounted(() => {
   const name = sessionStorage.getItem('playerName') || 'Trainer'
@@ -148,5 +181,107 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
   overflow-y: auto;
   padding: 0.8rem;
+}
+
+/* ── Finish Screen ── */
+.finish-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+  padding: 1rem;
+  animation: fadeIn 0.5s ease;
+}
+
+.finish-modal {
+  background: var(--color-bg-card);
+  border: 2px solid var(--color-accent);
+  border-radius: 16px;
+  padding: 2.5rem;
+  max-width: 560px;
+  width: 100%;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+.finish-title {
+  text-align: center;
+  font-size: 2rem;
+  color: var(--color-accent);
+  font-weight: 900;
+}
+
+.finish-subtitle {
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 0.95rem;
+}
+
+.scores-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.score-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--color-bg);
+  border: 1px solid #333;
+  border-radius: var(--radius);
+  padding: 0.6rem 0.8rem;
+  font-size: 0.9rem;
+}
+
+.score-winner {
+  border-color: var(--color-accent);
+  background: rgba(244, 208, 63, 0.06);
+}
+
+.score-rank { font-size: 1.3rem; flex-shrink: 0; }
+.score-name { flex: 1; font-weight: 600; }
+
+.score-breakdown {
+  display: flex;
+  gap: 0.6rem;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.score-total {
+  color: var(--color-accent);
+  font-size: 0.9rem;
+}
+
+.champion-banner {
+  text-align: center;
+  background: rgba(244, 208, 63, 0.1);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius);
+  padding: 0.8rem;
+  color: var(--color-text-muted);
+  font-size: 1rem;
+}
+
+.champion-banner strong {
+  color: var(--color-accent);
+  font-size: 1.1rem;
+}
+
+.finish-actions {
+  display: flex;
+  justify-content: center;
+}
+
+.finish-actions button {
+  padding: 0.8rem 2rem;
 }
 </style>

@@ -5,7 +5,7 @@
     <div class="player-header">
       <div class="dot" :style="{ background: player.color }"></div>
       <span class="name">{{ player.name }}</span>
-      <span v-if="player.is_host"   class="badge host">H</span>
+      <span v-if="player.is_host"    class="badge host">H</span>
       <span v-if="isMe"             class="badge me">Você</span>
       <span v-if="isCurrentTurn"    class="badge turn">Vez</span>
       <span v-if="!player.is_connected" class="badge dc">DC</span>
@@ -17,16 +17,19 @@
       <span title="Master Points">⭐ {{ player.master_points }}</span>
     </div>
 
-    <div class="badges-row" v-if="player.badges.length">
+    <div class="position-row" v-if="tileName">
+      📍 <span class="tile-name">{{ tileName }}</span>
+    </div>
+
+    <div class="badges-row" v-if="player.badges?.length">
       <span v-for="b in player.badges" :key="b" class="badge-icon" :title="b">🏅</span>
     </div>
 
     <div class="pokemon-count">
-      Pokémon: {{ pokemonCount }}
-      <span v-if="player.starter_pokemon" class="starter-name">
-        ({{ player.starter_pokemon.name }})
-      </span>
+      {{ pokemonCount }} Pokémon
+      <span v-if="player.starter_pokemon" class="starter-name">({{ player.starter_pokemon.name }})</span>
     </div>
+
   </div>
 </template>
 
@@ -39,7 +42,13 @@ const store = useGameStore()
 
 const isMe          = computed(() => props.player.id === store.playerId)
 const isCurrentTurn = computed(() => props.player.id === store.turn?.current_player_id)
-const pokemonCount  = computed(() => props.player.pokemon.length)
+const pokemonCount  = computed(() => props.player.pokemon?.length ?? 0)
+
+const tileName = computed(() => {
+  const tiles = store.board?.tiles ?? []
+  const pos   = props.player.position ?? 0
+  return tiles[pos]?.name ?? `Casa ${pos}`
+})
 </script>
 
 <style scoped>
@@ -51,17 +60,12 @@ const pokemonCount  = computed(() => props.player.pokemon.length)
   padding: 0.6rem 0.8rem;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.3rem;
   transition: background 0.2s;
 }
 
-.player-panel.is-current {
-  background: rgba(244,208,63,0.06);
-}
-
-.player-panel.is-me {
-  border-style: solid;
-}
+.player-panel.is-current { background: rgba(244,208,63,0.06); }
+.player-panel.is-me      { border-style: solid; }
 
 .player-header {
   display: flex;
@@ -70,8 +74,7 @@ const pokemonCount  = computed(() => props.player.pokemon.length)
 }
 
 .dot {
-  width: 8px;
-  height: 8px;
+  width: 8px; height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -99,22 +102,27 @@ const pokemonCount  = computed(() => props.player.pokemon.length)
 .stats {
   display: flex;
   gap: 0.6rem;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   color: var(--color-text-muted);
 }
 
-.badges-row {
+.position-row {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
   display: flex;
-  gap: 2px;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+.tile-name {
+  color: var(--color-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
+.badges-row { display: flex; gap: 2px; flex-wrap: wrap; }
 .badge-icon { font-size: 0.75rem; }
 
-.pokemon-count {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-}
-
-.starter-name { color: var(--color-accent); }
+.pokemon-count { font-size: 0.72rem; color: var(--color-text-muted); }
+.starter-name  { color: var(--color-accent); }
 </style>
