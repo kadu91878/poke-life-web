@@ -8,11 +8,17 @@
       </p>
 
       <div class="starters">
-        <button v-for="starter in starters" :key="starter.id"
+        <button v-for="starter in allStarters" :key="starter.id"
                 class="starter-card"
-                :class="{ selected: selected === starter.id }"
-                :disabled="!isMyTurn"
-                @click="isMyTurn && (selected = starter.id)">
+                :class="{
+                  selected: selected === starter.id,
+                  taken: takenIds.has(starter.id),
+                }"
+                :disabled="!isMyTurn || takenIds.has(starter.id)"
+                @click="isMyTurn && !takenIds.has(starter.id) && (selected = starter.id)">
+          <div class="starter-taken-badge" v-if="takenIds.has(starter.id)">
+            {{ takenByName(starter.id) }}
+          </div>
           <div class="starter-name">{{ starter.name }}</div>
           <div class="starter-type">{{ starter.types.join(' / ') }}</div>
           <div class="starter-stats">
@@ -27,7 +33,7 @@
       </div>
 
       <button v-if="isMyTurn" class="btn-primary confirm-btn"
-              :disabled="!selected"
+              :disabled="!selected || takenIds.has(selected)"
               @click="confirm">
         Confirmar Escolha
       </button>
@@ -42,12 +48,45 @@ import { useGameStore } from '@/stores/gameStore'
 const store   = useGameStore()
 const selected = ref(null)
 
-const starters      = computed(() => store.turn?.available_starters ?? [])
 const isMyTurn      = computed(() => store.isMyTurn)
 const currentPlayer = computed(() => store.currentPlayer)
 
+// Starters disponíveis para escolha (ainda não tomados)
+const availableStarters = computed(() => store.turn?.available_starters ?? [])
+
+// Starters já escolhidos (de starter_pokemon dos jogadores)
+const chosenStarters = computed(() =>
+  store.players
+    .map(p => p.starter_pokemon)
+    .filter(Boolean)
+)
+
+// Lista completa de todos os starters (disponíveis + já tomados)
+const allStarters = computed(() => {
+  const available = availableStarters.value
+  const chosen = chosenStarters.value
+  // Combina os disponíveis com os já escolhidos, mantendo ordem original
+  const seen = new Set(available.map(s => s.id))
+  return [...available, ...chosen.filter(s => !seen.has(s.id))]
+})
+
+// IDs dos starters já tomados por outros jogadores
+const takenIds = computed(() => {
+  const set = new Set()
+  for (const p of store.players) {
+    if (p.starter_pokemon) set.add(p.starter_pokemon.id)
+  }
+  return set
+})
+
+// Retorna o nome do jogador que escolheu o starter
+function takenByName(starterId) {
+  const player = store.players.find(p => p.starter_pokemon?.id === starterId)
+  return player ? player.name : ''
+}
+
 function confirm() {
-  if (!selected.value) return
+  if (!selected.value || takenIds.value.has(selected.value)) return
   store.actions.selectStarter(selected.value)
 }
 </script>
@@ -98,10 +137,29 @@ function confirm() {
   gap: 0.4rem;
   text-align: center;
   transition: border-color 0.2s, transform 0.1s;
+  position: relative;
 }
 
-.starter-card:hover { border-color: var(--color-secondary); }
+.starter-card:hover:not(:disabled):not(.taken) { border-color: var(--color-secondary); }
 .starter-card.selected { border-color: var(--color-accent); background: rgba(244,208,63,0.08); }
+.starter-card.taken {
+  opacity: 0.45;
+  border-color: #555;
+  cursor: not-allowed;
+}
+
+.starter-taken-badge {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #555;
+  color: #ccc;
+  font-size: 0.65rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
 
 .starter-name  { font-size: 1.2rem; font-weight: 700; color: var(--color-accent); }
 .starter-type  { font-size: 0.75rem; color: var(--color-text-muted); }
