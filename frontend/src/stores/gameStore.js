@@ -64,33 +64,55 @@ export const useGameStore = defineStore('game', () => {
 
   // ── WebSocket ─────────────────────────────────────────────────────────────
   function connect(code, name) {
+    const sameRoom = roomCode.value === code
+    const hasLiveSocket = socket && [WebSocket.CONNECTING, WebSocket.OPEN].includes(socket.readyState)
+
+    if (sameRoom && hasLiveSocket) {
+      return
+    }
+
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+
+    if (socket && socket.readyState !== WebSocket.CLOSED) {
+      socket.close()
+    }
+
     roomCode.value = code
     playerName.value = name
     wsStatus.value = 'connecting'
+    errorMsg.value = null
 
-    const wsUrl = `ws://${window.location.host}/ws/game/${code}/`
-    socket = new WebSocket(wsUrl)
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    const ws = new WebSocket(`${protocol}://${window.location.host}/ws/game/${code}/`)
+    socket = ws
 
-    socket.onopen = () => {
+    ws.onopen = () => {
+      if (socket !== ws) return
       wsStatus.value = 'connected'
-      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
       // Envia player_id salvo (se houver) para reconexão confiável por ID
       const savedId = sessionStorage.getItem(`playerId_${code}`) || ''
       send('join_game', { player_name: name, player_id: savedId })
     }
 
-    socket.onmessage = (event) => {
+    ws.onmessage = (event) => {
+      if (socket !== ws) return
       const msg = JSON.parse(event.data)
       handleMessage(msg)
     }
 
-    socket.onerror = () => {
+    ws.onerror = () => {
+      if (socket !== ws) return
       wsStatus.value = 'error'
       errorMsg.value = 'Erro de conexão WebSocket'
     }
 
-    socket.onclose = () => {
+    ws.onclose = () => {
+      if (socket !== ws) return
       wsStatus.value = 'disconnected'
+      socket = null
       // Auto-reconnect after 3s if we have credentials
       if (code && name) {
         reconnectTimer = setTimeout(() => {
@@ -104,7 +126,9 @@ export const useGameStore = defineStore('game', () => {
 
   function disconnect() {
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
-    socket?.close()
+    const activeSocket = socket
+    socket = null
+    activeSocket?.close()
     socket = null
   }
 
