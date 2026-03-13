@@ -19,6 +19,13 @@
           <div class="starter-taken-badge" v-if="takenIds.has(starter.id)">
             {{ takenByName(starter.id) }}
           </div>
+          <div class="starter-image-wrap">
+            <img v-if="starter.image_path"
+                 :src="starter.image_path"
+                 :alt="starter.name"
+                 class="starter-card-img" />
+            <div v-else class="starter-card-img-placeholder">?</div>
+          </div>
           <div class="starter-name">{{ starter.name }}</div>
           <div class="starter-type">{{ starter.types.join(' / ') }}</div>
           <div class="starter-stats">
@@ -138,6 +145,32 @@ function confirm() {
   text-align: center;
   transition: border-color 0.2s, transform 0.1s;
   position: relative;
+}
+
+.starter-image-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 120px;
+}
+
+.starter-card-img {
+  max-height: 120px;
+  max-width: 140px;
+  object-fit: contain;
+  border-radius: 6px;
+}
+
+.starter-card-img-placeholder {
+  width: 100px;
+  height: 100px;
+  border-radius: 6px;
+  background: #222;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  color: #555;
 }
 
 .starter-card:hover:not(:disabled):not(.taken) { border-color: var(--color-secondary); }

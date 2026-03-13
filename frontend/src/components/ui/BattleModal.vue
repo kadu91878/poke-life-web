@@ -16,6 +16,10 @@
                   class="pokemon-btn"
                   :class="{ selected: selectedIndex === i }"
                   @click="selectedIndex = i">
+            <img v-if="p.image_path"
+                 :src="p.image_path"
+                 :alt="p.name"
+                 class="pokemon-btn-img" />
             <strong>{{ p.name }}</strong>
             <span>BP: {{ p.battle_points }}</span>
           </button>
@@ -129,10 +133,21 @@ function confirmChoice() {
   background: var(--color-bg);
   border: 1px solid #444;
   display: flex;
-  justify-content: space-between;
-  padding: 0.6rem 1rem;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.5rem 1rem;
   color: var(--color-text);
   transition: border-color 0.15s;
+}
+
+.pokemon-btn strong { flex: 1; text-align: left; }
+
+.pokemon-btn-img {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  border-radius: 4px;
+  flex-shrink: 0;
 }
 .pokemon-btn.selected { border-color: var(--color-accent); background: rgba(244,208,63,0.08); }
 .pokemon-btn strong   { color: var(--color-accent); }

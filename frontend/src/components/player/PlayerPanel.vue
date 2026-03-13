@@ -26,6 +26,10 @@
     </div>
 
     <div class="pokemon-count">
+      <img v-if="player.starter_pokemon?.image_path"
+           :src="player.starter_pokemon.image_path"
+           :alt="player.starter_pokemon.name"
+           class="starter-thumb" />
       {{ pokemonCount }} Pokémon
       <span v-if="player.starter_pokemon" class="starter-name">({{ player.starter_pokemon.name }})</span>
     </div>
@@ -123,6 +127,19 @@ const tileName = computed(() => {
 .badges-row { display: flex; gap: 2px; flex-wrap: wrap; }
 .badge-icon { font-size: 0.75rem; }
 
-.pokemon-count { font-size: 0.72rem; color: var(--color-text-muted); }
+.pokemon-count {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.starter-thumb {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
 .starter-name  { color: var(--color-accent); }
 </style>
