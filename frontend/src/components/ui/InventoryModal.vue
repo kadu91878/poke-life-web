@@ -111,12 +111,13 @@
 
         <div v-if="inventoryItems.length" class="item-card-grid">
           <article v-for="item in inventoryItems" :key="item.key" class="item-card">
+            <img v-if="item.image_path" :src="item.image_path" :alt="item.name" class="item-card-image" />
             <div class="item-card-top">
-              <span class="item-card-kind">Item</span>
+              <span class="item-card-kind">{{ item.category || 'item' }}</span>
               <span class="item-card-qty">x{{ item.quantity }}</span>
             </div>
             <strong>{{ item.name }}</strong>
-            <p>{{ itemDescription(item) }}</p>
+            <p>{{ item.notes || itemDescription(item) }}</p>
           </article>
         </div>
         <p v-else class="empty-copy">Nenhum item guardado no momento.</p>
@@ -132,12 +133,13 @@ import { computed, ref } from 'vue'
 const POKEBALL_SLOT_IMAGE = '/assets/items/pokeball-slot.png'
 
 const ITEM_DESCRIPTIONS = {
-  full_restore: 'Cura recursos de captura e aparece como carta no inventario.',
-  bill: 'Carta de item Bill.',
-  defender: 'Carta de item Defender.',
-  lucky_powder: 'Carta de item Lucky Powder.',
-  miracle_stone: 'Carta de item Miracle Stone.',
-  master_ball: 'Carta de item Master Ball.',
+  full_restore: 'Item presente no inventário atual.',
+  bill: 'Modificador de dado de movimento.',
+  gust_of_wind: 'Item de batalha para decidir o Pokémon inimigo.',
+  pluspower: 'Bônus temporário de BP em batalha.',
+  prof_oak: 'Redução conservadora do dado de movimento.',
+  miracle_stone: 'Evolução baseada apenas nos dados atuais da engine.',
+  master_points_nugget: 'Sem uso implementado por falta de regra operacional segura.',
 }
 
 const props = defineProps({
@@ -489,6 +491,14 @@ h3 {
   background:
     radial-gradient(circle at top right, rgba(255, 224, 102, 0.1), transparent 36%),
     rgba(255, 255, 255, 0.04);
+}
+
+.item-card-image {
+  width: 100%;
+  max-height: 180px;
+  object-fit: contain;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .item-card strong {

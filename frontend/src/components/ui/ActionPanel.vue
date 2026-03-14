@@ -3,6 +3,17 @@
     <div class="phase-label">{{ phaseLabel }}</div>
     <template v-if="isMyTurn">
       <template v-if="phase === 'roll'">
+        <div v-if="moveDiceItems.length" class="item-shortcuts">
+          <div class="hint">Itens de dado disponíveis:</div>
+          <button
+            v-for="item in moveDiceItems"
+            :key="item.key"
+            class="btn-secondary duel-btn"
+            @click="store.actions.useItem(item.key)"
+          >
+            🧰 {{ item.label }}<span class="duel-stats">x{{ item.quantity }}</span>
+          </button>
+        </div>
         <button class="btn-primary roll-btn" @click="store.actions.rollDice()">🎲 Rolar Dado</button>
       </template>
       <template v-if="phase === 'action'">
@@ -87,6 +98,22 @@
       <template v-if="phase === 'battle'">
         <p class="hint battle-hint">⚔️ Selecione seu Pokémon no modal</p>
       </template>
+      <template v-if="canUseMiracleStone && miracleStoneTargets.length">
+        <div class="event-card">
+          <div class="event-title">💎 Miracle Stone</div>
+          <div class="event-description">
+            Evolua um Pokémon usando apenas a cadeia de evolução presente nos dados atuais.
+          </div>
+        </div>
+        <button
+          v-for="target in miracleStoneTargets"
+          :key="target.key"
+          class="btn-secondary duel-btn"
+          @click="store.actions.useItem('miracle_stone', { pokemon_index: target.index })"
+        >
+          ⬆️ {{ target.name }}<span class="duel-stats">x{{ miracleStoneQuantity }}</span>
+        </button>
+      </template>
       <template v-if="phase === 'end'">
         <p class="hint">⏳ Processando...</p>
       </template>
@@ -102,11 +129,23 @@
         <span class="log-player">{{ entry.player }}</span>: {{ entry.message }}
       </div>
     </div>
+    <div v-if="isDev && me" class="debug-panel">
+      <div class="phase-label">Debug de Itens</div>
+      <select v-model="debugItemKey" class="debug-select">
+        <option v-for="item in debugItemOptions" :key="item.key" :value="item.key">
+          {{ item.label }}
+        </option>
+      </select>
+      <input v-model.number="debugQuantity" class="debug-input" type="number" min="1" max="9" />
+      <button class="btn-secondary" @click="store.actions.debugAddItem(debugItemKey, debugQuantity || 1)">
+        Adicionar item
+      </button>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useGameStore } from '@/stores/gameStore'
 
 const store = useGameStore()
@@ -132,6 +171,18 @@ const inventoryItems = computed(() => me.value?.items ?? [])
 const releasablePokemon = computed(() =>
   (me.value?.pokemon_inventory ?? []).filter(pokemon => !pokemon.is_starter_slot)
 )
+const isDev = import.meta.env.DEV
+const debugItemOptions = [
+  { key: 'bill', label: 'Bill' },
+  { key: 'full_restore', label: 'Full Restore' },
+  { key: 'gust_of_wind', label: 'Gust of Wind' },
+  { key: 'pluspower', label: 'PlusPower' },
+  { key: 'prof_oak', label: 'Prof. Oak' },
+  { key: 'miracle_stone', label: 'Miracle Stone' },
+  { key: 'master_points_nugget', label: 'Master Points Nugget' },
+]
+const debugItemKey = ref('bill')
+const debugQuantity = ref(1)
 
 const NEGATIVE_EFFECTS = new Set(['lose_pokeball','lose_full_restore','lose_master_points','move_backward','teleport_start'])
 const isNegativeEvent = computed(() => NEGATIVE_EFFECTS.has(pendingEvent.value?.effect?.type ?? ''))
@@ -185,6 +236,35 @@ const PHASE_LABELS = {
   release_pokemon:'🎾 Liberar Pokémon', gym:'🏆 Ginásio', league:'👑 Liga Pokémon', end:'⏳ Encerrando...',
 }
 const phaseLabel = computed(() => PHASE_LABELS[phase.value] ?? phase.value)
+const moveDiceItems = computed(() =>
+  inventoryItems.value
+    .filter(item => ['bill', 'prof_oak'].includes(item.key) && item.quantity > 0)
+    .map(item => ({
+      key: item.key,
+      quantity: item.quantity,
+      label: item.key === 'bill' ? 'Bill (+2 no dado)' : 'Prof. Oak (-1 no dado)',
+    }))
+)
+const miracleStoneQuantity = computed(() =>
+  inventoryItems.value.find(item => item.key === 'miracle_stone')?.quantity ?? 0
+)
+const canUseMiracleStone = computed(() =>
+  ['roll', 'action'].includes(phase.value) && isMyTurn.value && miracleStoneQuantity.value > 0
+)
+const miracleStoneTargets = computed(() => {
+  if (!canUseMiracleStone.value || !me.value) return []
+  const targets = []
+  const team = me.value.pokemon ?? []
+  team.forEach((pokemon, index) => {
+    if (pokemon?.evolves_to != null) {
+      targets.push({ key: `team-${index}`, index, name: pokemon.name })
+    }
+  })
+  if (me.value.starter_pokemon?.evolves_to != null) {
+    targets.push({ key: 'starter', index: team.length, name: `${me.value.starter_pokemon.name} (Starter)` })
+  }
+  return targets
+})
 </script>
 
 <style scoped>
@@ -218,8 +298,19 @@ button { width:100%; }
 .waiting strong { color:var(--color-text); }
 .hint { font-size:.78rem; color:var(--color-text-muted); text-align:center; }
 .battle-hint { color:var(--color-primary); }
+.item-shortcuts { display:flex; flex-direction:column; gap:.4rem; }
 .roll-btn { font-size:1rem; padding:.75rem; }
 .mini-log { border-top:1px solid rgba(255,255,255,.07); padding-top:.35rem; display:flex; flex-direction:column; gap:.18rem; max-height:100px; overflow-y:auto; }
 .log-entry { font-size:.68rem; color:var(--color-text-muted); line-height:1.3; }
 .log-player { color:var(--color-accent); font-weight:600; }
+.debug-panel { display:flex; flex-direction:column; gap:.45rem; padding-top:.35rem; border-top:1px solid rgba(255,255,255,.08); }
+.debug-select,
+.debug-input {
+  width:100%;
+  background:rgba(255,255,255,.05);
+  color:var(--color-text);
+  border:1px solid rgba(255,255,255,.1);
+  border-radius:8px;
+  padding:.45rem .55rem;
+}
 </style>
