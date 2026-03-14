@@ -1,0 +1,43 @@
+{
+  "starting_items": [
+    {
+      "item_name": "pokeball",
+      "quantity": 6,
+      "evidence": "Na seção 'PREPARING': 'Put six Pokéballs on the table in front of you and take two Full Restores.'",
+      "confidence": "high",
+      "ambiguous": false,
+      "notes": "Incluído por evidência visual direta, embora Pokébolas não sejam alvo principal desta task."
+    },
+    {
+      "item_name": "full_restore",
+      "quantity": 2,
+      "evidence": "Na seção 'PREPARING': 'Put six Pokéballs on the table in front of you and take two Full Restores.'",
+      "confidence": "high",
+      "ambiguous": false,
+      "notes": ""
+    }
+  ],
+  "general_item_rules": [
+    {
+      "rule": "O jogador pode manter no máximo 8 itens em posse ao mesmo tempo.",
+      "evidence": "Na seção 'ITEMS': 'You have a total of 8 items in your possession at any time.'",
+      "confidence": "high",
+      "ambiguous": false,
+      "notes": "A regra visual não diferencia explicitamente Pokébolas de outros itens."
+    },
+    {
+      "rule": "Itens podem ser obtidos de várias maneiras durante o jogo.",
+      "evidence": "Na seção 'ITEMS': 'You can obtain items in various ways.'",
+      "confidence": "high",
+      "ambiguous": false,
+      "notes": "A regra é genérica e não descreve fontes específicas."
+    },
+    {
+      "rule": "Itens podem ser usados durante o turno e também durante batalha, salvo quando outra regra declarar exceção.",
+      "evidence": "Na seção 'YOUR TURN': 'You can always use abilities and items, even during battle (unless stated otherwise).' ",
+      "confidence": "high",
+      "ambiguous": false,
+      "notes": "Algumas cartas individuais explicitamente impõem exceções, como Full Restore."
+    }
+  ]
+}
