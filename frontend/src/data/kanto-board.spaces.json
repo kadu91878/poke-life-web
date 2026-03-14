@@ -1,0 +1,1199 @@
+{
+  "boardId": "kanto",
+  "boardName": "Kanto",
+  "imageSrc": "/assets/cards/Kanto/Board & Rules/Kanto Board (Compact; borders 8,8,8,8).png",
+  "imageWidth": 1432,
+  "imageHeight": 2096,
+  "spaces": [
+    {
+      "id": 0,
+      "tileTypeId": "start_game",
+      "label": "Pallet Town",
+      "x": 386,
+      "y": 1541
+    },
+    {
+      "id": 1,
+      "tileTypeId": "regular_battle",
+      "label": "BattleTile",
+      "x": 387,
+      "y": 1470
+    },
+    {
+      "id": 2,
+      "tileTypeId": "regular_grass",
+      "label": "Grass Tile",
+      "x": 391,
+      "y": 1420
+    },
+    {
+      "id": 3,
+      "tileTypeId": "regular_battle",
+      "label": "Battle Tile",
+      "x": 387,
+      "y": 1355
+    },
+    {
+      "id": 4,
+      "tileTypeId": "regular_grass",
+      "label": "Grass Tile",
+      "x": 389,
+      "y": 1302
+    },
+    {
+      "id": 5,
+      "tileTypeId": "regular_grass",
+      "label": "Grass Tile",
+      "x": 383,
+      "y": 1246
+    },
+    {
+      "id": 6,
+      "tileTypeId": "regular_battle",
+      "label": "Battle Tile",
+      "x": 389,
+      "y": 1184
+    },
+    {
+      "id": 7,
+      "tileTypeId": "regular_event",
+      "label": "Event Tile",
+      "x": 384,
+      "y": 1124
+    },
+    {
+      "id": 8,
+      "tileTypeId": "regular_pokemon_center",
+      "label": "Pokemon Center",
+      "x": 384,
+      "y": 1064
+    },
+    {
+      "id": 9,
+      "tileTypeId": "regular_grass",
+      "label": "Grass Tile",
+      "x": 386,
+      "y": 1013
+    },
+    {
+      "id": 10,
+      "tileTypeId": "regular_grass",
+      "label": "Grass Tile",
+      "x": 379,
+      "y": 965
+    },
+    {
+      "id": 11,
+      "tileTypeId": "regular_event",
+      "label": "Event Tile",
+      "x": 379,
+      "y": 903
+    },
+    {
+      "id": 12,
+      "tileTypeId": "regular_event",
+      "label": "Event Tile",
+      "x": 383,
+      "y": 842
+    },
+    {
+      "id": 13,
+      "tileTypeId": "regular_battle",
+      "label": "Battle Tile",
+      "x": 384,
+      "y": 787
+    },
+    {
+      "id": 14,
+      "tileTypeId": "regular_event",
+      "label": "Event Tile",
+      "x": 384,
+      "y": 734
+    },
+    {
+      "id": 15,
+      "tileTypeId": "regular_grass",
+      "label": "Grass Tile",
+      "x": 387,
+      "y": 682
+    },
+    {
+      "id": 16,
+      "tileTypeId": "regular_grass",
+      "label": "Grass Tile",
+      "x": 383,
+      "y": 614
+    },
+    {
+      "id": 17,
+      "tileTypeId": "regular_battle",
+      "label": "Battle Tile",
+      "x": 387,
+      "y": 562
+    },
+    {
+      "id": 18,
+      "tileTypeId": "regular_grass",
+      "label": "Grass Tile",
+      "x": 384,
+      "y": 503
+    },
+    {
+      "id": 19,
+      "tileTypeId": "regular_event",
+      "label": "Event Tile",
+      "x": 384,
+      "y": 447
+    },
+    {
+      "id": 20,
+      "tileTypeId": "regular_pokemon_center",
+      "label": "Pokemon Center",
+      "x": 381,
+      "y": 393
+    },
+    {
+      "id": 21,
+      "tileTypeId": "regular_pokemart",
+      "label": "PokeMart",
+      "x": 387,
+      "y": 336
+    },
+    {
+      "id": 22,
+      "tileTypeId": "regular_event",
+      "label": "Event Tile",
+      "x": 383,
+      "y": 272
+    },
+    {
+      "id": 23,
+      "tileTypeId": "regular_grass",
+      "label": "Grass Tile",
+      "x": 389,
+      "y": 217
+    },
+    {
+      "id": 24,
+      "tileTypeId": "gym_brock",
+      "label": "Leader Brock (STOP)",
+      "x": 384,
+      "y": 155
+    },
+    {
+      "id": 25,
+      "tileTypeId": "regular_event",
+      "label": "Event Tile",
+      "x": 386,
+      "y": 96
+    },
+    {
+      "id": 26,
+      "tileTypeId": "regular_battle",
+      "label": "Battle Tile",
+      "x": 446,
+      "y": 102
+    },
+    {
+      "id": 27,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 504,
+      "y": 102
+    },
+    {
+      "id": 28,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 562,
+      "y": 105
+    },
+    {
+      "id": 29,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 618,
+      "y": 107
+    },
+    {
+      "id": 30,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 686,
+      "y": 100
+    },
+    {
+      "id": 31,
+      "tileTypeId": "regular_battle",
+      "label": "",
+      "x": 741,
+      "y": 100
+    },
+    {
+      "id": 32,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 737,
+      "y": 161
+    },
+    {
+      "id": 33,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 739,
+      "y": 231
+    },
+    {
+      "id": 34,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 739,
+      "y": 282
+    },
+    {
+      "id": 35,
+      "tileTypeId": "special_miracle_stone",
+      "label": "",
+      "x": 734,
+      "y": 344
+    },
+    {
+      "id": 36,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 741,
+      "y": 395
+    },
+    {
+      "id": 37,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 734,
+      "y": 447
+    },
+    {
+      "id": 38,
+      "tileTypeId": "special_team_rocket",
+      "label": "Team Rocket (STOP)",
+      "x": 812,
+      "y": 447
+    },
+    {
+      "id": 39,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 857,
+      "y": 452
+    },
+    {
+      "id": 40,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 917,
+      "y": 455
+    },
+    {
+      "id": 41,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 920,
+      "y": 384
+    },
+    {
+      "id": 42,
+      "tileTypeId": "regular_pokemon_center",
+      "label": "",
+      "x": 920,
+      "y": 333
+    },
+    {
+      "id": 43,
+      "tileTypeId": "regular_pokemart",
+      "label": "",
+      "x": 920,
+      "y": 280
+    },
+    {
+      "id": 44,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 914,
+      "y": 217
+    },
+    {
+      "id": 45,
+      "tileTypeId": "regular_battle",
+      "label": "",
+      "x": 917,
+      "y": 167
+    },
+    {
+      "id": 46,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 979,
+      "y": 161
+    },
+    {
+      "id": 47,
+      "tileTypeId": "special_bill",
+      "label": "Bill",
+      "x": 1032,
+      "y": 159
+    },
+    {
+      "id": 48,
+      "tileTypeId": "regular_pokemon_center",
+      "label": "",
+      "x": 1092,
+      "y": 159
+    },
+    {
+      "id": 49,
+      "tileTypeId": "gym_misty",
+      "label": "Leader Misty (STOP)",
+      "x": 1153,
+      "y": 166
+    },
+    {
+      "id": 50,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1210,
+      "y": 161
+    },
+    {
+      "id": 51,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1270,
+      "y": 167
+    },
+    {
+      "id": 52,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 1329,
+      "y": 161
+    },
+    {
+      "id": 53,
+      "tileTypeId": "regular_battle",
+      "label": "",
+      "x": 1388,
+      "y": 167
+    },
+    {
+      "id": 54,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1387,
+      "y": 220
+    },
+    {
+      "id": 55,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 1388,
+      "y": 280
+    },
+    {
+      "id": 56,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1393,
+      "y": 334
+    },
+    {
+      "id": 57,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 1390,
+      "y": 392
+    },
+    {
+      "id": 58,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 1385,
+      "y": 450
+    },
+    {
+      "id": 59,
+      "tileTypeId": "regular_battle",
+      "label": "",
+      "x": 1385,
+      "y": 511
+    },
+    {
+      "id": 60,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1383,
+      "y": 563
+    },
+    {
+      "id": 61,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1387,
+      "y": 625
+    },
+    {
+      "id": 62,
+      "tileTypeId": "regular_pokemart",
+      "label": "",
+      "x": 1393,
+      "y": 680
+    },
+    {
+      "id": 63,
+      "tileTypeId": "regular_pokemon_center",
+      "label": "",
+      "x": 1393,
+      "y": 730
+    },
+    {
+      "id": 64,
+      "tileTypeId": "gym_lt_surge",
+      "label": "Leader Lt. Surge (STOP)",
+      "x": 1385,
+      "y": 797
+    },
+    {
+      "id": 65,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1388,
+      "y": 848
+    },
+    {
+      "id": 66,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1388,
+      "y": 907
+    },
+    {
+      "id": 67,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 1395,
+      "y": 968
+    },
+    {
+      "id": 68,
+      "tileTypeId": "regular_pokemon_center",
+      "label": "",
+      "x": 1390,
+      "y": 1017
+    },
+    {
+      "id": 69,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1385,
+      "y": 1077
+    },
+    {
+      "id": 70,
+      "tileTypeId": "regular_battle",
+      "label": "",
+      "x": 1388,
+      "y": 1136
+    },
+    {
+      "id": 71,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1385,
+      "y": 1187
+    },
+    {
+      "id": 72,
+      "tileTypeId": "special_game_corner",
+      "label": "Game Corner",
+      "x": 1326,
+      "y": 1192
+    },
+    {
+      "id": 73,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 1272,
+      "y": 1190
+    },
+    {
+      "id": 74,
+      "tileTypeId": "regular_pokemart",
+      "label": "",
+      "x": 1216,
+      "y": 1194
+    },
+    {
+      "id": 75,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1151,
+      "y": 1189
+    },
+    {
+      "id": 76,
+      "tileTypeId": "regular_pokemon_center",
+      "label": "",
+      "x": 1095,
+      "y": 1187
+    },
+    {
+      "id": 77,
+      "tileTypeId": "gym_erika",
+      "label": "Leader Erika (STOP)",
+      "x": 1040,
+      "y": 1189
+    },
+    {
+      "id": 78,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 973,
+      "y": 1189
+    },
+    {
+      "id": 79,
+      "tileTypeId": "special_celadon_dept_store",
+      "label": "Celadon Dept. Store",
+      "x": 917,
+      "y": 1187
+    },
+    {
+      "id": 80,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 854,
+      "y": 1195
+    },
+    {
+      "id": 81,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 801,
+      "y": 1187
+    },
+    {
+      "id": 82,
+      "tileTypeId": "regular_battle",
+      "label": "",
+      "x": 739,
+      "y": 1198
+    },
+    {
+      "id": 83,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 682,
+      "y": 1189
+    },
+    {
+      "id": 84,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 679,
+      "y": 1246
+    },
+    {
+      "id": 85,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 679,
+      "y": 1310
+    },
+    {
+      "id": 86,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 686,
+      "y": 1359
+    },
+    {
+      "id": 87,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 677,
+      "y": 1416
+    },
+    {
+      "id": 88,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 682,
+      "y": 1477
+    },
+    {
+      "id": 89,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 683,
+      "y": 1532
+    },
+    {
+      "id": 90,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 683,
+      "y": 1591
+    },
+    {
+      "id": 91,
+      "tileTypeId": "regular_battle",
+      "label": "",
+      "x": 686,
+      "y": 1646
+    },
+    {
+      "id": 92,
+      "tileTypeId": "special_bicycle_bridge",
+      "label": "Bicycle Bridge Booth",
+      "x": 675,
+      "y": 1708
+    },
+    {
+      "id": 93,
+      "tileTypeId": "regular_pokemart",
+      "label": "",
+      "x": 686,
+      "y": 1760
+    },
+    {
+      "id": 94,
+      "tileTypeId": "regular_pokemon_center",
+      "label": "",
+      "x": 679,
+      "y": 1818
+    },
+    {
+      "id": 95,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 736,
+      "y": 1816
+    },
+    {
+      "id": 96,
+      "tileTypeId": "special_safari_zone",
+      "label": "Safari Zone",
+      "x": 796,
+      "y": 1817
+    },
+    {
+      "id": 97,
+      "tileTypeId": "special_safari_zone",
+      "label": "Safari Zone 2",
+      "x": 799,
+      "y": 1882
+    },
+    {
+      "id": 98,
+      "tileTypeId": "special_safari_zone",
+      "label": "Safari Zone 3",
+      "x": 803,
+      "y": 1939
+    },
+    {
+      "id": 99,
+      "tileTypeId": "special_safari_zone",
+      "label": "Safari Zone 4",
+      "x": 795,
+      "y": 1993
+    },
+    {
+      "id": 100,
+      "tileTypeId": "special_safari_zone",
+      "label": "Safari Zone 5",
+      "x": 857,
+      "y": 1991
+    },
+    {
+      "id": 101,
+      "tileTypeId": "special_safari_zone",
+      "label": "Safari Zone 6",
+      "x": 914,
+      "y": 1992
+    },
+    {
+      "id": 102,
+      "tileTypeId": "special_safari_zone",
+      "label": "Safari Zone 7",
+      "x": 979,
+      "y": 1990
+    },
+    {
+      "id": 103,
+      "tileTypeId": "special_safari_zone",
+      "label": "Safari Zone 8",
+      "x": 1037,
+      "y": 1990
+    },
+    {
+      "id": 104,
+      "tileTypeId": "special_safari_zone",
+      "label": "Safari Zone 9",
+      "x": 1091,
+      "y": 2000
+    },
+    {
+      "id": 105,
+      "tileTypeId": "special_safari_zone",
+      "label": "Safati Zone 10",
+      "x": 1169,
+      "y": 1981
+    },
+    {
+      "id": 106,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 865,
+      "y": 1816
+    },
+    {
+      "id": 107,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 911,
+      "y": 1820
+    },
+    {
+      "id": 108,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 979,
+      "y": 1820
+    },
+    {
+      "id": 109,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 1038,
+      "y": 1820
+    },
+    {
+      "id": 110,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1091,
+      "y": 1819
+    },
+    {
+      "id": 111,
+      "tileTypeId": "gym_koga",
+      "label": "Leader Koga (STOP)",
+      "x": 1156,
+      "y": 1817
+    },
+    {
+      "id": 112,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 1156,
+      "y": 1758
+    },
+    {
+      "id": 113,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1156,
+      "y": 1699
+    },
+    {
+      "id": 114,
+      "tileTypeId": "regular_battle",
+      "label": "",
+      "x": 1159,
+      "y": 1650
+    },
+    {
+      "id": 115,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1148,
+      "y": 1592
+    },
+    {
+      "id": 116,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 1154,
+      "y": 1534
+    },
+    {
+      "id": 117,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1148,
+      "y": 1481
+    },
+    {
+      "id": 118,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1151,
+      "y": 1416
+    },
+    {
+      "id": 119,
+      "tileTypeId": "regular_pokemart",
+      "label": "",
+      "x": 1153,
+      "y": 1357
+    },
+    {
+      "id": 120,
+      "tileTypeId": "regular_pokemon_center",
+      "label": "",
+      "x": 1154,
+      "y": 1296
+    },
+    {
+      "id": 121,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 1154,
+      "y": 1240
+    },
+    {
+      "id": 122,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 1151,
+      "y": 1128
+    },
+    {
+      "id": 123,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1154,
+      "y": 1082
+    },
+    {
+      "id": 124,
+      "tileTypeId": "special_mr_fuji_house",
+      "label": "Mr Fuji`s House",
+      "x": 1159,
+      "y": 1014
+    },
+    {
+      "id": 125,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 1150,
+      "y": 960
+    },
+    {
+      "id": 126,
+      "tileTypeId": "regular_battle",
+      "label": "",
+      "x": 1087,
+      "y": 961
+    },
+    {
+      "id": 127,
+      "tileTypeId": "regular_battle",
+      "label": "",
+      "x": 1033,
+      "y": 964
+    },
+    {
+      "id": 128,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 974,
+      "y": 956
+    },
+    {
+      "id": 129,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 909,
+      "y": 960
+    },
+    {
+      "id": 130,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 858,
+      "y": 961
+    },
+    {
+      "id": 131,
+      "tileTypeId": "regular_pokemon_center",
+      "label": "",
+      "x": 801,
+      "y": 971
+    },
+    {
+      "id": 132,
+      "tileTypeId": "gym_sabrina",
+      "label": "Leader Sabrina (STOP)",
+      "x": 796,
+      "y": 899
+    },
+    {
+      "id": 133,
+      "tileTypeId": "regular_pokemart",
+      "label": "",
+      "x": 801,
+      "y": 848
+    },
+    {
+      "id": 134,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 795,
+      "y": 789
+    },
+    {
+      "id": 135,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 798,
+      "y": 729
+    },
+    {
+      "id": 136,
+      "tileTypeId": "special_teleporter",
+      "label": "Teleporter 0",
+      "x": 804,
+      "y": 668
+    },
+    {
+      "id": 137,
+      "tileTypeId": "special_teleporter",
+      "label": "Teleporter 1",
+      "x": 443,
+      "y": 1873
+    },
+    {
+      "id": 138,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 389,
+      "y": 1875
+    },
+    {
+      "id": 139,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 325,
+      "y": 1874
+    },
+    {
+      "id": 140,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 270,
+      "y": 1868
+    },
+    {
+      "id": 141,
+      "tileTypeId": "special_miracle_stone",
+      "label": "",
+      "x": 211,
+      "y": 1881
+    },
+    {
+      "id": 142,
+      "tileTypeId": "regular_battle",
+      "label": "",
+      "x": 153,
+      "y": 1873
+    },
+    {
+      "id": 143,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 90,
+      "y": 1877
+    },
+    {
+      "id": 144,
+      "tileTypeId": "regular_pokemart",
+      "label": "",
+      "x": 90,
+      "y": 1814
+    },
+    {
+      "id": 145,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 95,
+      "y": 1757
+    },
+    {
+      "id": 146,
+      "tileTypeId": "regular_pokemon_center",
+      "label": "",
+      "x": 88,
+      "y": 1706
+    },
+    {
+      "id": 147,
+      "tileTypeId": "gym_blaine",
+      "label": "Leader Blaine (STOP)",
+      "x": 85,
+      "y": 1635
+    },
+    {
+      "id": 148,
+      "tileTypeId": "special_ocean_route",
+      "label": "",
+      "x": 98,
+      "y": 1586
+    },
+    {
+      "id": 149,
+      "tileTypeId": "regular_event",
+      "label": "Ocean Route",
+      "x": 83,
+      "y": 1531
+    },
+    {
+      "id": 150,
+      "tileTypeId": "regular_battle",
+      "label": "Ocean Route",
+      "x": 83,
+      "y": 1469
+    },
+    {
+      "id": 151,
+      "tileTypeId": "special_ocean_route",
+      "label": "",
+      "x": 85,
+      "y": 1420
+    },
+    {
+      "id": 152,
+      "tileTypeId": "regular_event",
+      "label": "Ocean Route",
+      "x": 95,
+      "y": 1360
+    },
+    {
+      "id": 153,
+      "tileTypeId": "special_ocean_route",
+      "label": "",
+      "x": 88,
+      "y": 1294
+    },
+    {
+      "id": 154,
+      "tileTypeId": "special_ocean_route",
+      "label": "",
+      "x": 90,
+      "y": 1245
+    },
+    {
+      "id": 155,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 88,
+      "y": 1188
+    },
+    {
+      "id": 156,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 93,
+      "y": 1129
+    },
+    {
+      "id": 157,
+      "tileTypeId": "regular_pokemart",
+      "label": "",
+      "x": 90,
+      "y": 1076
+    },
+    {
+      "id": 158,
+      "tileTypeId": "regular_pokemon_center",
+      "label": "",
+      "x": 93,
+      "y": 1024
+    },
+    {
+      "id": 159,
+      "tileTypeId": "gym_giovanni",
+      "label": "Leader Giovanni (STOP)",
+      "x": 87,
+      "y": 959
+    },
+    {
+      "id": 160,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 96,
+      "y": 904
+    },
+    {
+      "id": 161,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 93,
+      "y": 855
+    },
+    {
+      "id": 162,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 96,
+      "y": 784
+    },
+    {
+      "id": 163,
+      "tileTypeId": null,
+      "label": "",
+      "x": 93,
+      "y": 729
+    },
+    {
+      "id": 164,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 95,
+      "y": 729
+    },
+    {
+      "id": 165,
+      "tileTypeId": "regular_battle",
+      "label": "",
+      "x": 93,
+      "y": 680
+    },
+    {
+      "id": 166,
+      "tileTypeId": "regular_grass",
+      "label": "",
+      "x": 90,
+      "y": 623
+    },
+    {
+      "id": 167,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 88,
+      "y": 562
+    },
+    {
+      "id": 168,
+      "tileTypeId": "regular_event",
+      "label": "",
+      "x": 87,
+      "y": 503
+    },
+    {
+      "id": 169,
+      "tileTypeId": "pokemon_league",
+      "label": "",
+      "x": 90,
+      "y": 387
+    }
+  ]
+}
