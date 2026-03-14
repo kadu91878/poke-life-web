@@ -24,9 +24,29 @@
             <span>BP: {{ p.battle_points }}</span>
           </button>
         </div>
+        <label v-if="pluspowerQuantity > 0" class="pluspower-toggle">
+          <input v-model="usePlusPower" type="checkbox" />
+          Usar PlusPower (+2 BP nesta batalha) · x{{ pluspowerQuantity }}
+        </label>
         <button class="btn-primary" :disabled="selectedIndex === null" @click="confirmChoice">
           Confirmar
         </button>
+        <div v-if="gustOfWindQuantity > 0 && !opponentHasChosen" class="gust-panel">
+          <p class="hint">Gust of Wind: force o Pokémon do oponente.</p>
+          <button
+            v-for="(p, i) in opponentPokemon"
+            :key="`${p.id}-${i}`"
+            class="btn-secondary pokemon-btn"
+            @click="store.actions.useItem('gust_of_wind', { target_pokemon_index: i })"
+          >
+            <img v-if="p.image_path"
+                 :src="p.image_path"
+                 :alt="p.name"
+                 class="pokemon-btn-img" />
+            <strong>{{ p.name }}</strong>
+            <span>Forçar</span>
+          </button>
+        </div>
       </template>
 
       <template v-else-if="isParticipant && hasChosen">
@@ -50,6 +70,7 @@ import { useGameStore } from '@/stores/gameStore'
 
 const store = useGameStore()
 const selectedIndex = ref(null)
+const usePlusPower = ref(false)
 
 const battle     = computed(() => store.turn?.battle ?? {})
 const challenger = computed(() => store.players.find(p => p.id === battle.value.challenger_id))
@@ -72,11 +93,33 @@ const myPokemon = computed(() => {
   if (me.starter_pokemon) pool.push(me.starter_pokemon)
   return pool
 })
+const inventoryItems = computed(() => store.me?.items ?? [])
+const pluspowerQuantity = computed(() => inventoryItems.value.find(item => item.key === 'pluspower')?.quantity ?? 0)
+const gustOfWindQuantity = computed(() => inventoryItems.value.find(item => item.key === 'gust_of_wind')?.quantity ?? 0)
+const opponent = computed(() =>
+  store.playerId === battle.value.challenger_id ? defender.value : challenger.value
+)
+const opponentPokemon = computed(() => {
+  const current = opponent.value
+  if (!current) return []
+  const pool = [...(current.pokemon ?? [])]
+  if (current.starter_pokemon) pool.push(current.starter_pokemon)
+  return pool
+})
+const opponentHasChosen = computed(() => {
+  const b = battle.value
+  if (store.playerId === b.challenger_id) return !!b.defender_choice
+  return !!b.challenger_choice
+})
 
 function confirmChoice() {
   if (selectedIndex.value === null) return
+  if (usePlusPower.value && pluspowerQuantity.value > 0) {
+    store.actions.useItem('pluspower', { pokemon_index: selectedIndex.value })
+  }
   store.actions.battleChoice(selectedIndex.value)
   selectedIndex.value = null
+  usePlusPower.value = false
 }
 </script>
 
@@ -151,4 +194,6 @@ function confirmChoice() {
 }
 .pokemon-btn.selected { border-color: var(--color-accent); background: rgba(244,208,63,0.08); }
 .pokemon-btn strong   { color: var(--color-accent); }
+.pluspower-toggle { display:flex; align-items:center; gap:.5rem; font-size:.85rem; color:var(--color-text-muted); }
+.gust-panel { display:flex; flex-direction:column; gap:.5rem; }
 </style>
