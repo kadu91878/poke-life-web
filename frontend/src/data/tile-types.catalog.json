@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "tileTypes": [
+    { "id": "start_game", "label": "Start Tile", "group": "special", "description": "Start of the game." },
+    { "id": "regular_grass", "label": "Grass Tile", "group": "regular", "description": "Throw the capture dice to capture a Pokemon." },
+    { "id": "regular_event", "label": "Event Tile", "group": "regular", "description": "Draw an event card." },
+    { "id": "regular_battle", "label": "Battle Tile", "group": "regular", "description": "Challenge another player." },
+    { "id": "regular_pokemon_center", "label": "Pokemon Center", "group": "regular", "description": "Heal all your Pokemon when you land here." },
+    { "id": "regular_roadblock", "label": "Roadblock", "group": "regular", "description": "Stop moving until the roadblock disappears." },
+    { "id": "regular_pokemart", "label": "PokeMart", "group": "regular", "description": "Receive an item based on the die roll." },
+    { "id": "gym_brock", "label": "Leader Brock", "group": "gym", "description": "Gym tile for Brock." },
+    { "id": "gym_misty", "label": "Leader Misty", "group": "gym", "description": "Gym tile for Misty." },
+    { "id": "gym_lt_surge", "label": "Leader Lt. Surge", "group": "gym", "description": "Gym tile for Lt. Surge." },
+    { "id": "gym_erika", "label": "Leader Erika", "group": "gym", "description": "Gym tile for Erika." },
+    { "id": "gym_koga", "label": "Leader Koga", "group": "gym", "description": "Gym tile for Koga." },
+    { "id": "gym_sabrina", "label": "Leader Sabrina", "group": "gym", "description": "Gym tile for Sabrina." },
+    { "id": "gym_blaine", "label": "Leader Blaine", "group": "gym", "description": "Gym tile for Blaine." },
+    { "id": "gym_giovanni", "label": "Leader Giovanni", "group": "gym", "description": "Gym tile for Giovanni." },
+    { "id": "pokemon_league", "label": "Pokemon League", "group": "league", "description": "League tile and Elite Four path." },
+    { "id": "special_miracle_stone", "label": "Miracle Stone", "group": "special", "description": "Instant evolution tile." },
+    { "id": "special_team_rocket", "label": "Team Rocket", "group": "special", "description": "Team Rocket event tile." },
+    { "id": "special_bill", "label": "Bill", "group": "special", "description": "Teleport to another player's location once per game." },
+    { "id": "special_game_corner", "label": "Game Corner", "group": "special", "description": "Roll to win an item." },
+    { "id": "special_bicycle_bridge", "label": "Bicycle Bridge Booth", "group": "special", "description": "Draw from the victory pile." },
+    { "id": "special_safari_zone", "label": "Safari Zone", "group": "special", "description": "Safari capture sequence." },
+    { "id": "special_mr_fuji_house", "label": "Mr Fuji's House", "group": "special", "description": "Draw two cards from the event pile." },
+    { "id": "special_celadon_dept_store", "label": "Celadon Dept. Store", "group": "special", "description": "Receive a Pokeball or treat as a market." },
+    { "id": "special_teleporter", "label": "Teleporter", "group": "special", "description": "Teleport and play an extra turn on landing." },
+    { "id": "special_ocean_route", "label": "Ocean Route", "group": "special", "description": "Ocean route tile not listed in the legend image." }
+  ]
+}

@@ -3,14 +3,23 @@
     <div class="board-header">
       <div>
         <h3 class="board-title">Tabuleiro Kanto</h3>
-        <p class="board-subtitle">Mapa fixo com casas mapeadas, leitura do caminho e preview dos proximos resultados do dado</p>
+        <p class="board-subtitle">
+          Cada posicao logica usa um `spaceId` calibrado manualmente e um `tileTypeId` do catalogo de tipos reutilizaveis.
+        </p>
       </div>
-      <div class="board-legend">
-        <span v-for="item in legendItems" :key="item.type" class="legend-chip">
-          {{ item.icon }} {{ item.label }}
-        </span>
-        <span class="legend-chip legend-chip--water">🌊 Rota aquática</span>
+      <div class="board-actions">
+        <label class="debug-toggle">
+          <input v-model="showDebug" type="checkbox" />
+          <span>Debug overlay</span>
+        </label>
+        <RouterLink class="calibration-link" :to="{ name: 'board-calibration' }">
+          Calibrar e mapear
+        </RouterLink>
       </div>
+    </div>
+
+    <div v-if="unmappedLogicalTileCount" class="board-warning">
+      {{ unmappedLogicalTileCount }} tile(s) logicos ainda sem `spaceId` ou `tileTypeId`.
     </div>
 
     <div class="board-layout">
@@ -20,26 +29,23 @@
             <img class="board-image" :src="BOARD_IMAGE" alt="Tabuleiro Kanto" />
 
             <button
-              v-for="tile in tiles"
+              v-for="tile in positionedTiles"
               :key="tile.id"
               class="tile-node"
-              :class="[
-                `tile-node--${tile.type}`,
-                {
-                  'tile-node--water': isWaterTile(tile),
-                  'tile-node--current': currentTile?.id === tile.id,
-                  'tile-node--selected': activeTile?.id === tile.id,
-                },
-              ]"
+              :class="{
+                'tile-node--current': currentTile?.id === tile.id,
+                'tile-node--selected': activeTile?.id === tile.id,
+                'tile-node--debug': showDebug,
+              }"
               :style="nodeStyle(tile.id)"
+              :title="debugTitle(tile.id)"
               @click="selectedTileId = tile.id"
             >
-              <span v-if="showNodeId(tile)" class="tile-id">{{ tile.id }}</span>
-              <span v-if="isWaterTile(tile)" class="tile-water-label">AGUA</span>
+              <span v-if="showDebug" class="tile-id">{{ tile.id }}</span>
             </button>
 
             <div
-              v-for="player in players"
+              v-for="player in positionedPlayers"
               :key="player.id"
               class="player-pin"
               :class="{ 'player-pin--me': player.id === me?.id }"
@@ -65,8 +71,16 @@
           <div>
             <strong>{{ activeTile?.name }}</strong>
             <p>{{ activeTile?.description }}</p>
-            <span class="info-meta">Casa {{ activeTile?.id }} · {{ describeTile(activeTile) }}</span>
+            <span class="info-meta">
+              Casa {{ activeTile?.id }} · {{ describeTile(activeTile) }}
+            </span>
           </div>
+        </div>
+
+        <div class="route-card">
+          <h4>Estado do mapeamento</h4>
+          <p>{{ mappedLogicalTiles }}/{{ logicalTileCount }} tiles logicos apontam para um espaco visual calibrado.</p>
+          <p>{{ calibratedSpaceCount }}/{{ totalSpaces }} espacos visuais possuem coordenadas explicitas.</p>
         </div>
 
         <div class="players-card">
@@ -80,26 +94,9 @@
             <span class="player-dot" :style="{ background: player.color }"></span>
             <strong>{{ player.name }}</strong>
             <span>{{ tileName(player.position) }}</span>
-            <button class="focus-btn" @click="selectedTileId = player.position">focar</button>
-          </div>
-        </div>
-
-        <div class="route-card">
-          <h4>Direção da rota</h4>
-          <p>
-            O caminho segue do <strong>Inicio</strong> para a <strong>Liga</strong>, acompanhando as setas douradas sobre a trilha.
-            Clique em qualquer casa para ver o efeito e os proximos destinos do dado.
-          </p>
-        </div>
-
-        <div class="route-card">
-          <h4>Próximos passos no dado</h4>
-          <div class="dice-preview">
-            <div v-for="step in nextStops" :key="step.roll" class="dice-step">
-              <strong>{{ step.roll }}</strong>
-              <span>{{ step.tile.name }}</span>
-              <em>{{ step.meta }}</em>
-            </div>
+            <button class="focus-btn" :disabled="!isTileMapped(player.position)" @click="selectedTileId = player.position">
+              focar
+            </button>
           </div>
         </div>
       </aside>
@@ -109,16 +106,33 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 import { useGameStore } from '@/stores/gameStore'
-import { BOARD_ASPECT_RATIO, BOARD_IMAGE, TILE_POSITIONS, getTilePosition } from './kantoBoardLayout'
+import {
+  BOARD_ASPECT_RATIO,
+  BOARD_IMAGE,
+  BOARD_LOGICAL_MAP,
+  BOARD_SPACES,
+  TILE_TYPES,
+  buildLogicalLookup,
+  buildSpaceLookup,
+  countCalibratedSpaces,
+  countMappedLogicalTiles,
+  getLogicalTileMapping,
+  getLogicalTileVisualPosition,
+} from '@/lib/boardCalibration'
 
 const store = useGameStore()
 const selectedTileId = ref(null)
+const showDebug = ref(false)
 
 const tiles = computed(() => store.gameState?.board?.tiles ?? [])
 const players = computed(() => store.players)
 const me = computed(() => store.me)
 const currentTile = computed(() => store.turn?.current_tile ?? null)
+const logicalLookup = computed(() => buildLogicalLookup(BOARD_LOGICAL_MAP.slots))
+const spaceLookup = computed(() => buildSpaceLookup(BOARD_SPACES.spaces))
+const tileTypeLookup = computed(() => new Map(TILE_TYPES.map(tileType => [tileType.id, tileType])))
 
 watch(currentTile, tile => {
   if (tile?.id !== undefined) {
@@ -133,41 +147,35 @@ const activeTile = computed(() => {
   return currentTile.value ?? tiles.value[0] ?? null
 })
 
-const nextStops = computed(() => {
-  const originId = activeTile.value?.id ?? 0
-  return Array.from({ length: 6 }, (_, offset) => {
-    const tile = tiles.value[Math.min(originId + offset + 1, tiles.value.length - 1)] ?? activeTile.value
-    return {
-      roll: offset + 1,
-      tile,
-      meta: describeTile(tile),
-    }
-  })
-})
+const positionedTiles = computed(() => tiles.value.filter(tile => isTileMapped(tile.id)))
+const positionedPlayers = computed(() => players.value.filter(player => isTileMapped(player.position)))
+const mappedLogicalTiles = computed(() => countMappedLogicalTiles(BOARD_LOGICAL_MAP.slots))
+const calibratedSpaceCount = computed(() => countCalibratedSpaces(BOARD_SPACES.spaces))
+const logicalTileCount = BOARD_LOGICAL_MAP.slots.length
+const totalSpaces = BOARD_SPACES.spaces.length
+const unmappedLogicalTileCount = computed(() => logicalTileCount - mappedLogicalTiles.value)
 
-const legendItems = [
-  { type: 'grass', label: 'Captura', icon: '🌿' },
-  { type: 'event', label: 'Evento', icon: '📋' },
-  { type: 'duel', label: 'Duelo', icon: '⚔️' },
-  { type: 'gym', label: 'Ginasio', icon: '🏆' },
-  { type: 'special', label: 'Especial', icon: '⭐' },
-  { type: 'league', label: 'Liga', icon: '👑' },
-]
+function isTileMapped(tileId) {
+  return Boolean(getLogicalTileVisualPosition(tileId, logicalLookup.value, spaceLookup.value))
+}
 
 function nodeStyle(tileId) {
-  const position = getTilePosition(tileId)
+  const position = getLogicalTileVisualPosition(tileId, logicalLookup.value, spaceLookup.value)
+
+  if (!position) {
+    return {}
+  }
+
   return {
-    left: `${position.left}%`,
-    top: `${position.top}%`,
+    left: position.left,
+    top: position.top,
   }
 }
 
-function isWaterTile(tile) {
-  return tile?.data?.terrain === 'water'
-}
-
-function showNodeId(tile) {
-  return tile.id % 5 === 0 || ['start', 'gym', 'special', 'league'].includes(tile.type)
+function debugTitle(tileId) {
+  const mapping = getLogicalTileMapping(tileId, logicalLookup.value)
+  const tileType = mapping?.tileTypeId ? tileTypeLookup.value.get(mapping.tileTypeId) : null
+  return `tile ${tileId} · space ${mapping?.spaceId ?? '-'} · ${tileType?.label ?? 'sem tipo'}`
 }
 
 function tileName(position) {
@@ -176,9 +184,14 @@ function tileName(position) {
 
 function describeTile(tile) {
   if (!tile) return ''
+  const mapping = getLogicalTileMapping(tile.id, logicalLookup.value)
+  const tileType = mapping?.tileTypeId ? tileTypeLookup.value.get(mapping.tileTypeId) : null
   const parts = [typeLabel(tile.type)]
-  if (isWaterTile(tile)) {
-    parts.push('aquática')
+  if (tileType?.label) {
+    parts.push(tileType.label)
+  }
+  if (!isTileMapped(tile.id)) {
+    parts.push('sem mapeamento visual')
   }
   return parts.join(' · ')
 }
@@ -222,8 +235,14 @@ function typeLabel(type) {
   min-height: 100%;
 }
 
-.board-header {
+.board-header,
+.board-actions,
+.player-pin,
+.board-sidebar {
   display: flex;
+}
+
+.board-header {
   justify-content: space-between;
   align-items: flex-start;
   gap: 1rem;
@@ -240,26 +259,38 @@ function typeLabel(type) {
   margin: 0.2rem 0 0;
   color: var(--color-text-muted);
   font-size: 0.85rem;
+  max-width: 58ch;
 }
 
-.board-legend {
-  display: flex;
+.board-actions {
+  align-items: center;
   flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.debug-toggle {
+  display: flex;
+  align-items: center;
   gap: 0.45rem;
-}
-
-.legend-chip {
-  background: rgba(8, 20, 35, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
   color: #eef4ff;
-  font-size: 0.75rem;
-  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
 }
 
-.legend-chip--water {
-  background: rgba(21, 95, 177, 0.24);
-  border-color: rgba(109, 192, 255, 0.24);
+.calibration-link {
+  color: #fff3bf;
+  text-decoration: none;
+  border: 1px solid rgba(255, 224, 102, 0.24);
+  border-radius: 999px;
+  padding: 0.55rem 0.9rem;
+  background: rgba(255, 224, 102, 0.12);
+}
+
+.board-warning {
+  background: rgba(255, 214, 102, 0.12);
+  border: 1px solid rgba(255, 214, 102, 0.32);
+  color: #ffe7a0;
+  border-radius: 16px;
+  padding: 0.75rem 1rem;
 }
 
 .board-layout {
@@ -305,31 +336,39 @@ function typeLabel(type) {
   border-radius: 999px;
   border: none;
   background: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: transparent;
-  box-shadow: none;
   opacity: 0;
+  padding: 0;
 }
 
+.tile-node--debug,
 .tile-node--selected,
 .tile-node--current {
-  width: 22px;
-  height: 22px;
+  opacity: 1;
+}
+
+.tile-node--debug {
+  background: rgba(230, 57, 70, 0.88);
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  color: #fff;
+}
+
+.tile-node--current {
+  box-shadow: 0 0 0 5px rgba(255, 224, 102, 0.24);
+}
+
+.tile-node--selected {
+  background: rgba(78, 205, 196, 0.92);
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  color: #04111d;
 }
 
 .tile-id {
-  display: none;
-}
-
-.tile-water-label {
-  display: none;
+  font-size: 0.62rem;
+  font-weight: 800;
 }
 
 .player-pin {
   z-index: 4;
-  display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.2rem;
@@ -348,12 +387,6 @@ function typeLabel(type) {
   font-size: 0.62rem;
   font-weight: 800;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.28);
-  transition: transform 0.14s ease, box-shadow 0.14s ease;
-}
-
-.player-pin-btn:hover {
-  transform: scale(1.18);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.34);
 }
 
 .player-pin--me .player-pin-btn {
@@ -375,7 +408,6 @@ function typeLabel(type) {
 }
 
 .board-sidebar {
-  display: flex;
   flex-direction: column;
   gap: 0.85rem;
 }
@@ -413,7 +445,8 @@ function typeLabel(type) {
   color: var(--color-accent);
 }
 
-.info-card p {
+.info-card p,
+.route-card p {
   margin: 0.25rem 0 0.45rem;
   color: var(--color-text-muted);
   font-size: 0.88rem;
@@ -469,48 +502,6 @@ function typeLabel(type) {
   color: #fff3bf;
   font-size: 0.72rem;
   padding: 0.25rem 0.55rem;
-}
-
-.route-card p {
-  margin: 0;
-  color: var(--color-text-muted);
-  font-size: 0.85rem;
-}
-
-.dice-preview {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-}
-
-.dice-step {
-  display: grid;
-  grid-template-columns: 28px 1fr auto;
-  gap: 0.55rem;
-  align-items: center;
-  font-size: 0.8rem;
-  color: var(--color-text-muted);
-}
-
-.dice-step strong {
-  width: 28px;
-  height: 28px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 224, 102, 0.14);
-  color: #fff3bf;
-}
-
-.dice-step span {
-  color: #eef4ff;
-}
-
-.dice-step em {
-  color: #9ec7ff;
-  font-style: normal;
-  font-size: 0.72rem;
 }
 
 @media (max-width: 1100px) {
