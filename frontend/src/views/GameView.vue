@@ -20,7 +20,12 @@
 
       <!-- Painel direito -->
       <aside class="side-panel">
-        <PlayerPanel v-for="p in players" :key="p.id" :player="p" />
+        <PlayerPanel
+          v-for="p in players"
+          :key="p.id"
+          :player="p"
+          @open-inventory="openInventory"
+        />
         <ActionPanel />
       </aside>
     </main>
@@ -30,6 +35,13 @@
 
     <!-- Modal de batalha -->
     <BattleModal v-if="phase === 'battle'" />
+
+    <!-- Modal de inventário -->
+    <InventoryModal
+      v-if="selectedInventoryPlayer"
+      :player="selectedInventoryPlayer"
+      @close="selectedInventoryPlayerId = null"
+    />
 
     <!-- Toast de log de eventos -->
     <EventLog />
@@ -69,7 +81,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onBeforeUnmount } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from '@/stores/gameStore'
 
@@ -79,6 +91,7 @@ import ActionPanel  from '@/components/ui/ActionPanel.vue'
 import StarterModal from '@/components/ui/StarterModal.vue'
 import BattleModal  from '@/components/ui/BattleModal.vue'
 import EventLog     from '@/components/ui/EventLog.vue'
+import InventoryModal from '@/components/ui/InventoryModal.vue'
 
 const route  = useRoute()
 const router = useRouter()
@@ -92,6 +105,10 @@ const errorMsg    = computed(() => store.errorMsg)
 const notification= computed(() => store.notification)
 const status      = computed(() => store.status)
 const finalScores = computed(() => store.finalScores)
+const selectedInventoryPlayerId = ref(null)
+const selectedInventoryPlayer = computed(() =>
+  players.value.find(player => player.id === selectedInventoryPlayerId.value) ?? null
+)
 
 function rankEmoji(index) {
   return ['🥇','🥈','🥉'][index] ?? `#${index + 1}`
@@ -103,6 +120,10 @@ function handleLeave() {
   }
   store.$reset()
   router.push({ name: 'home' })
+}
+
+function openInventory(playerId) {
+  selectedInventoryPlayerId.value = playerId
 }
 
 onMounted(() => {

@@ -52,6 +52,38 @@
         <button class="btn-primary" @click="store.actions.resolveEvent(false)">✓ Confirmar Evento</button>
         <button v-if="canUseRunAway && isNegativeEvent" class="btn-secondary" @click="store.actions.resolveEvent(true)">🐭 Fugir (Run Away)</button>
       </template>
+      <template v-if="phase === 'item_choice' && pendingItemChoice">
+        <div class="event-card">
+          <div class="event-title">🎒 Inventário cheio</div>
+          <div class="event-description">
+            Você só pode manter {{ me?.item_capacity ?? 8 }} itens. Escolha um item para descartar.
+          </div>
+        </div>
+        <button
+          v-for="item in inventoryItems"
+          :key="item.key"
+          class="btn-secondary duel-btn"
+          @click="store.actions.discardItem(item.key)"
+        >
+          🗑️ {{ item.name }}<span class="duel-stats">x{{ item.quantity }}</span>
+        </button>
+      </template>
+      <template v-if="phase === 'release_pokemon' && pendingReleaseChoice">
+        <div class="event-card">
+          <div class="event-title">🎾 Sem slots livres</div>
+          <div class="event-description">
+            Libere um Pokémon para abrir espaço e concluir a captura de {{ pendingReleaseChoice.pokemon?.name }}.
+          </div>
+        </div>
+        <button
+          v-for="(pokemon, index) in releasablePokemon"
+          :key="`${pokemon.id}-${index}`"
+          class="btn-secondary duel-btn"
+          @click="store.actions.releasePokemon(index)"
+        >
+          🕊️ {{ pokemon.name }}<span class="duel-stats">{{ pokemon.slot_cost ?? pokemon.pokeball_slots ?? 1 }} slot(s)</span>
+        </button>
+      </template>
       <template v-if="phase === 'battle'">
         <p class="hint battle-hint">⚔️ Selecione seu Pokémon no modal</p>
       </template>
@@ -87,6 +119,8 @@ const pendingPokemon = computed(() => store.turn?.pending_pokemon ?? null)
 const pendingEvent   = computed(() => store.turn?.pending_event ?? null)
 const players        = computed(() => store.players)
 const turn           = computed(() => store.turn)
+const pendingItemChoice = computed(() => turn.value?.pending_item_choice ?? null)
+const pendingReleaseChoice = computed(() => turn.value?.pending_release_choice ?? null)
 
 const captureContext     = computed(() => turn.value?.capture_context ?? null)
 const isFreeCapture      = computed(() => !!turn.value?.compound_eyes_active)
@@ -94,6 +128,10 @@ const isLegendaryCapture = computed(() => !!turn.value?.seafoam_legendary || cap
 const isDuelTile         = computed(() => currentTile.value?.type === 'duel')
 const safariRemaining    = computed(() => (turn.value?.pending_safari ?? []).length)
 const otherActivePlayers = computed(() => players.value.filter(p => p.id !== store.playerId && p.is_active))
+const inventoryItems = computed(() => me.value?.items ?? [])
+const releasablePokemon = computed(() =>
+  (me.value?.pokemon_inventory ?? []).filter(pokemon => !pokemon.is_starter_slot)
+)
 
 const NEGATIVE_EFFECTS = new Set(['lose_pokeball','lose_full_restore','lose_master_points','move_backward','teleport_start'])
 const isNegativeEvent = computed(() => NEGATIVE_EFFECTS.has(pendingEvent.value?.effect?.type ?? ''))
@@ -143,7 +181,8 @@ const eventEffectClass = computed(() => {
 const lastLogs = computed(() => (store.gameState?.log ?? []).slice(-5).reverse())
 const PHASE_LABELS = {
   select_starter:'🌟 Escolha seu Pokémon inicial', roll:'🎲 Role o dado', action:'🎯 Escolha uma ação',
-  battle:'⚔️ Batalha em andamento', event:'📋 Carta de Evento', gym:'🏆 Ginásio', league:'👑 Liga Pokémon', end:'⏳ Encerrando...',
+  battle:'⚔️ Batalha em andamento', event:'📋 Carta de Evento', item_choice:'🎒 Inventário cheio',
+  release_pokemon:'🎾 Liberar Pokémon', gym:'🏆 Ginásio', league:'👑 Liga Pokémon', end:'⏳ Encerrando...',
 }
 const phaseLabel = computed(() => PHASE_LABELS[phase.value] ?? phase.value)
 </script>

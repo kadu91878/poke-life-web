@@ -199,6 +199,8 @@ export const useGameStore = defineStore('game', () => {
       action_skipped:      () => 'Ação pulada',
       event_resolved:      () => 'Evento resolvido!',
       ability_used:        () => 'Habilidade usada!',
+      item_discarded:      () => 'Item descartado',
+      pokemon_released:    () => 'Pokémon liberado para abrir espaço',
     }
 
     const fn = messages[event.type]
@@ -222,6 +224,8 @@ export const useGameStore = defineStore('game', () => {
     removePlayer:     (targetId)                  => send('remove_player',    { player_id: targetId }),
     leaveGame:        ()                          => send('leave_game'),
     resolveEvent:     (useRunAway = false)        => send('resolve_event',    { use_run_away: useRunAway }),
+    discardItem:      (itemKey)                   => send('discard_item',     { item_key: itemKey }),
+    releasePokemon:   (pokemonIndex)              => send('release_pokemon',  { pokemon_index: pokemonIndex }),
     useAbility:       (abilityAction, targetId, targetPosition) =>
       send('use_ability', { ability_action: abilityAction, target_id: targetId, target_position: targetPosition }),
     saveState:        ()                          => send('save_state'),
