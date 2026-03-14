@@ -2,8 +2,8 @@
   <div class="game-board">
     <div class="board-header">
       <div>
-        <h3 class="board-title">Jornada Kanto</h3>
-        <p class="board-subtitle">Rota em trilha, com leitura clara das casas e da posicao dos jogadores</p>
+        <h3 class="board-title">Tabuleiro Kanto</h3>
+        <p class="board-subtitle">Mapa fixo com casas mapeadas, leitura do caminho e preview dos proximos resultados do dado</p>
       </div>
       <div class="board-legend">
         <span v-for="item in legendItems" :key="item.type" class="legend-chip">
@@ -15,65 +15,47 @@
 
     <div class="board-layout">
       <div class="board-panel">
-        <div
-          class="journey-grid"
-          :style="{
-            '--grid-columns': BOARD_GRID.columns,
-            '--grid-rows': BOARD_GRID.rows,
-          }"
-        >
-          <div
-            v-for="segment in segments"
-            :key="segment.id"
-            class="grid-segment"
-            :class="[`grid-segment--${segment.dir}`, { 'grid-segment--water': segment.water }]"
-            :style="segment.style"
-          ></div>
+        <div class="board-frame">
+          <div class="board-map" :style="{ '--board-aspect': BOARD_ASPECT_RATIO }">
+            <img class="board-image" :src="BOARD_IMAGE" alt="Tabuleiro Kanto" />
 
-          <div
-            v-for="region in REGION_LABELS"
-            :key="region.name"
-            class="region-label"
-            :style="regionStyle(region)"
-          >
-            {{ region.name }}
-          </div>
+            <button
+              v-for="tile in tiles"
+              :key="tile.id"
+              class="tile-node"
+              :class="[
+                `tile-node--${tile.type}`,
+                {
+                  'tile-node--water': isWaterTile(tile),
+                  'tile-node--current': currentTile?.id === tile.id,
+                  'tile-node--selected': activeTile?.id === tile.id,
+                },
+              ]"
+              :style="nodeStyle(tile.id)"
+              @click="selectedTileId = tile.id"
+            >
+              <span v-if="showNodeId(tile)" class="tile-id">{{ tile.id }}</span>
+              <span v-if="isWaterTile(tile)" class="tile-water-label">AGUA</span>
+            </button>
 
-          <button
-            v-for="tile in tiles"
-            :key="tile.id"
-            class="tile-node"
-            :class="[
-              `tile-node--${tile.type}`,
-              {
-                'tile-node--current': currentTile?.id === tile.id,
-                'tile-node--selected': activeTile?.id === tile.id,
-                'tile-node--water': isWaterTile(tile),
-              },
-            ]"
-            :style="tileStyle(tile.id)"
-            :title="`${tile.name}: ${tile.description}`"
-            @click="selectedTileId = tile.id"
-          >
-            <span class="tile-icon">{{ tileIcon(tile.type) }}</span>
-            <span v-if="showNodeId(tile)" class="tile-id">{{ tile.id }}</span>
-            <span v-if="isWaterTile(tile)" class="tile-water-label">AGUA</span>
-
-            <div v-if="playersOnTile(tile.id).length" class="tile-tokens">
-              <div
-                v-for="player in playersOnTile(tile.id)"
-                :key="player.id"
-                class="tile-token"
-                :class="{ 'tile-token--me': player.id === me?.id }"
+            <div
+              v-for="player in players"
+              :key="player.id"
+              class="player-pin"
+              :class="{ 'player-pin--me': player.id === me?.id }"
+              :style="nodeStyle(player.position)"
+            >
+              <button
+                class="player-pin-btn"
                 :style="{ background: player.color }"
+                :title="`${player.name} em ${tileName(player.position)}`"
+                @click="selectedTileId = player.position"
               >
                 {{ player.name[0] }}
-              </div>
+              </button>
+              <span class="player-pin-label">{{ player.name }}</span>
             </div>
-          </button>
-
-          <div class="journey-badge journey-badge--start" :style="tileStyle(0)">Inicio</div>
-          <div class="journey-badge journey-badge--league" :style="tileStyle(70)">Liga</div>
+          </div>
         </div>
       </div>
 
@@ -83,7 +65,7 @@
           <div>
             <strong>{{ activeTile?.name }}</strong>
             <p>{{ activeTile?.description }}</p>
-            <span class="info-meta">Casa {{ activeTile?.id }} · {{ typeLabel(activeTile?.type) }}</span>
+            <span class="info-meta">Casa {{ activeTile?.id }} · {{ describeTile(activeTile) }}</span>
           </div>
         </div>
 
@@ -103,14 +85,15 @@
         </div>
 
         <div class="route-card">
-          <h4>Rota principal</h4>
+          <h4>Direção da rota</h4>
           <p>
-            A trilha faz a viagem parecer uma rota de verdade, mas continua seguindo a ordem original das casas do jogo.
+            O caminho segue do <strong>Inicio</strong> para a <strong>Liga</strong>, acompanhando as setas douradas sobre a trilha.
+            Clique em qualquer casa para ver o efeito e os proximos destinos do dado.
           </p>
         </div>
 
         <div class="route-card">
-          <h4>Proximos passos no dado</h4>
+          <h4>Próximos passos no dado</h4>
           <div class="dice-preview">
             <div v-for="step in nextStops" :key="step.roll" class="dice-step">
               <strong>{{ step.roll }}</strong>
@@ -127,7 +110,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { useGameStore } from '@/stores/gameStore'
-import { BOARD_GRID, REGION_LABELS, TILE_GRID_POSITIONS, getTileGridPosition } from './kantoBoardLayout'
+import { BOARD_ASPECT_RATIO, BOARD_IMAGE, TILE_POSITIONS, getTilePosition } from './kantoBoardLayout'
 
 const store = useGameStore()
 const selectedTileId = ref(null)
@@ -150,23 +133,6 @@ const activeTile = computed(() => {
   return currentTile.value ?? tiles.value[0] ?? null
 })
 
-const segments = computed(() =>
-  TILE_GRID_POSITIONS.slice(0, -1).map((point, index) => {
-    const next = TILE_GRID_POSITIONS[index + 1]
-    const sameRow = point.row === next.row
-    const sameCol = point.col === next.col
-    const fromTile = tiles.value[index]
-    const toTile = tiles.value[index + 1]
-
-    return {
-      id: `${index}-${index + 1}`,
-      dir: sameRow ? 'horizontal' : sameCol ? 'vertical' : 'diagonal',
-      style: buildSegmentStyle(point, next, index),
-      water: isWaterTile(fromTile) || isWaterTile(toTile),
-    }
-  })
-)
-
 const nextStops = computed(() => {
   const originId = activeTile.value?.id ?? 0
   return Array.from({ length: 6 }, (_, offset) => {
@@ -188,44 +154,12 @@ const legendItems = [
   { type: 'league', label: 'Liga', icon: '👑' },
 ]
 
-function buildSegmentStyle(from, to, index) {
-  const cellWidth = 100 / BOARD_GRID.columns
-  const cellHeight = 100 / BOARD_GRID.rows
-  const x1 = (from.col - 0.5) * cellWidth
-  const y1 = (from.row - 0.5) * cellHeight
-  const x2 = (to.col - 0.5) * cellWidth
-  const y2 = (to.row - 0.5) * cellHeight
-  const dx = x2 - x1
-  const dy = y2 - y1
-  const length = Math.hypot(dx, dy)
-  const angle = Math.atan2(dy, dx) * (180 / Math.PI)
-
+function nodeStyle(tileId) {
+  const position = getTilePosition(tileId)
   return {
-    left: `${x1}%`,
-    top: `${y1}%`,
-    width: `${length}%`,
-    transform: `translateY(-50%) rotate(${angle}deg)`,
-    opacity: index % 2 === 0 ? 1 : 0.88,
+    left: `${position.left}%`,
+    top: `${position.top}%`,
   }
-}
-
-function tileStyle(tileId) {
-  const position = getTileGridPosition(tileId)
-  return {
-    gridColumn: position.col,
-    gridRow: position.row,
-  }
-}
-
-function regionStyle(region) {
-  return {
-    gridColumn: region.col,
-    gridRow: region.row,
-  }
-}
-
-function playersOnTile(tileId) {
-  return players.value.filter(player => player.position === tileId)
 }
 
 function isWaterTile(tile) {
@@ -330,211 +264,113 @@ function typeLabel(type) {
 
 .board-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.75fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(290px, 0.75fr);
   gap: 1rem;
   align-items: start;
 }
 
-.journey-grid {
-  position: relative;
-  display: grid;
-  grid-template-columns: repeat(var(--grid-columns), minmax(0, 1fr));
-  grid-template-rows: repeat(var(--grid-rows), minmax(68px, 1fr));
-  gap: 0.85rem 0.7rem;
-  min-height: 760px;
-  padding: 1.15rem;
+.board-frame {
+  padding: 1rem;
   border-radius: 24px;
-  overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background:
-    radial-gradient(circle at 16% 76%, rgba(77, 163, 88, 0.16), transparent 16%),
-    radial-gradient(circle at 52% 78%, rgba(27, 163, 218, 0.14), transparent 18%),
-    radial-gradient(circle at 53% 22%, rgba(194, 156, 42, 0.14), transparent 18%),
-    linear-gradient(180deg, #121531 0%, #171b40 100%);
+  background: linear-gradient(180deg, rgba(11, 23, 39, 0.98), rgba(6, 16, 28, 0.98));
   box-shadow: 0 24px 50px rgba(0, 0, 0, 0.35);
 }
 
-.journey-grid::before {
-  content: '';
-  position: absolute;
-  inset: 18px;
-  border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  pointer-events: none;
+.board-map {
+  position: relative;
+  width: min(100%, 780px);
+  margin: 0 auto;
+  aspect-ratio: var(--board-aspect);
+  overflow: hidden;
+  border-radius: 18px;
 }
 
-.grid-segment {
-  position: absolute;
-  height: 8px;
-  transform-origin: left center;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgba(255, 224, 102, 0.22), rgba(255, 224, 102, 0.82));
-  box-shadow: 0 0 0 1px rgba(10, 14, 28, 0.18);
-  z-index: 1;
-  pointer-events: none;
-}
-
-.grid-segment--diagonal {
-  height: 7px;
-}
-
-.grid-segment::after {
-  content: '›';
-  position: absolute;
-  right: -6px;
-  top: 50%;
-  transform: translateY(-52%);
-  color: rgba(255, 244, 201, 0.8);
-  font-size: 0.92rem;
-  font-weight: 900;
-}
-
-.grid-segment--water {
-  height: 12px;
-  background:
-    linear-gradient(90deg, rgba(173, 227, 255, 0.22), rgba(109, 192, 255, 0.92)),
-    repeating-linear-gradient(
-      90deg,
-      rgba(255, 255, 255, 0.18) 0 8px,
-      rgba(255, 255, 255, 0.02) 8px 16px
-    );
-  box-shadow:
-    0 0 0 2px rgba(109, 192, 255, 0.2),
-    0 8px 18px rgba(12, 62, 107, 0.18);
-}
-
-.grid-segment--water::after {
-  color: rgba(196, 233, 255, 0.92);
-}
-
-.region-label {
-  align-self: center;
-  justify-self: center;
-  transform: translateY(-44px);
-  padding: 0.32rem 0.65rem;
-  border-radius: 999px;
-  background: rgba(8, 20, 35, 0.82);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  color: #dce9ff;
-  font-size: 0.64rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  z-index: 2;
-  pointer-events: none;
+.board-image {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .tile-node,
-.journey-badge {
-  align-self: center;
-  justify-self: center;
-  position: relative;
-  z-index: 3;
+.player-pin {
+  position: absolute;
+  transform: translate(-50%, -50%);
 }
 
 .tile-node {
-  width: 58px;
-  height: 42px;
-  border-radius: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.9);
-  background: #1b223c;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.26);
-  transition: border-color 0.15s, box-shadow 0.15s;
+  color: transparent;
+  box-shadow: none;
+  opacity: 0;
 }
 
-.tile-node--selected {
-  border-color: #ffe066;
-  box-shadow: 0 0 0 6px rgba(255, 224, 102, 0.14), 0 8px 18px rgba(0, 0, 0, 0.26);
-}
-
+.tile-node--selected,
 .tile-node--current {
-  border-color: #9bf6ff;
-}
-
-.tile-node--start { background: #1f6a47; }
-.tile-node--grass { background: #2b7a3f; }
-.tile-node--event { background: #285693; }
-.tile-node--duel { background: #8f3434; }
-.tile-node--gym { background: #a37b13; }
-.tile-node--city { background: #5e6c86; }
-.tile-node--special { background: #7247b7; }
-.tile-node--league { background: #8d1e57; }
-.tile-node--water {
-  background:
-    linear-gradient(180deg, rgba(79, 161, 223, 0.96), rgba(38, 101, 168, 0.96));
-  box-shadow:
-    0 0 0 4px rgba(109, 192, 255, 0.24),
-    0 8px 18px rgba(0, 0, 0, 0.26);
-  border-color: #c0eeff;
-}
-
-.tile-icon {
-  font-size: 0.9rem;
+  width: 22px;
+  height: 22px;
 }
 
 .tile-id {
-  position: absolute;
-  top: -14px;
-  right: 4px;
-  font-size: 0.58rem;
-  font-weight: 700;
-  color: #fff4c9;
+  display: none;
 }
 
 .tile-water-label {
-  position: absolute;
-  left: 6px;
-  bottom: 4px;
-  font-size: 0.46rem;
-  font-weight: 900;
-  letter-spacing: 0.06em;
-  color: #e8f8ff;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  display: none;
 }
 
-.tile-tokens {
-  position: absolute;
-  bottom: -11px;
-  left: 50%;
-  transform: translateX(-50%);
+.player-pin {
+  z-index: 4;
   display: flex;
-  gap: 0.18rem;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
 }
 
-.tile-token {
-  width: 18px;
-  height: 18px;
+.player-pin-btn {
+  width: 22px;
+  height: 22px;
   border-radius: 999px;
   border: 2px solid rgba(255, 255, 255, 0.95);
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
   color: #fff;
   font-size: 0.62rem;
   font-weight: 800;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.28);
+  transition: transform 0.14s ease, box-shadow 0.14s ease;
 }
 
-.tile-token--me {
-  width: 22px;
-  height: 22px;
+.player-pin-btn:hover {
+  transform: scale(1.18);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.34);
+}
+
+.player-pin--me .player-pin-btn {
+  width: 26px;
+  height: 26px;
   box-shadow: 0 0 0 4px rgba(155, 246, 255, 0.16), 0 4px 10px rgba(0, 0, 0, 0.28);
 }
 
-.journey-badge {
-  transform: translateY(30px);
-  background: rgba(8, 20, 35, 0.94);
-  color: #fff4c9;
-  border: 1px solid rgba(255, 224, 102, 0.25);
+.player-pin-label {
+  background: rgba(8, 20, 35, 0.88);
+  color: #eef4ff;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 999px;
-  padding: 0.18rem 0.52rem;
-  font-size: 0.64rem;
+  padding: 0.08rem 0.38rem;
+  font-size: 0.52rem;
   font-weight: 800;
+  line-height: 1;
   pointer-events: none;
 }
 
@@ -680,13 +516,6 @@ function typeLabel(type) {
 @media (max-width: 1100px) {
   .board-layout {
     grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 720px) {
-  .journey-grid {
-    min-height: 700px;
-    padding: 0.85rem;
   }
 }
 </style>
