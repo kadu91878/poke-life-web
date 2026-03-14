@@ -3,13 +3,19 @@
     <div class="board-header">
       <div>
         <h3 class="board-title">Tabuleiro Kanto</h3>
-        <p class="board-subtitle">Mapa fixo com casas mapeadas, leitura do caminho e preview dos proximos resultados do dado</p>
+        <p class="board-subtitle">
+          O tabuleiro agora usa o JSON de `spaces` calibrados. A resolucao logica atual e generica para teste:
+          `tileId -> spaceId` na ordem do arquivo.
+        </p>
       </div>
       <div class="board-legend">
         <span v-for="item in legendItems" :key="item.type" class="legend-chip">
           {{ item.icon }} {{ item.label }}
         </span>
-        <span class="legend-chip legend-chip--water">🌊 Rota aquática</span>
+        <label class="legend-chip legend-chip--toggle">
+          <input v-model="showDebugOverlay" type="checkbox" />
+          Overlay debug
+        </label>
       </div>
     </div>
 
@@ -20,30 +26,21 @@
             <img class="board-image" :src="BOARD_IMAGE" alt="Tabuleiro Kanto" />
 
             <button
-              v-for="tile in tiles"
-              :key="tile.id"
+              v-for="space in visibleSpaces"
+              :key="space.id"
               class="tile-node"
-              :class="[
-                `tile-node--${tile.type}`,
-                {
-                  'tile-node--water': isWaterTile(tile),
-                  'tile-node--current': currentTile?.id === tile.id,
-                  'tile-node--selected': activeTile?.id === tile.id,
-                },
-              ]"
-              :style="nodeStyle(tile.id)"
-              @click="selectedTileId = tile.id"
-            >
-              <span v-if="showNodeId(tile)" class="tile-id">{{ tile.id }}</span>
-              <span v-if="isWaterTile(tile)" class="tile-water-label">AGUA</span>
-            </button>
+              :class="{ 'tile-node--debug': showDebugOverlay }"
+              :style="spaceStyle(space.id)"
+              :title="spaceTooltip(space)"
+              @click="selectedSpaceId = space.id"
+            />
 
             <div
-              v-for="player in players"
+              v-for="player in positionedPlayers"
               :key="player.id"
               class="player-pin"
               :class="{ 'player-pin--me': player.id === me?.id }"
-              :style="nodeStyle(player.position)"
+              :style="playerPositionStyle(player.position)"
             >
               <button
                 class="player-pin-btn"
@@ -55,6 +52,10 @@
               </button>
               <span class="player-pin-label">{{ player.name }}</span>
             </div>
+
+            <div v-if="showTestPin && testPinStyle" class="test-pin" :style="testPinStyle">
+              <span>T</span>
+            </div>
           </div>
         </div>
       </div>
@@ -65,8 +66,34 @@
           <div>
             <strong>{{ activeTile?.name }}</strong>
             <p>{{ activeTile?.description }}</p>
-            <span class="info-meta">Casa {{ activeTile?.id }} · {{ describeTile(activeTile) }}</span>
+            <span class="info-meta">
+              Casa {{ activeTile?.id }} · {{ describeTile(activeTile) }}
+            </span>
           </div>
+        </div>
+
+        <div class="route-card">
+          <h4>Teste visual do pino</h4>
+          <label class="test-toggle">
+            <input v-model="showTestPin" type="checkbox" />
+            <span>Ativar pino de teste por `spaceId`</span>
+          </label>
+          <div class="test-controls">
+            <button class="focus-btn" @click="moveTestPin(-1)">-1</button>
+            <button class="focus-btn" @click="rollTestPin">rolar dado</button>
+            <button class="focus-btn" @click="moveTestPin(1)">+1</button>
+          </div>
+          <div class="test-controls">
+            <button class="focus-btn" @click="moveTestPin(-6)">-6</button>
+            <button class="focus-btn" @click="testSpaceId = 0">inicio</button>
+            <button class="focus-btn" @click="moveTestPin(6)">+6</button>
+          </div>
+          <p class="test-meta">
+            spaceId atual: <strong>{{ testSpaceId }}</strong> / {{ maxSpaceId }}
+            <template v-if="selectedSpace">
+              · {{ selectedSpace.tileTypeId ?? 'sem tipo' }}
+            </template>
+          </p>
         </div>
 
         <div class="players-card">
@@ -80,27 +107,19 @@
             <span class="player-dot" :style="{ background: player.color }"></span>
             <strong>{{ player.name }}</strong>
             <span>{{ tileName(player.position) }}</span>
-            <button class="focus-btn" @click="selectedTileId = player.position">focar</button>
+            <button class="focus-btn" :disabled="!playerHasMappedPosition(player.position)" @click="selectedTileId = player.position">
+              focar
+            </button>
           </div>
         </div>
 
         <div class="route-card">
-          <h4>Direção da rota</h4>
-          <p>
-            O caminho segue do <strong>Inicio</strong> para a <strong>Liga</strong>, acompanhando as setas douradas sobre a trilha.
-            Clique em qualquer casa para ver o efeito e os proximos destinos do dado.
+          <h4>Estado do mapeamento</h4>
+          <p>{{ visibleSpaces.length }} spaces calibrados carregados do JSON.</p>
+          <p>{{ positionedPlayers.length }}/{{ players.length }} pinos de jogadores conseguiram ser resolvidos pelo mapeamento generico.</p>
+          <p class="warning-copy">
+            Esta etapa serve para validar alinhamento visual. O mapeamento logico definitivo ainda pode ser trocado depois sem mudar o renderer.
           </p>
-        </div>
-
-        <div class="route-card">
-          <h4>Próximos passos no dado</h4>
-          <div class="dice-preview">
-            <div v-for="step in nextStops" :key="step.roll" class="dice-step">
-              <strong>{{ step.roll }}</strong>
-              <span>{{ step.tile.name }}</span>
-              <em>{{ step.meta }}</em>
-            </div>
-          </div>
         </div>
       </aside>
     </div>
@@ -110,15 +129,21 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { useGameStore } from '@/stores/gameStore'
-import { BOARD_ASPECT_RATIO, BOARD_IMAGE, TILE_POSITIONS, getTilePosition } from './kantoBoardLayout'
+import { BOARD_ASPECT_RATIO, BOARD_IMAGE, BOARD_SPACES, getLogicalTilePosition, getSpaceById, getSpacePosition } from './kantoBoardLayout'
 
 const store = useGameStore()
 const selectedTileId = ref(null)
+const selectedSpaceId = ref(0)
+const showDebugOverlay = ref(true)
+const showTestPin = ref(true)
+const testSpaceId = ref(0)
 
 const tiles = computed(() => store.gameState?.board?.tiles ?? [])
 const players = computed(() => store.players)
 const me = computed(() => store.me)
 const currentTile = computed(() => store.turn?.current_tile ?? null)
+const visibleSpaces = BOARD_SPACES.filter(space => Number.isFinite(space.x) && Number.isFinite(space.y))
+const maxSpaceId = BOARD_SPACES.length - 1
 
 watch(currentTile, tile => {
   if (tile?.id !== undefined) {
@@ -133,16 +158,14 @@ const activeTile = computed(() => {
   return currentTile.value ?? tiles.value[0] ?? null
 })
 
-const nextStops = computed(() => {
-  const originId = activeTile.value?.id ?? 0
-  return Array.from({ length: 6 }, (_, offset) => {
-    const tile = tiles.value[Math.min(originId + offset + 1, tiles.value.length - 1)] ?? activeTile.value
-    return {
-      roll: offset + 1,
-      tile,
-      meta: describeTile(tile),
-    }
-  })
+const positionedPlayers = computed(() =>
+  players.value.filter(player => playerHasMappedPosition(player.position))
+)
+
+const selectedSpace = computed(() => getSpaceById(testSpaceId.value) ?? getSpaceById(selectedSpaceId.value))
+const testPinStyle = computed(() => {
+  const position = getSpacePosition(testSpaceId.value)
+  return position ? { left: position.left, top: position.top } : null
 })
 
 const legendItems = [
@@ -154,20 +177,37 @@ const legendItems = [
   { type: 'league', label: 'Liga', icon: '👑' },
 ]
 
-function nodeStyle(tileId) {
-  const position = getTilePosition(tileId)
-  return {
-    left: `${position.left}%`,
-    top: `${position.top}%`,
-  }
+function spaceStyle(spaceId) {
+  const position = getSpacePosition(spaceId)
+  return position ? { left: position.left, top: position.top } : { display: 'none' }
 }
 
-function isWaterTile(tile) {
-  return tile?.data?.terrain === 'water'
+function playerPositionStyle(tileId) {
+  const position = getLogicalTilePosition(tileId)
+  return position ? { left: position.left, top: position.top } : { display: 'none' }
 }
 
-function showNodeId(tile) {
-  return tile.id % 5 === 0 || ['start', 'gym', 'special', 'league'].includes(tile.type)
+function playerHasMappedPosition(tileId) {
+  return Boolean(getLogicalTilePosition(tileId))
+}
+
+function moveTestPin(delta) {
+  testSpaceId.value = clampSpaceId(testSpaceId.value + delta)
+}
+
+function rollTestPin() {
+  const roll = Math.floor(Math.random() * 6) + 1
+  moveTestPin(roll)
+}
+
+function clampSpaceId(spaceId) {
+  return Math.max(0, Math.min(maxSpaceId, spaceId))
+}
+
+function spaceTooltip(space) {
+  const tileType = space.tileTypeId ?? 'sem tipo'
+  const label = space.label ? ` · ${space.label}` : ''
+  return `space ${space.id} · ${tileType}${label}`
 }
 
 function tileName(position) {
@@ -177,8 +217,11 @@ function tileName(position) {
 function describeTile(tile) {
   if (!tile) return ''
   const parts = [typeLabel(tile.type)]
-  if (isWaterTile(tile)) {
+  if (tile?.data?.terrain === 'water') {
     parts.push('aquática')
+  }
+  if (!playerHasMappedPosition(tile.id)) {
+    parts.push('sem mapeamento lógico definitivo')
   }
   return parts.join(' · ')
 }
@@ -240,6 +283,7 @@ function typeLabel(type) {
   margin: 0.2rem 0 0;
   color: var(--color-text-muted);
   font-size: 0.85rem;
+  max-width: 56ch;
 }
 
 .board-legend {
@@ -257,9 +301,10 @@ function typeLabel(type) {
   padding: 0.35rem 0.7rem;
 }
 
-.legend-chip--water {
-  background: rgba(21, 95, 177, 0.24);
-  border-color: rgba(109, 192, 255, 0.24);
+.legend-chip--toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 .board-layout {
@@ -293,7 +338,8 @@ function typeLabel(type) {
 }
 
 .tile-node,
-.player-pin {
+.player-pin,
+.test-pin {
   position: absolute;
   transform: translate(-50%, -50%);
 }
@@ -305,26 +351,15 @@ function typeLabel(type) {
   border-radius: 999px;
   border: none;
   background: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: transparent;
-  box-shadow: none;
   opacity: 0;
+  padding: 0;
 }
 
-.tile-node--selected,
-.tile-node--current {
-  width: 22px;
-  height: 22px;
-}
-
-.tile-id {
-  display: none;
-}
-
-.tile-water-label {
-  display: none;
+.tile-node--debug {
+  opacity: 1;
+  background: rgba(230, 57, 70, 0.82);
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  color: #fff;
 }
 
 .player-pin {
@@ -335,7 +370,8 @@ function typeLabel(type) {
   gap: 0.2rem;
 }
 
-.player-pin-btn {
+.player-pin-btn,
+.test-pin {
   width: 22px;
   height: 22px;
   border-radius: 999px;
@@ -348,18 +384,19 @@ function typeLabel(type) {
   font-size: 0.62rem;
   font-weight: 800;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.28);
-  transition: transform 0.14s ease, box-shadow 0.14s ease;
-}
-
-.player-pin-btn:hover {
-  transform: scale(1.18);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.34);
 }
 
 .player-pin--me .player-pin-btn {
   width: 26px;
   height: 26px;
   box-shadow: 0 0 0 4px rgba(155, 246, 255, 0.16), 0 4px 10px rgba(0, 0, 0, 0.28);
+}
+
+.test-pin {
+  z-index: 5;
+  background: #f4d03f;
+  color: #09111f;
+  box-shadow: 0 0 0 6px rgba(244, 208, 63, 0.2), 0 4px 10px rgba(0, 0, 0, 0.28);
 }
 
 .player-pin-label {
@@ -413,13 +450,15 @@ function typeLabel(type) {
   color: var(--color-accent);
 }
 
-.info-card p {
+.info-card p,
+.route-card p {
   margin: 0.25rem 0 0.45rem;
   color: var(--color-text-muted);
   font-size: 0.88rem;
 }
 
-.info-meta {
+.info-meta,
+.test-meta {
   color: #bcd2f5;
   font-size: 0.75rem;
 }
@@ -471,46 +510,20 @@ function typeLabel(type) {
   padding: 0.25rem 0.55rem;
 }
 
-.route-card p {
-  margin: 0;
-  color: var(--color-text-muted);
-  font-size: 0.85rem;
-}
-
-.dice-preview {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-}
-
-.dice-step {
-  display: grid;
-  grid-template-columns: 28px 1fr auto;
-  gap: 0.55rem;
-  align-items: center;
-  font-size: 0.8rem;
-  color: var(--color-text-muted);
-}
-
-.dice-step strong {
-  width: 28px;
-  height: 28px;
-  border-radius: 10px;
+.test-toggle,
+.test-controls {
   display: flex;
   align-items: center;
-  justify-content: center;
-  background: rgba(255, 224, 102, 0.14);
-  color: #fff3bf;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
-.dice-step span {
-  color: #eef4ff;
+.test-controls + .test-controls {
+  margin-top: 0.5rem;
 }
 
-.dice-step em {
-  color: #9ec7ff;
-  font-style: normal;
-  font-size: 0.72rem;
+.warning-copy {
+  color: #ffe7a0;
 }
 
 @media (max-width: 1100px) {
