@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import axios from 'axios'
+import gameActions from '@/constants/gameActions'
 
 export const useGameStore = defineStore('game', () => {
   // ── Estado ───────────────────────────────────────────────────────────────
@@ -94,7 +95,7 @@ export const useGameStore = defineStore('game', () => {
       wsStatus.value = 'connected'
       // Envia player_id salvo (se houver) para reconexão confiável por ID
       const savedId = sessionStorage.getItem(`playerId_${code}`) || ''
-      send('join_game', { player_name: name, player_id: savedId })
+      send(gameActions.joinGame, { player_name: name, player_id: savedId })
     }
 
     ws.onmessage = (event) => {
@@ -189,12 +190,21 @@ export const useGameStore = defineStore('game', () => {
       player_reconnected:  (e) => `${e.player_name || 'Um jogador'} reconectou!`,
       game_started:        () => 'A partida começou!',
       starter_selected:    () => 'Pokémon inicial escolhido!',
-      dice_rolled:         (e) => `Dado rolado: ${e.result}`,
+      dice_rolled:         (e) => {
+        const rollType = e.roll_type === 'movement' ? 'movimento' : (e.roll_type || 'dado')
+        if (e.raw_result != null && e.final_result != null && e.raw_result !== e.final_result) {
+          return `Dado de ${rollType}: ${e.raw_result} -> ${e.final_result}`
+        }
+        return `Dado de ${rollType}: ${e.result}`
+      },
       pokemon_captured:    (e) => `Capturou ${e.result?.pokemon?.name ?? 'Pokémon'}!`,
+      capture_roll_resolved: (e) => e.result?.success === false ? 'Captura falhou' : 'Rolagem de captura resolvida',
       battle_resolved:     (e) => {
         const isWinner = e.result?.winner_id === playerId.value
         return `Batalha resolvida! ${isWinner ? 'Você venceu!' : 'Adversário venceu.'}`
       },
+      battle_choice_registered: (e) => `${e.player_id === playerId.value ? 'Você escolheu' : 'Oponente escolheu'} um Pokémon!`,
+      battle_roll_registered:   (e) => `${e.player_id === playerId.value ? 'Você rolou' : 'Oponente rolou'} o dado de batalha!`,
       duel_started:        () => 'Duelo iniciado!',
       action_skipped:      () => 'Ação pulada',
       event_resolved:      () => 'Evento resolvido!',
@@ -202,7 +212,9 @@ export const useGameStore = defineStore('game', () => {
       item_discarded:      () => 'Item descartado',
       item_used:           () => 'Item usado',
       pokemon_released:    () => 'Pokémon liberado para abrir espaço',
+      pending_action_resolved: () => 'Escolha resolvida',
       debug_item_added:    () => 'Item de debug adicionado',
+      debug_tile_triggered: () => 'Efeito do tile executado',
       revealed_card_dismissed: () => 'Carta fechada',
     }
 
@@ -215,27 +227,31 @@ export const useGameStore = defineStore('game', () => {
 
   // ── Ações do jogo ────────────────────────────────────────────────────────
   const actions = {
-    startGame:        ()                          => send('start_game'),
-    selectStarter:    (id)                        => send('select_starter',   { starter_id: id }),
-    rollDice:         ()                          => send('roll_dice'),
-    capturePokemon:   (useFullRestore = false)    => send('capture_pokemon',  { use_full_restore: useFullRestore }),
-    skipAction:       ()                          => send('skip_action'),
-    passTurn:         ()                          => send('pass_turn'),
-    challengePlayer:  (targetId)                  => send('challenge_player', { target_player_id: targetId }),
-    skipChallenge:    ()                          => send('skip_action'),
-    battleChoice:     (index)                     => send('battle_choice',    { pokemon_index: index }),
-    removePlayer:     (targetId)                  => send('remove_player',    { player_id: targetId }),
-    leaveGame:        ()                          => send('leave_game'),
-    resolveEvent:     (useRunAway = false)        => send('resolve_event',    { use_run_away: useRunAway }),
-    discardItem:      (itemKey)                   => send('discard_item',     { item_key: itemKey }),
-    releasePokemon:   (pokemonIndex)              => send('release_pokemon',  { pokemon_index: pokemonIndex }),
-    useItem:          (itemKey, payload = {})     => send('use_item',         { item_key: itemKey, ...payload }),
-    debugAddItem:     (itemKey, quantity = 1)     => send('debug_add_item',   { item_key: itemKey, quantity }),
-    dismissRevealedCard: ()                        => send('dismiss_revealed_card'),
+    startGame:        ()                          => send(gameActions.startGame),
+    selectStarter:    (id)                        => send(gameActions.selectStarter, { starter_id: id }),
+    rollDice:         ()                          => send(gameActions.rollDice),
+    capturePokemon:   (useFullRestore = false)    => send(gameActions.capturePokemon, { use_full_restore: useFullRestore }),
+    rollCaptureDice:  (useFullRestore = false)    => send(gameActions.rollCaptureDice, { use_full_restore: useFullRestore }),
+    skipAction:       ()                          => send(gameActions.skipAction),
+    passTurn:         ()                          => send(gameActions.passTurn),
+    challengePlayer:  (targetId)                  => send(gameActions.challengePlayer, { target_player_id: targetId }),
+    skipChallenge:    ()                          => send(gameActions.skipChallenge),
+    battleChoice:     (index)                     => send(gameActions.battleChoice, { pokemon_index: index }),
+    rollBattleDice:   ()                          => send(gameActions.rollBattleDice),
+    removePlayer:     (targetId)                  => send(gameActions.removePlayer, { player_id: targetId }),
+    leaveGame:        ()                          => send(gameActions.leaveGame),
+    resolveEvent:     (useRunAway = false)        => send(gameActions.resolveEvent, { use_run_away: useRunAway }),
+    resolvePendingAction: (optionId)              => send(gameActions.resolvePendingAction, { option_id: optionId }),
+    discardItem:      (itemKey)                   => send(gameActions.discardItem, { item_key: itemKey }),
+    releasePokemon:   (pokemonIndex)              => send(gameActions.releasePokemon, { pokemon_index: pokemonIndex }),
+    useItem:          (itemKey, payload = {})     => send(gameActions.useItem, { item_key: itemKey, ...payload }),
+    debugAddItem:     (itemKey, quantity = 1)     => send(gameActions.debugAddItem, { item_key: itemKey, quantity }),
+    debugTriggerCurrentTile: ()                   => send(gameActions.debugTriggerCurrentTile),
+    dismissRevealedCard: ()                        => send(gameActions.dismissRevealedCard),
     useAbility:       (abilityAction, targetId, targetPosition) =>
-      send('use_ability', { ability_action: abilityAction, target_id: targetId, target_position: targetPosition }),
-    saveState:        ()                          => send('save_state'),
-    restoreState:     (state)                     => send('restore_state',    { state }),
+      send(gameActions.useAbility, { ability_action: abilityAction, target_id: targetId, target_position: targetPosition }),
+    saveState:        ()                          => send(gameActions.saveState),
+    restoreState:     (state)                     => send(gameActions.restoreState, { state }),
   }
 
   function $reset() {
