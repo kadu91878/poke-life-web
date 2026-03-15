@@ -36,6 +36,8 @@
     <!-- Modal de batalha -->
     <BattleModal v-if="phase === 'battle'" />
 
+    <RevealedCardOverlay />
+
     <!-- Modal de inventário -->
     <InventoryModal
       v-if="selectedInventoryPlayer"
@@ -92,6 +94,7 @@ import StarterModal from '@/components/ui/StarterModal.vue'
 import BattleModal  from '@/components/ui/BattleModal.vue'
 import EventLog     from '@/components/ui/EventLog.vue'
 import InventoryModal from '@/components/ui/InventoryModal.vue'
+import RevealedCardOverlay from '@/components/ui/RevealedCardOverlay.vue'
 
 const route  = useRoute()
 const router = useRouter()
