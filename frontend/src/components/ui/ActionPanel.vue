@@ -184,8 +184,24 @@ const debugItemOptions = [
 const debugItemKey = ref('bill')
 const debugQuantity = ref(1)
 
-const NEGATIVE_EFFECTS = new Set(['lose_pokeball','lose_full_restore','lose_master_points','move_backward','teleport_start'])
-const isNegativeEvent = computed(() => NEGATIVE_EFFECTS.has(pendingEvent.value?.effect?.type ?? ''))
+const NEGATIVE_EVENT_CATEGORIES = new Set(['event', 'team_rocket'])
+const isNegativeEvent = computed(() => {
+  const card = pendingEvent.value
+  if (!card) return false
+  if (!NEGATIVE_EVENT_CATEGORIES.has(card.category)) return false
+  const description = (card.description || '').toLowerCase()
+  return [
+    'skip your next turn',
+    'run three tiles back',
+    'throw away an item',
+    'loses a charge',
+    'knocking out 2 of your pokémon',
+    'knocking out 2 of your pokemon',
+    'steal two of your items',
+    'steal 20 of your master points',
+    'run five tiles forward',
+  ].some(text => description.includes(text))
+})
 const canUseRunAway = computed(() => {
   if (!me.value) return false
   const all = [...(me.value.pokemon ?? [])]
@@ -200,7 +216,18 @@ function bestBP(player) {
   return Math.max(...pool.map(p => p.battle_points ?? 0))
 }
 
-const CAPTURE_CONTEXT_LABELS = { safari:'🌿 Safari Zone', mt_moon:'🌑 Mt. Moon', cinnabar:'🔬 Cinnabar Lab', seafoam:'❄️ Seafoam', power_plant:'⚡ Usina Elétrica', grass:'' }
+const CAPTURE_CONTEXT_LABELS = {
+  safari:'🌿 Safari Zone',
+  mt_moon:'🌑 Mt. Moon',
+  cinnabar:'🔬 Cinnabar Lab',
+  seafoam:'❄️ Seafoam',
+  power_plant:'⚡ Usina Elétrica',
+  event_card:'🃏 Event Card',
+  victory_wild:'🏆 Victory Card',
+  victory_gift:'🎁 Victory Reward',
+  water:'🌊 Water Encounter',
+  grass:'',
+}
 const captureContextLabel = computed(() => CAPTURE_CONTEXT_LABELS[captureContext.value] ?? '')
 const captureContextClass = computed(() => ({
   'context--safari': captureContext.value === 'safari',
@@ -209,23 +236,26 @@ const captureContextClass = computed(() => ({
   'context--legendary': isLegendaryCapture.value,
 }))
 
-const EVENT_EFFECT_LABELS = {
-  gain_pokeball:(e)=>`+${e.amount??1} Pokébola(s)`, lose_pokeball:(e)=>`-${e.amount??1} Pokébola(s)`,
-  gain_full_restore:(e)=>`+${e.amount??1} Full Restore(s)`, lose_full_restore:(e)=>`-${e.amount??1} Full Restore(s)`,
-  gain_master_points:(e)=>`+${e.amount??5} Master Points`, lose_master_points:(e)=>`-${e.amount??5} Master Points`,
-  move_forward:(e)=>`Avança ${e.spaces??2} casas`, move_backward:(e)=>`Recua ${e.spaces??2} casas`,
-  draw_pokemon:()=>'Compre uma carta de Pokémon', steal_pokeball:()=>'Rouba 1 Pokébola',
-  teleport_start:()=>'Volta ao início!', extra_turn:()=>'Turno extra!', none:()=>'Efeito informativo',
-}
 const eventEffectLabel = computed(() => {
-  const effect = pendingEvent.value?.effect ?? {}
-  const fn = EVENT_EFFECT_LABELS[effect.type]
-  return fn ? fn(effect) : (effect.type ?? '')
+  const card = pendingEvent.value
+  if (!card) return ''
+  const category = card.category || 'event'
+  const description = (card.description || '').toLowerCase()
+  if (category === 'wild_pokemon') return 'Role a captura desta carta'
+  if (category === 'trainer_battle') return 'Evento de batalha especial'
+  if (category === 'market') return 'Role a recompensa do PokéMarket'
+  if (category === 'special_event') return 'Evento especial da pilha'
+  if (category === 'team_rocket') return 'Team Rocket em ação'
+  if (description.includes('skip your next turn')) return 'Perde o próximo turno'
+  if (description.includes('run three tiles back')) return 'Recua 3 casas e ativa o tile'
+  if (description.includes('throw away an item')) return 'Descartar itens'
+  return category
 })
 const eventEffectClass = computed(() => {
-  const t = pendingEvent.value?.effect?.type ?? ''
-  if (['gain_pokeball','gain_full_restore','gain_master_points','extra_turn','draw_pokemon'].includes(t)) return 'effect--positive'
-  if (NEGATIVE_EFFECTS.has(t)) return 'effect--negative'
+  const card = pendingEvent.value
+  if (!card) return 'effect--neutral'
+  if (['wild_pokemon', 'market', 'special_event'].includes(card.category)) return 'effect--positive'
+  if (isNegativeEvent.value) return 'effect--negative'
   return 'effect--neutral'
 })
 
