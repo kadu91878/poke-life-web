@@ -203,6 +203,7 @@ export const useGameStore = defineStore('game', () => {
       item_used:           () => 'Item usado',
       pokemon_released:    () => 'Pokémon liberado para abrir espaço',
       debug_item_added:    () => 'Item de debug adicionado',
+      revealed_card_dismissed: () => 'Carta fechada',
     }
 
     const fn = messages[event.type]
@@ -230,6 +231,7 @@ export const useGameStore = defineStore('game', () => {
     releasePokemon:   (pokemonIndex)              => send('release_pokemon',  { pokemon_index: pokemonIndex }),
     useItem:          (itemKey, payload = {})     => send('use_item',         { item_key: itemKey, ...payload }),
     debugAddItem:     (itemKey, quantity = 1)     => send('debug_add_item',   { item_key: itemKey, quantity }),
+    dismissRevealedCard: ()                        => send('dismiss_revealed_card'),
     useAbility:       (abilityAction, targetId, targetPosition) =>
       send('use_ability', { ability_action: abilityAction, target_id: targetId, target_position: targetPosition }),
     saveState:        ()                          => send('save_state'),
