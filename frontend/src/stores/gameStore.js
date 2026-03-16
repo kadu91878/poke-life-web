@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import axios from 'axios'
+import gameActions from '@/constants/gameActions'
 
 export const useGameStore = defineStore('game', () => {
   // ── Estado ───────────────────────────────────────────────────────────────
@@ -28,6 +29,29 @@ export const useGameStore = defineStore('game', () => {
   const status = computed(() => gameState.value?.status ?? 'waiting')
 
   const turn = computed(() => gameState.value?.turn ?? {})
+
+  const debugVisual = computed(() => gameState.value?.debug_visual ?? { enabled: false, session_state: null })
+
+  const debugSession = computed(() => debugVisual.value?.session_state ?? null)
+
+  const debugTestPlayer = computed(() =>
+    debugSession.value?.players?.find(player => player.is_test_player) ?? debugSession.value?.players?.[0] ?? null
+  )
+
+  const allPlayers = computed(() => {
+    const basePlayers = [...players.value]
+    const debugPlayer = debugTestPlayer.value
+    if (debugVisual.value?.enabled && debugPlayer && !basePlayers.some(player => player.id === debugPlayer.id)) {
+      basePlayers.push(debugPlayer)
+    }
+    return basePlayers
+  })
+
+  const debugTurn = computed(() => debugSession.value?.turn ?? {})
+
+  const debugLog = computed(() => debugSession.value?.log ?? [])
+
+  const debugRevealedCard = computed(() => debugSession.value?.revealed_card ?? null)
 
   const isMyTurn = computed(() =>
     turn.value?.current_player_id === playerId.value
@@ -94,7 +118,7 @@ export const useGameStore = defineStore('game', () => {
       wsStatus.value = 'connected'
       // Envia player_id salvo (se houver) para reconexão confiável por ID
       const savedId = sessionStorage.getItem(`playerId_${code}`) || ''
-      send('join_game', { player_name: name, player_id: savedId })
+      send(gameActions.joinGame, { player_name: name, player_id: savedId })
     }
 
     ws.onmessage = (event) => {
@@ -189,12 +213,21 @@ export const useGameStore = defineStore('game', () => {
       player_reconnected:  (e) => `${e.player_name || 'Um jogador'} reconectou!`,
       game_started:        () => 'A partida começou!',
       starter_selected:    () => 'Pokémon inicial escolhido!',
-      dice_rolled:         (e) => `Dado rolado: ${e.result}`,
+      dice_rolled:         (e) => {
+        const rollType = e.roll_type === 'movement' ? 'movimento' : (e.roll_type || 'dado')
+        if (e.raw_result != null && e.final_result != null && e.raw_result !== e.final_result) {
+          return `Dado de ${rollType}: ${e.raw_result} -> ${e.final_result}`
+        }
+        return `Dado de ${rollType}: ${e.result}`
+      },
       pokemon_captured:    (e) => `Capturou ${e.result?.pokemon?.name ?? 'Pokémon'}!`,
+      capture_roll_resolved: (e) => e.result?.success === false ? 'Captura falhou' : 'Rolagem de captura resolvida',
       battle_resolved:     (e) => {
         const isWinner = e.result?.winner_id === playerId.value
         return `Batalha resolvida! ${isWinner ? 'Você venceu!' : 'Adversário venceu.'}`
       },
+      battle_choice_registered: (e) => `${e.player_id === playerId.value ? 'Você escolheu' : 'Oponente escolheu'} um Pokémon!`,
+      battle_roll_registered:   (e) => `${e.player_id === playerId.value ? 'Você rolou' : 'Oponente rolou'} o dado de batalha!`,
       duel_started:        () => 'Duelo iniciado!',
       action_skipped:      () => 'Ação pulada',
       event_resolved:      () => 'Evento resolvido!',
@@ -202,7 +235,13 @@ export const useGameStore = defineStore('game', () => {
       item_discarded:      () => 'Item descartado',
       item_used:           () => 'Item usado',
       pokemon_released:    () => 'Pokémon liberado para abrir espaço',
+      pending_action_resolved: () => 'Escolha resolvida',
       debug_item_added:    () => 'Item de debug adicionado',
+      debug_tile_triggered: () => 'Efeito do tile executado',
+      debug_test_player_toggled: (e) => e.enabled ? 'Player de teste habilitado' : 'Player de teste desabilitado',
+      debug_test_player_moved: (e) => `Player de teste moveu ${e.result?.steps ?? e.steps ?? 0} casa(s)`,
+      debug_test_player_rolled: (e) => `Player de teste rolou ${e.result?.roll ?? '?'}`,
+      debug_test_player_tile_triggered: () => 'Tile do player de teste executado',
       revealed_card_dismissed: () => 'Carta fechada',
     }
 
@@ -215,27 +254,41 @@ export const useGameStore = defineStore('game', () => {
 
   // ── Ações do jogo ────────────────────────────────────────────────────────
   const actions = {
-    startGame:        ()                          => send('start_game'),
-    selectStarter:    (id)                        => send('select_starter',   { starter_id: id }),
-    rollDice:         ()                          => send('roll_dice'),
-    capturePokemon:   (useFullRestore = false)    => send('capture_pokemon',  { use_full_restore: useFullRestore }),
-    skipAction:       ()                          => send('skip_action'),
-    passTurn:         ()                          => send('pass_turn'),
-    challengePlayer:  (targetId)                  => send('challenge_player', { target_player_id: targetId }),
-    skipChallenge:    ()                          => send('skip_action'),
-    battleChoice:     (index)                     => send('battle_choice',    { pokemon_index: index }),
-    removePlayer:     (targetId)                  => send('remove_player',    { player_id: targetId }),
-    leaveGame:        ()                          => send('leave_game'),
-    resolveEvent:     (useRunAway = false)        => send('resolve_event',    { use_run_away: useRunAway }),
-    discardItem:      (itemKey)                   => send('discard_item',     { item_key: itemKey }),
-    releasePokemon:   (pokemonIndex)              => send('release_pokemon',  { pokemon_index: pokemonIndex }),
-    useItem:          (itemKey, payload = {})     => send('use_item',         { item_key: itemKey, ...payload }),
-    debugAddItem:     (itemKey, quantity = 1)     => send('debug_add_item',   { item_key: itemKey, quantity }),
-    dismissRevealedCard: ()                        => send('dismiss_revealed_card'),
+    startGame:        ()                          => send(gameActions.startGame),
+    selectStarter:    (id)                        => send(gameActions.selectStarter, { starter_id: id }),
+    rollDice:         ()                          => send(gameActions.rollDice),
+    capturePokemon:   (useFullRestore = false)    => send(gameActions.capturePokemon, { use_full_restore: useFullRestore }),
+    rollCaptureDice:  (useFullRestore = false)    => send(gameActions.rollCaptureDice, { use_full_restore: useFullRestore }),
+    skipAction:       ()                          => send(gameActions.skipAction),
+    passTurn:         ()                          => send(gameActions.passTurn),
+    challengePlayer:  (targetId)                  => send(gameActions.challengePlayer, { target_player_id: targetId }),
+    skipChallenge:    ()                          => send(gameActions.skipChallenge),
+    battleChoice:     (index)                     => send(gameActions.battleChoice, { pokemon_index: index }),
+    rollBattleDice:   ()                          => send(gameActions.rollBattleDice),
+    removePlayer:     (targetId)                  => send(gameActions.removePlayer, { player_id: targetId }),
+    leaveGame:        ()                          => send(gameActions.leaveGame),
+    resolveEvent:     (useRunAway = false)        => send(gameActions.resolveEvent, { use_run_away: useRunAway }),
+    resolvePendingAction: (optionId)              => send(gameActions.resolvePendingAction, { option_id: optionId }),
+    discardItem:      (itemKey)                   => send(gameActions.discardItem, { item_key: itemKey }),
+    releasePokemon:   (pokemonIndex)              => send(gameActions.releasePokemon, { pokemon_index: pokemonIndex }),
+    useItem:          (itemKey, payload = {})     => send(gameActions.useItem, { item_key: itemKey, ...payload }),
+    debugAddItem:     (itemKey, quantity = 1)     => send(gameActions.debugAddItem, { item_key: itemKey, quantity }),
+    debugTriggerCurrentTile: ()                   => send(gameActions.debugTriggerCurrentTile),
+    debugToggleTestPlayer: (enabled)              => send(gameActions.debugToggleTestPlayer, { enabled }),
+    debugMoveTestPlayer: (steps)                  => send(gameActions.debugMoveTestPlayer, { steps }),
+    debugRollTestPlayer: ()                       => send(gameActions.debugRollTestPlayer),
+    debugTriggerTestPlayerTile: ()                => send(gameActions.debugTriggerTestPlayerTile),
+    debugRollCaptureForTestPlayer: (useFullRestore = false) => send(gameActions.debugRollCaptureForTestPlayer, { use_full_restore: useFullRestore }),
+    debugResolveEventForTestPlayer: (useRunAway = false)    => send(gameActions.debugResolveEventForTestPlayer, { use_run_away: useRunAway }),
+    debugSkipTestPlayerPending: ()                          => send(gameActions.debugSkipTestPlayerPending),
+    debugStartDuelWithPlayer: (targetPlayerId)              => send(gameActions.debugStartDuelWithPlayer, { target_player_id: targetPlayerId }),
+    debugDuelChoosePokemon: (pokemonIndex)                  => send(gameActions.debugDuelChoosePokemon, { pokemon_index: pokemonIndex }),
+    debugDuelRollBattle: ()                                 => send(gameActions.debugDuelRollBattle),
+    dismissRevealedCard: ()                        => send(gameActions.dismissRevealedCard),
     useAbility:       (abilityAction, targetId, targetPosition) =>
-      send('use_ability', { ability_action: abilityAction, target_id: targetId, target_position: targetPosition }),
-    saveState:        ()                          => send('save_state'),
-    restoreState:     (state)                     => send('restore_state',    { state }),
+      send(gameActions.useAbility, { ability_action: abilityAction, target_id: targetId, target_position: targetPosition }),
+    saveState:        ()                          => send(gameActions.saveState),
+    restoreState:     (state)                     => send(gameActions.restoreState, { state }),
   }
 
   function $reset() {
@@ -256,8 +309,8 @@ export const useGameStore = defineStore('game', () => {
     roomCode, playerId, playerName, gameState,
     wsStatus, lastEvent, errorMsg, notification,
     // computed
-    me, players, status, turn, isMyTurn, isHost, currentPlayer, phase,
-    finalScores, board,
+    me, players, allPlayers, status, turn, isMyTurn, isHost, currentPlayer, phase,
+    finalScores, board, debugVisual, debugSession, debugTestPlayer, debugTurn, debugLog, debugRevealedCard,
     // methods
     createRoom, fetchRoom, deleteRoom,
     connect, disconnect, send, handleMessage,

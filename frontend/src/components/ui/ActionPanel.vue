@@ -2,6 +2,42 @@
   <div class="action-panel">
     <div class="phase-label">{{ phaseLabel }}</div>
     <template v-if="isMyTurn">
+      <template v-if="pendingAction?.type === 'reward_choice'">
+        <div class="event-card">
+          <div class="event-title">🎁 Escolha pendente</div>
+          <div class="event-description">{{ pendingAction.prompt }}</div>
+        </div>
+        <button
+          v-for="option in pendingAction.options ?? []"
+          :key="option.id"
+          class="btn-secondary duel-btn"
+          :disabled="!canResolvePendingChoice"
+          @click="store.actions.resolvePendingAction(option.id)"
+        >
+          ✨ {{ option.label }}
+        </button>
+      </template>
+      <template v-else-if="pendingAction?.type === 'capture_attempt'">
+        <div class="pokemon-offer" :class="captureContextClass">
+          <div class="context-badge" v-if="captureContextLabel">{{ captureContextLabel }}</div>
+          <div class="pokemon-name">{{ pendingPokemon?.name ?? pendingAction?.pokemon_name ?? 'Captura pendente' }}</div>
+          <div class="pokemon-type">{{ (pendingPokemon?.types || []).join(' / ') }}</div>
+          <div class="event-description">
+            Role o dado de captura para resolver esta tentativa.
+          </div>
+        </div>
+        <template v-if="canRollPendingCapture && isFreeCapture">
+          <button class="btn-accent" @click="store.actions.rollCaptureDice()">🎲 Rolar dado de captura grátis</button>
+        </template>
+        <template v-else-if="canRollPendingCapture && isLegendaryCapture">
+          <button class="btn-primary" :disabled="(me?.pokeballs ?? 0) < 2" @click="store.actions.rollCaptureDice(false)">🎲 Rolar captura (2 Pokébolas)</button>
+          <button class="btn-secondary" :disabled="(me?.full_restores ?? 0) <= 0" @click="store.actions.rollCaptureDice(true)">🎲 Rolar usando Full Restore</button>
+        </template>
+        <template v-else-if="canRollPendingCapture">
+          <button class="btn-primary" @click="store.actions.rollCaptureDice()">🎲 Rolar dado de captura</button>
+        </template>
+        <button v-if="canSkipPendingCapture" class="btn-ghost" @click="store.actions.skipAction()">{{ safariRemaining > 0 ? 'Pular este Pokémon' : 'Pular' }}</button>
+      </template>
       <template v-if="phase === 'roll'">
         <div v-if="moveDiceItems.length" class="item-shortcuts">
           <div class="hint">Itens de dado disponíveis:</div>
@@ -16,7 +52,7 @@
         </div>
         <button class="btn-primary roll-btn" @click="store.actions.rollDice()">🎲 Rolar Dado</button>
       </template>
-      <template v-if="phase === 'action'">
+      <template v-else-if="phase === 'action' && !pendingAction">
         <template v-if="pendingPokemon">
           <div class="pokemon-offer" :class="captureContextClass">
             <div class="context-badge" v-if="captureContextLabel">{{ captureContextLabel }}</div>
@@ -32,14 +68,14 @@
             <div v-if="safariRemaining > 0" class="safari-info">+{{ safariRemaining }} Pokémon na fila</div>
           </div>
           <template v-if="isFreeCapture">
-            <button class="btn-accent" @click="store.actions.capturePokemon()">🆓 Captura Gratuita!</button>
+            <button class="btn-accent" @click="store.actions.rollCaptureDice()">🆓 Captura Gratuita!</button>
           </template>
           <template v-else-if="isLegendaryCapture">
-            <button class="btn-primary" :disabled="(me?.pokeballs ?? 0) < 2" @click="store.actions.capturePokemon(false)">🎾 Capturar (2 Pokébolas)</button>
-            <button class="btn-secondary" :disabled="(me?.full_restores ?? 0) <= 0" @click="store.actions.capturePokemon(true)">💊 Usar Full Restore ({{ me?.full_restores ?? 0 }})</button>
+            <button class="btn-primary" :disabled="(me?.pokeballs ?? 0) < 2" @click="store.actions.rollCaptureDice(false)">🎲 Rolar captura (2 Pokébolas)</button>
+            <button class="btn-secondary" :disabled="(me?.full_restores ?? 0) <= 0" @click="store.actions.rollCaptureDice(true)">💊 Rolar com Full Restore ({{ me?.full_restores ?? 0 }})</button>
           </template>
           <template v-else>
-            <button class="btn-primary" :disabled="(me?.pokeballs ?? 0) <= 0" @click="store.actions.capturePokemon()">🎾 Capturar ({{ me?.pokeballs ?? 0 }} Pokébolas)</button>
+            <button class="btn-primary" @click="store.actions.rollCaptureDice()">🎲 Rolar dado de captura</button>
           </template>
           <button class="btn-ghost" @click="store.actions.skipAction()">{{ safariRemaining > 0 ? 'Pular este Pokémon' : 'Pular' }}</button>
         </template>
@@ -54,7 +90,7 @@
           <button class="btn-ghost" @click="store.actions.skipAction()">Encerrar Turno</button>
         </template>
       </template>
-      <template v-if="phase === 'event' && pendingEvent">
+      <template v-if="phase === 'event' && pendingEvent && !pendingAction">
         <div class="event-card">
           <div class="event-title">📋 {{ pendingEvent.title }}</div>
           <div class="event-description">{{ pendingEvent.description }}</div>
@@ -140,12 +176,16 @@
       <button class="btn-secondary" @click="store.actions.debugAddItem(debugItemKey, debugQuantity || 1)">
         Adicionar item
       </button>
+      <button class="btn-secondary" :disabled="!canTriggerCurrentTileDebug" @click="store.actions.debugTriggerCurrentTile()">
+        Executar efeito do tile atual
+      </button>
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed, ref } from 'vue'
+import gameActions from '@/constants/gameActions'
 import { useGameStore } from '@/stores/gameStore'
 
 const store = useGameStore()
@@ -158,8 +198,26 @@ const pendingPokemon = computed(() => store.turn?.pending_pokemon ?? null)
 const pendingEvent   = computed(() => store.turn?.pending_event ?? null)
 const players        = computed(() => store.players)
 const turn           = computed(() => store.turn)
+const pendingAction = computed(() => turn.value?.pending_action ?? null)
 const pendingItemChoice = computed(() => turn.value?.pending_item_choice ?? null)
 const pendingReleaseChoice = computed(() => turn.value?.pending_release_choice ?? null)
+const pendingAllowedActions = computed(() => new Set(pendingAction.value?.allowed_actions ?? []))
+const canResolvePendingChoice = computed(() => pendingAllowedActions.value.has(gameActions.resolvePendingAction))
+const canRollPendingCapture = computed(() => pendingAllowedActions.value.has(gameActions.rollCaptureDice))
+const canSkipPendingCapture = computed(() => pendingAllowedActions.value.has(gameActions.skipAction))
+const hasBlockingTurnInteraction = computed(() =>
+  phase.value === 'battle'
+  || !!pendingAction.value
+  || !!pendingEvent.value
+  || !!pendingPokemon.value
+  || !!pendingItemChoice.value
+  || !!pendingReleaseChoice.value
+)
+const canTriggerCurrentTileDebug = computed(() =>
+  isMyTurn.value
+  && phase.value !== 'select_starter'
+  && !hasBlockingTurnInteraction.value
+)
 
 const captureContext     = computed(() => turn.value?.capture_context ?? null)
 const isFreeCapture      = computed(() => !!turn.value?.compound_eyes_active)
