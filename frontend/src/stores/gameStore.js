@@ -30,6 +30,29 @@ export const useGameStore = defineStore('game', () => {
 
   const turn = computed(() => gameState.value?.turn ?? {})
 
+  const debugVisual = computed(() => gameState.value?.debug_visual ?? { enabled: false, session_state: null })
+
+  const debugSession = computed(() => debugVisual.value?.session_state ?? null)
+
+  const debugTestPlayer = computed(() =>
+    debugSession.value?.players?.find(player => player.is_test_player) ?? debugSession.value?.players?.[0] ?? null
+  )
+
+  const allPlayers = computed(() => {
+    const basePlayers = [...players.value]
+    const debugPlayer = debugTestPlayer.value
+    if (debugVisual.value?.enabled && debugPlayer && !basePlayers.some(player => player.id === debugPlayer.id)) {
+      basePlayers.push(debugPlayer)
+    }
+    return basePlayers
+  })
+
+  const debugTurn = computed(() => debugSession.value?.turn ?? {})
+
+  const debugLog = computed(() => debugSession.value?.log ?? [])
+
+  const debugRevealedCard = computed(() => debugSession.value?.revealed_card ?? null)
+
   const isMyTurn = computed(() =>
     turn.value?.current_player_id === playerId.value
   )
@@ -215,6 +238,10 @@ export const useGameStore = defineStore('game', () => {
       pending_action_resolved: () => 'Escolha resolvida',
       debug_item_added:    () => 'Item de debug adicionado',
       debug_tile_triggered: () => 'Efeito do tile executado',
+      debug_test_player_toggled: (e) => e.enabled ? 'Player de teste habilitado' : 'Player de teste desabilitado',
+      debug_test_player_moved: (e) => `Player de teste moveu ${e.result?.steps ?? e.steps ?? 0} casa(s)`,
+      debug_test_player_rolled: (e) => `Player de teste rolou ${e.result?.roll ?? '?'}`,
+      debug_test_player_tile_triggered: () => 'Tile do player de teste executado',
       revealed_card_dismissed: () => 'Carta fechada',
     }
 
@@ -247,6 +274,16 @@ export const useGameStore = defineStore('game', () => {
     useItem:          (itemKey, payload = {})     => send(gameActions.useItem, { item_key: itemKey, ...payload }),
     debugAddItem:     (itemKey, quantity = 1)     => send(gameActions.debugAddItem, { item_key: itemKey, quantity }),
     debugTriggerCurrentTile: ()                   => send(gameActions.debugTriggerCurrentTile),
+    debugToggleTestPlayer: (enabled)              => send(gameActions.debugToggleTestPlayer, { enabled }),
+    debugMoveTestPlayer: (steps)                  => send(gameActions.debugMoveTestPlayer, { steps }),
+    debugRollTestPlayer: ()                       => send(gameActions.debugRollTestPlayer),
+    debugTriggerTestPlayerTile: ()                => send(gameActions.debugTriggerTestPlayerTile),
+    debugRollCaptureForTestPlayer: (useFullRestore = false) => send(gameActions.debugRollCaptureForTestPlayer, { use_full_restore: useFullRestore }),
+    debugResolveEventForTestPlayer: (useRunAway = false)    => send(gameActions.debugResolveEventForTestPlayer, { use_run_away: useRunAway }),
+    debugSkipTestPlayerPending: ()                          => send(gameActions.debugSkipTestPlayerPending),
+    debugStartDuelWithPlayer: (targetPlayerId)              => send(gameActions.debugStartDuelWithPlayer, { target_player_id: targetPlayerId }),
+    debugDuelChoosePokemon: (pokemonIndex)                  => send(gameActions.debugDuelChoosePokemon, { pokemon_index: pokemonIndex }),
+    debugDuelRollBattle: ()                                 => send(gameActions.debugDuelRollBattle),
     dismissRevealedCard: ()                        => send(gameActions.dismissRevealedCard),
     useAbility:       (abilityAction, targetId, targetPosition) =>
       send(gameActions.useAbility, { ability_action: abilityAction, target_id: targetId, target_position: targetPosition }),
@@ -272,8 +309,8 @@ export const useGameStore = defineStore('game', () => {
     roomCode, playerId, playerName, gameState,
     wsStatus, lastEvent, errorMsg, notification,
     // computed
-    me, players, status, turn, isMyTurn, isHost, currentPlayer, phase,
-    finalScores, board,
+    me, players, allPlayers, status, turn, isMyTurn, isHost, currentPlayer, phase,
+    finalScores, board, debugVisual, debugSession, debugTestPlayer, debugTurn, debugLog, debugRevealedCard,
     // methods
     createRoom, fetchRoom, deleteRoom,
     connect, disconnect, send, handleMessage,

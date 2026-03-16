@@ -25,5 +25,15 @@
   "useItem": "use_item",
   "debugAddItem": "debug_add_item",
   "debugTriggerCurrentTile": "debug_trigger_current_tile",
+  "debugToggleTestPlayer": "debug_toggle_test_player",
+  "debugMoveTestPlayer": "debug_move_test_player",
+  "debugRollTestPlayer": "debug_roll_test_player",
+  "debugTriggerTestPlayerTile": "debug_trigger_test_player_tile",
+  "debugRollCaptureForTestPlayer": "debug_roll_capture_for_test_player",
+  "debugResolveEventForTestPlayer": "debug_resolve_event_for_test_player",
+  "debugSkipTestPlayerPending": "debug_skip_test_player_pending",
+  "debugStartDuelWithPlayer": "debug_start_duel_with_player",
+  "debugDuelChoosePokemon": "debug_duel_choose_pokemon",
+  "debugDuelRollBattle": "debug_duel_roll_battle",
   "dismissRevealedCard": "dismiss_revealed_card"
 }

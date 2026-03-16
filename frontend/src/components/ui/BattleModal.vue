@@ -47,14 +47,14 @@
               <span v-if="p.types?.length" class="types">{{ p.types.join('/') }}</span>
             </button>
           </div>
-          <label v-if="pluspowerQuantity > 0" class="pluspower-toggle">
+          <label v-if="canUseBattleItems && pluspowerQuantity > 0" class="pluspower-toggle">
             <input v-model="usePlusPower" type="checkbox" />
             Usar PlusPower (+2 BP nesta batalha) · x{{ pluspowerQuantity }}
           </label>
           <button class="btn-primary" :disabled="selectedIndex === null" @click="confirmChoice">
             Confirmar escolha
           </button>
-          <div v-if="gustOfWindQuantity > 0 && !opponentHasChosen" class="gust-panel">
+          <div v-if="canUseBattleItems && gustOfWindQuantity > 0 && !opponentHasChosen" class="gust-panel">
             <p class="hint">Gust of Wind: force o Pokémon do oponente.</p>
             <button
               v-for="(p, i) in opponentPokemon"
@@ -183,30 +183,64 @@ const lastResult    = ref(null)
 const battle     = computed(() => store.turn?.battle ?? {})
 const subPhase   = computed(() => battle.value.sub_phase ?? 'choosing')
 const mode       = computed(() => battle.value.mode ?? 'player')
-const challenger = computed(() => store.players.find(p => p.id === battle.value.challenger_id))
-const defender   = computed(() => store.players.find(p => p.id === battle.value.defender_id))
+const debugTestPlayer = computed(() => store.debugTestPlayer ?? null)
+const debugChallengerId = computed(() => debugTestPlayer.value?.id ?? null)
+const allPlayers = computed(() => store.allPlayers ?? store.players)
+const challenger = computed(() => allPlayers.value.find(p => p.id === battle.value.challenger_id))
+const defender   = computed(() => allPlayers.value.find(p => p.id === battle.value.defender_id))
 const defenderLabel = computed(() => defender.value?.name ?? battle.value.defender_name ?? 'Trainer')
 const choiceStage = computed(() => battle.value.choice_stage ?? (mode.value === 'trainer' ? 'challenger' : 'defender'))
 const isTrainerBattle = computed(() => mode.value === 'trainer')
-const amChallenger = computed(() => store.playerId === battle.value.challenger_id)
+const controlsDebugChallenger = computed(() =>
+  !!store.debugVisual?.enabled
+  && store.isHost
+  && battle.value.challenger_id === debugChallengerId.value
+)
+const amChallenger = computed(() =>
+  store.playerId === battle.value.challenger_id || controlsDebugChallenger.value
+)
 const amDefender = computed(() => store.playerId === battle.value.defender_id)
 
 const isParticipant = computed(() =>
-  [battle.value.challenger_id, battle.value.defender_id].includes(store.playerId)
-  || (isTrainerBattle.value && amChallenger.value)
+  amChallenger.value || amDefender.value
 )
+
+const localBattleActorId = computed(() => {
+  const b = battle.value
+  if (subPhase.value === 'choosing') {
+    if (choiceStage.value === 'defender' && amDefender.value) return b.defender_id
+    if (choiceStage.value === 'challenger' && amChallenger.value) return b.challenger_id
+  }
+
+  if (subPhase.value === 'rolling') {
+    if (amDefender.value && b.defender_roll == null) return b.defender_id
+    if (amChallenger.value && b.challenger_roll == null) return b.challenger_id
+  }
+
+  if (amDefender.value && !amChallenger.value) return b.defender_id
+  if (amChallenger.value) return b.challenger_id
+  return null
+})
+
+const localBattlePlayer = computed(() =>
+  allPlayers.value.find(player => player.id === localBattleActorId.value) ?? null
+)
+const isDebugBattleActor = computed(() => localBattleActorId.value === debugChallengerId.value)
 
 const hasChosen = computed(() => {
   const b = battle.value
-  if (store.playerId === b.challenger_id) return !!b.challenger_choice
-  return !!b.defender_choice
+  if (localBattleActorId.value === b.challenger_id) return !!b.challenger_choice
+  if (localBattleActorId.value === b.defender_id) return !!b.defender_choice
+  return false
 })
 
 const hasRolled = computed(() => {
   const b = battle.value
-  if (store.playerId === b.challenger_id) return b.challenger_roll != null
-  return b.defender_roll != null
+  if (localBattleActorId.value === b.challenger_id) return b.challenger_roll != null
+  if (localBattleActorId.value === b.defender_id) return b.defender_roll != null
+  return false
 })
+
 const canChooseNow = computed(() => {
   if (!isParticipant.value || hasChosen.value) return false
   if (isTrainerBattle.value) return amChallenger.value
@@ -238,19 +272,20 @@ const waitingRollMessage = computed(() => {
 })
 
 const myPokemon = computed(() => {
-  const me = store.me
-  if (!me) return []
-  const pool = [...me.pokemon]
-  if (me.starter_pokemon) pool.push(me.starter_pokemon)
+  const player = localBattlePlayer.value
+  if (!player) return []
+  const pool = [...(player.pokemon ?? [])]
+  if (player.starter_pokemon) pool.push(player.starter_pokemon)
   return pool
 })
 
-const inventoryItems    = computed(() => store.me?.items ?? [])
+const canUseBattleItems = computed(() => localBattleActorId.value === store.playerId)
+const inventoryItems    = computed(() => canUseBattleItems.value ? (localBattlePlayer.value?.items ?? []) : [])
 const pluspowerQuantity = computed(() => inventoryItems.value.find(i => i.key === 'pluspower')?.quantity ?? 0)
 const gustOfWindQuantity = computed(() => inventoryItems.value.find(i => i.key === 'gust_of_wind')?.quantity ?? 0)
 
 const opponent = computed(() =>
-  store.playerId === battle.value.challenger_id ? defender.value : challenger.value
+  localBattleActorId.value === battle.value.challenger_id ? defender.value : challenger.value
 )
 const opponentPokemon = computed(() => {
   const opp = opponent.value
@@ -262,16 +297,21 @@ const opponentPokemon = computed(() => {
 const opponentHasChosen = computed(() => {
   if (isTrainerBattle.value) return true
   const b = battle.value
-  if (store.playerId === b.challenger_id) return !!b.defender_choice
-  return !!b.challenger_choice
+  if (localBattleActorId.value === b.challenger_id) return !!b.defender_choice
+  if (localBattleActorId.value === b.defender_id) return !!b.challenger_choice
+  return false
 })
 
 function confirmChoice() {
   if (selectedIndex.value === null) return
-  if (usePlusPower.value && pluspowerQuantity.value > 0) {
+  if (usePlusPower.value && canUseBattleItems.value && pluspowerQuantity.value > 0) {
     store.actions.useItem('pluspower', { pokemon_index: selectedIndex.value })
   }
-  store.actions.battleChoice(selectedIndex.value)
+  if (isDebugBattleActor.value) {
+    store.actions.debugDuelChoosePokemon(selectedIndex.value)
+  } else {
+    store.actions.battleChoice(selectedIndex.value)
+  }
   selectedIndex.value = null
   usePlusPower.value  = false
 }
@@ -279,7 +319,11 @@ function confirmChoice() {
 function rollBattleDice() {
   if (rolling.value) return
   rolling.value = true
-  store.actions.rollBattleDice()
+  if (isDebugBattleActor.value) {
+    store.actions.debugDuelRollBattle()
+  } else {
+    store.actions.rollBattleDice()
+  }
   // O estado será atualizado via WebSocket; reset local após breve delay
   setTimeout(() => { rolling.value = false }, 1500)
 }
@@ -290,7 +334,7 @@ watch(() => store.lastEvent, (event) => {
     const result = event.result
     lastResult.value = result
     const winnerId = result.winner_id
-    const winnerPlayer = store.players.find(p => p.id === winnerId)
+    const winnerPlayer = allPlayers.value.find(p => p.id === winnerId)
     winnerName.value = winnerPlayer?.name ?? 'Vencedor'
     showWinnerBanner.value = true
     setTimeout(() => { showWinnerBanner.value = false }, 3500)

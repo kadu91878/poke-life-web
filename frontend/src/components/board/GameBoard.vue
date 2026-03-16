@@ -1,5 +1,10 @@
 <template>
   <div class="game-board">
+    <InventoryModal
+      v-if="debugInventoryOpen && debugTestPlayer"
+      :player="debugTestPlayer"
+      @close="debugInventoryOpen = false"
+    />
     <div class="board-header">
       <div>
         <h3 class="board-title">Tabuleiro Kanto</h3>
@@ -32,7 +37,7 @@
               :class="{ 'tile-node--debug': showDebugOverlay }"
               :style="spaceStyle(space.id)"
               :title="spaceTooltip(space)"
-              @click="selectedSpaceId = space.id"
+              @click="selectedTileId = space.id"
             />
 
             <div
@@ -53,8 +58,15 @@
               <span class="player-pin-label">{{ player.name }}</span>
             </div>
 
-            <div v-if="showTestPin && testPinStyle" class="test-pin" :style="testPinStyle">
-              <span>T</span>
+            <div v-if="debugEnabled && testPinStyle" class="test-pin" :style="testPinStyle">
+              <button
+                class="test-pin-btn"
+                :title="`${debugTestPlayer?.name} em ${tileName(debugTestPlayer?.position ?? 0)}`"
+                @click="focusDebugTestPlayer"
+              >
+                T
+              </button>
+              <span class="player-pin-label player-pin-label--debug">{{ debugTestPlayer?.name }}</span>
             </div>
           </div>
         </div>
@@ -64,10 +76,10 @@
         <div class="info-card">
           <div class="info-icon">{{ tileIcon(activeTile?.type) }}</div>
           <div>
-            <strong>{{ activeTile?.name }}</strong>
-            <p>{{ activeTile?.description }}</p>
+            <strong>{{ activeTile?.name ?? 'Casa sem detalhes' }}</strong>
+            <p>{{ activeTile?.description ?? 'Selecione um pino ou tile para inspecionar.' }}</p>
             <span class="info-meta">
-              Casa {{ activeTile?.id }} · {{ describeTile(activeTile) }}
+              Casa {{ activeTile?.id ?? '—' }}<template v-if="activeTile"> · {{ describeTile(activeTile) }}</template>
             </span>
           </div>
         </div>
@@ -75,29 +87,233 @@
         <div class="route-card">
           <h4>Teste visual do pino</h4>
           <label class="test-toggle">
-            <input v-model="showTestPin" type="checkbox" />
-            <span>Ativar pino de teste por `spaceId`</span>
+            <input :checked="debugEnabled" type="checkbox" @change="toggleDebugTestPlayer" />
+            <span>Habilitar player de teste isolado</span>
           </label>
-          <div class="test-controls">
-            <button class="focus-btn" @click="moveTestPin(-1)">-1</button>
-            <button class="focus-btn" @click="rollTestPin">rolar dado</button>
-            <button class="focus-btn" @click="moveTestPin(1)">+1</button>
-          </div>
-          <div class="test-controls">
-            <button class="focus-btn" @click="moveTestPin(-6)">-6</button>
-            <button class="focus-btn" @click="testSpaceId = 0">inicio</button>
-            <button class="focus-btn" @click="moveTestPin(6)">+6</button>
-          </div>
-          <p class="test-meta">
-            spaceId atual: <strong>{{ testSpaceId }}</strong> / {{ maxSpaceId }}
-            <template v-if="selectedSpace">
-              · {{ selectedSpace.tileTypeId ?? 'sem tipo' }}
-            </template>
+
+          <template v-if="debugEnabled && debugTestPlayer">
+            <div class="debug-player-card">
+              <div class="debug-player-header">
+                <span class="player-dot" :style="{ background: debugTestPlayer.color }"></span>
+                <strong>{{ debugTestPlayer.name }}</strong>
+                <span class="debug-badge">Debug</span>
+                <button class="focus-btn focus-btn--inventory" @click="debugInventoryOpen = true">
+                  inventario
+                </button>
+              </div>
+
+              <p class="test-meta">
+                Posicao logica: <strong>{{ debugTestPlayer.position }}</strong>
+                <template v-if="debugSelectedSpace">
+                  · spaceId <strong>{{ debugSelectedSpace.id }}</strong>
+                  · {{ debugSelectedSpace.tileTypeId ?? 'sem tipo' }}
+                </template>
+              </p>
+              <p class="test-meta">
+                Tile atual: <strong>{{ tileName(debugTestPlayer.position) }}</strong>
+                · fase {{ debugPhaseLabel }}
+                <template v-if="debugLastRoll !== null">
+                  · ultimo dado {{ debugLastRoll }}
+                </template>
+              </p>
+
+              <!-- Controles de movimento — só quando não há pending -->
+              <template v-if="!debugHasPending">
+                <div class="test-controls">
+                  <button class="focus-btn" @click="store.actions.debugRollTestPlayer()">
+                    rolar dado
+                  </button>
+                  <button class="focus-btn" @click="store.actions.debugTriggerTestPlayerTile()">
+                    trigger tile
+                  </button>
+                  <button class="focus-btn" @click="focusDebugTestPlayer">
+                    focar
+                  </button>
+                </div>
+
+                <form class="debug-move-form" @submit.prevent="submitDebugMove">
+                  <input
+                    v-model="debugMoveValue"
+                    class="debug-number-input"
+                    type="text"
+                    inputmode="numeric"
+                    placeholder="Digite um inteiro positivo"
+                  />
+                  <button class="focus-btn focus-btn--primary" type="submit">
+                    mover N casas
+                  </button>
+                </form>
+
+                <p v-if="debugMoveError" class="error-copy">{{ debugMoveError }}</p>
+              </template>
+
+              <!-- Pending: captura de Pokémon -->
+              <div v-if="debugPendingPokemon" class="debug-pending-block">
+                <p class="debug-pending-title">
+                  Pokémon apareceu: <strong>{{ debugPendingPokemon.name }}</strong>
+                  <template v-if="debugPendingPokemon.types?.length">
+                    ({{ debugPendingPokemon.types.join('/') }})
+                  </template>
+                </p>
+                <div class="test-controls">
+                  <button class="focus-btn focus-btn--primary" @click="store.actions.debugRollCaptureForTestPlayer()">
+                    rolar dado de captura
+                  </button>
+                  <button class="focus-btn" @click="store.actions.debugSkipTestPlayerPending()">
+                    pular captura
+                  </button>
+                </div>
+              </div>
+
+              <!-- Pending: evento -->
+              <div v-if="debugPendingEvent" class="debug-pending-block">
+                <p class="debug-pending-title">
+                  Evento: <strong>{{ debugPendingEvent.title ?? 'Carta de Evento' }}</strong>
+                </p>
+                <p v-if="debugPendingEvent.description" class="test-meta">{{ debugPendingEvent.description }}</p>
+                <div class="test-controls">
+                  <button class="focus-btn focus-btn--primary" @click="store.actions.debugResolveEventForTestPlayer()">
+                    resolver evento
+                  </button>
+                  <button class="focus-btn" @click="store.actions.debugSkipTestPlayerPending()">
+                    pular
+                  </button>
+                </div>
+              </div>
+
+              <!-- Pending: tile de duelo — escolher oponente real -->
+              <div v-if="debugIsDuelPending" class="debug-pending-block">
+                <p class="debug-pending-title">Tile de duelo — escolha um oponente</p>
+                <template v-if="players.length">
+                  <button
+                    v-for="p in players"
+                    :key="p.id"
+                    class="focus-btn focus-btn--primary"
+                    @click="store.actions.debugStartDuelWithPlayer(p.id)"
+                  >
+                    desafiar {{ p.name }}
+                  </button>
+                </template>
+                <p v-else class="test-meta">Nenhum jogador real disponível na partida.</p>
+                <button class="focus-btn" @click="store.actions.debugSkipTestPlayerPending()">
+                  pular duelo
+                </button>
+              </div>
+
+              <div v-if="debugSharedBattle" class="debug-pending-block">
+                <p class="debug-pending-title">Duelo em andamento no fluxo principal</p>
+                <p class="test-meta">
+                  <template v-if="debugSharedBattle.sub_phase === 'choosing' && !debugSharedBattle.defender_choice">
+                    Aguardando o jogador desafiado escolher o Pokémon no modal principal.
+                  </template>
+                  <template v-else-if="debugSharedBattle.sub_phase === 'choosing'">
+                    O desafiado já escolheu {{ debugSharedBattle.defender_choice?.name }}. Continue o duelo pelo modal principal.
+                  </template>
+                  <template v-else>
+                    O duelo continua no modal principal até a rolagem final.
+                  </template>
+                </p>
+              </div>
+
+              <!-- Battle phase: escolha de pokémon (challenge stage) -->
+              <div v-if="debugBattleIsChoosing" class="debug-pending-block">
+                <p class="debug-pending-title">
+                  Duelo — escolha seu Pokémon
+                  <template v-if="debugBattle.defender_choice">
+                    (oponente já escolheu: {{ debugBattle.defender_choice.name }})
+                  </template>
+                </p>
+                <button
+                  v-for="(pokemon, idx) in debugDuelPokemonPool"
+                  :key="pokemon.id"
+                  class="focus-btn focus-btn--primary"
+                  @click="store.actions.debugDuelChoosePokemon(idx)"
+                >
+                  {{ pokemon.name }} (BP {{ pokemon.battle_points ?? '?' }})
+                  <template v-if="pokemon.is_starter_slot || pokemon === debugTestPlayer?.starter_pokemon"> · inicial</template>
+                </button>
+                <button class="focus-btn" @click="store.actions.debugSkipTestPlayerPending()">
+                  cancelar duelo
+                </button>
+              </div>
+
+              <!-- Battle phase: rolagem de dados -->
+              <div v-if="debugBattleIsRolling" class="debug-pending-block">
+                <p class="debug-pending-title">
+                  Duelo — rolar dado de batalha
+                </p>
+                <p class="test-meta">
+                  Você: <strong>{{ debugBattle.challenger_choice?.name }}</strong>
+                  (BP {{ debugBattle.challenger_choice?.battle_points ?? '?' }})
+                  vs {{ debugBattle.defender_choice?.name }}
+                  (BP {{ debugBattle.defender_choice?.battle_points ?? '?' }})
+                </p>
+                <button class="focus-btn focus-btn--primary" @click="store.actions.debugDuelRollBattle()">
+                  rolar dado de batalha
+                </button>
+                <button class="focus-btn" @click="store.actions.debugSkipTestPlayerPending()">
+                  cancelar duelo
+                </button>
+              </div>
+
+              <!-- Pending: escolha de item -->
+              <div v-if="debugPendingItemChoice" class="debug-pending-block">
+                <p class="debug-pending-title">Item recebido no tile</p>
+                <button class="focus-btn" @click="store.actions.debugSkipTestPlayerPending()">
+                  ok / pular
+                </button>
+              </div>
+
+              <!-- Carta revelada -->
+              <div v-if="debugRevealedCard?.card" class="debug-result-card">
+                <strong>{{ debugRevealedCard.card.title ?? debugRevealedCard.card.name ?? 'Carta revelada' }}</strong>
+                <p>{{ debugRevealedCard.card.description ?? 'Sem descricao adicional.' }}</p>
+              </div>
+
+              <!-- Inventário resumido (quando modal está fechado) -->
+              <div class="debug-inventory-grid">
+                <div class="inventory-block">
+                  <div class="inventory-title">Pokémon ({{ debugPokemonInventory.length }})</div>
+                  <div v-if="debugPokemonInventory.length" class="inventory-list">
+                    <span
+                      v-for="pokemon in debugPokemonInventory"
+                      :key="`${pokemon.id}-${pokemon.is_starter_slot ? 'starter' : 'team'}`"
+                      class="inventory-chip"
+                    >
+                      {{ pokemon.name }}<template v-if="pokemon.is_starter_slot"> · inicial</template>
+                    </span>
+                  </div>
+                  <p v-else class="test-meta">Sem Pokémon.</p>
+                </div>
+
+                <div class="inventory-block">
+                  <div class="inventory-title">Itens</div>
+                  <div v-if="debugItems.length" class="inventory-list">
+                    <span v-for="item in debugItems" :key="item.key" class="inventory-chip">
+                      {{ item.name }} x{{ item.quantity }}
+                    </span>
+                  </div>
+                  <p v-else class="test-meta">Sem itens.</p>
+                </div>
+              </div>
+
+              <!-- Log das últimas ações -->
+              <div v-if="lastDebugLogs.length" class="debug-log">
+                <div v-for="(entry, index) in lastDebugLogs" :key="index" class="debug-log-entry">
+                  <span class="log-player">{{ entry.player }}</span>: {{ entry.message }}
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <p v-else class="test-meta">
+            Quando habilitado, o player de teste aparece aqui com inventario proprio e controles reais de debug.
           </p>
         </div>
 
         <div class="players-card">
           <h4>Posicao dos jogadores</h4>
+          <p class="test-meta">Jogadores reais e player de teste ficam separados.</p>
           <div
             v-for="player in players"
             :key="player.id"
@@ -129,43 +345,136 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { useGameStore } from '@/stores/gameStore'
-import { BOARD_ASPECT_RATIO, BOARD_IMAGE, BOARD_SPACES, getLogicalTilePosition, getSpaceById, getSpacePosition } from './kantoBoardLayout'
+import InventoryModal from '@/components/ui/InventoryModal.vue'
+import {
+  BOARD_ASPECT_RATIO,
+  BOARD_IMAGE,
+  BOARD_SPACES,
+  getLogicalTilePosition,
+  getSpaceById,
+  getSpacePosition,
+  resolveSpaceIdForLogicalTile,
+} from './kantoBoardLayout'
 
 const store = useGameStore()
 const selectedTileId = ref(null)
-const selectedSpaceId = ref(0)
 const showDebugOverlay = ref(true)
-const showTestPin = ref(true)
-const testSpaceId = ref(0)
+const debugMoveValue = ref('1')
+const debugMoveError = ref('')
+const debugInventoryOpen = ref(false)
 
 const tiles = computed(() => store.gameState?.board?.tiles ?? [])
+const debugTiles = computed(() => store.debugSession?.board?.tiles ?? [])
 const players = computed(() => store.players)
 const me = computed(() => store.me)
 const currentTile = computed(() => store.turn?.current_tile ?? null)
+const debugCurrentTile = computed(() => store.debugTurn?.current_tile ?? null)
+const debugEnabled = computed(() => Boolean(store.debugVisual?.enabled && store.debugTestPlayer))
+const debugTestPlayer = computed(() => store.debugTestPlayer)
+const debugItems = computed(() => debugTestPlayer.value?.items ?? [])
+const debugPokemonInventory = computed(() => debugTestPlayer.value?.pokemon_inventory ?? [])
+const debugLastRoll = computed(() => store.debugTurn?.last_roll?.final_result ?? null)
+const debugRevealedCard = computed(() => store.debugRevealedCard)
+const lastDebugLogs = computed(() => (store.debugLog ?? []).slice(-4).reverse())
 const visibleSpaces = BOARD_SPACES.filter(space => Number.isFinite(space.x) && Number.isFinite(space.y))
-const maxSpaceId = BOARD_SPACES.length - 1
 
-watch(currentTile, tile => {
-  if (tile?.id !== undefined) {
-    selectedTileId.value = tile.id
-  }
-}, { immediate: true })
+const debugSelectedSpace = computed(() => {
+  const tileId = debugTestPlayer.value?.position
+  const spaceId = resolveSpaceIdForLogicalTile(tileId)
+  return spaceId === null ? null : getSpaceById(spaceId)
+})
 
 const activeTile = computed(() => {
-  if (selectedTileId.value !== null) {
-    return tiles.value.find(tile => tile.id === selectedTileId.value) ?? currentTile.value ?? tiles.value[0] ?? null
-  }
-  return currentTile.value ?? tiles.value[0] ?? null
+  const selectedTile = selectedTileId.value === null
+    ? null
+    : tiles.value.find(tile => tile.id === selectedTileId.value)
+      ?? debugTiles.value.find(tile => tile.id === selectedTileId.value)
+      ?? null
+
+  return selectedTile
+    ?? currentTile.value
+    ?? debugCurrentTile.value
+    ?? tiles.value[0]
+    ?? debugTiles.value[0]
+    ?? null
 })
 
 const positionedPlayers = computed(() =>
   players.value.filter(player => playerHasMappedPosition(player.position))
 )
 
-const selectedSpace = computed(() => getSpaceById(testSpaceId.value) ?? getSpaceById(selectedSpaceId.value))
 const testPinStyle = computed(() => {
-  const position = getSpacePosition(testSpaceId.value)
+  const position = getLogicalTilePosition(debugTestPlayer.value?.position)
   return position ? { left: position.left, top: position.top } : null
+})
+
+const debugPhaseLabel = computed(() => {
+  const phase = store.debugTurn?.phase ?? 'roll'
+  return DEBUG_PHASE_LABELS[phase] ?? phase
+})
+
+// Pending states do debug player
+const debugPendingPokemon = computed(() => store.debugTurn?.pending_pokemon ?? null)
+const debugPendingEvent = computed(() => store.debugTurn?.pending_event ?? null)
+const debugPendingAction = computed(() => store.debugTurn?.pending_action ?? null)
+const debugPendingItemChoice = computed(() => store.debugTurn?.pending_item_choice ?? null)
+const debugCaptureContext = computed(() => store.debugTurn?.capture_context ?? null)
+const debugIsDuelPending = computed(() =>
+  store.debugTurn?.phase === 'action' && debugCaptureContext.value === 'duel'
+)
+const debugSharedBattle = computed(() => {
+  const battle = store.turn?.battle ?? null
+  if (!battle || battle.challenger_id !== debugTestPlayer.value?.id) return null
+  return battle
+})
+
+// Battle state dentro da sessão de debug
+const debugBattle = computed(() => store.debugTurn?.battle ?? null)
+const debugBattleSubPhase = computed(() => debugBattle.value?.sub_phase ?? null)
+const debugBattleChoiceStage = computed(() => debugBattle.value?.choice_stage ?? null)
+const debugBattleIsChoosing = computed(() =>
+  store.debugTurn?.phase === 'battle' && debugBattleSubPhase.value === 'choosing'
+)
+const debugBattleIsRolling = computed(() =>
+  store.debugTurn?.phase === 'battle' && debugBattleSubPhase.value === 'rolling'
+)
+// Pokemon do debug player para seleção no duelo
+const debugDuelPokemonPool = computed(() => {
+  const player = debugTestPlayer.value
+  if (!player) return []
+  const pool = [...(player.pokemon ?? [])]
+  if (player.starter_pokemon) pool.push(player.starter_pokemon)
+  return pool
+})
+
+const debugHasPending = computed(() =>
+  !!(
+    debugPendingPokemon.value ||
+    debugPendingEvent.value ||
+    debugPendingItemChoice.value ||
+    debugIsDuelPending.value ||
+    debugSharedBattle.value ||
+    debugBattleIsChoosing.value ||
+    debugBattleIsRolling.value
+  )
+)
+
+watch(currentTile, tile => {
+  if (tile?.id !== undefined && !debugEnabled.value) {
+    selectedTileId.value = tile.id
+  }
+}, { immediate: true })
+
+watch(() => debugTestPlayer.value?.position, position => {
+  if (debugEnabled.value && Number.isInteger(position)) {
+    selectedTileId.value = position
+  }
+}, { immediate: true })
+
+watch(debugEnabled, enabled => {
+  if (!enabled) {
+    debugMoveError.value = ''
+  }
 })
 
 const legendItems = [
@@ -176,6 +485,16 @@ const legendItems = [
   { type: 'special', label: 'Especial', icon: '⭐' },
   { type: 'league', label: 'Liga', icon: '👑' },
 ]
+
+const DEBUG_PHASE_LABELS = {
+  roll: 'roll',
+  action: 'action',
+  event: 'event',
+  battle: 'battle',
+  item_choice: 'item_choice',
+  release_pokemon: 'release_pokemon',
+  end: 'end',
+}
 
 function spaceStyle(spaceId) {
   const position = getSpacePosition(spaceId)
@@ -191,17 +510,32 @@ function playerHasMappedPosition(tileId) {
   return Boolean(getLogicalTilePosition(tileId))
 }
 
-function moveTestPin(delta) {
-  testSpaceId.value = clampSpaceId(testSpaceId.value + delta)
+function toggleDebugTestPlayer(event) {
+  debugMoveError.value = ''
+  store.actions.debugToggleTestPlayer(event.target.checked)
 }
 
-function rollTestPin() {
-  const roll = Math.floor(Math.random() * 6) + 1
-  moveTestPin(roll)
+function submitDebugMove() {
+  const raw = debugMoveValue.value.trim()
+  if (!/^\d+$/.test(raw)) {
+    debugMoveError.value = 'Digite um inteiro positivo.'
+    return
+  }
+
+  const steps = Number.parseInt(raw, 10)
+  if (!Number.isInteger(steps) || steps <= 0) {
+    debugMoveError.value = 'Digite um inteiro positivo.'
+    return
+  }
+
+  debugMoveError.value = ''
+  store.actions.debugMoveTestPlayer(steps)
 }
 
-function clampSpaceId(spaceId) {
-  return Math.max(0, Math.min(maxSpaceId, spaceId))
+function focusDebugTestPlayer() {
+  if (debugTestPlayer.value) {
+    selectedTileId.value = debugTestPlayer.value.position
+  }
 }
 
 function spaceTooltip(space) {
@@ -211,7 +545,7 @@ function spaceTooltip(space) {
 }
 
 function tileName(position) {
-  return tiles.value[position]?.name ?? `Casa ${position}`
+  return tiles.value[position]?.name ?? debugTiles.value[position]?.name ?? `Casa ${position}`
 }
 
 function describeTile(tile) {
@@ -362,7 +696,8 @@ function typeLabel(type) {
   color: #fff;
 }
 
-.player-pin {
+.player-pin,
+.test-pin {
   z-index: 4;
   display: flex;
   flex-direction: column;
@@ -371,7 +706,7 @@ function typeLabel(type) {
 }
 
 .player-pin-btn,
-.test-pin {
+.test-pin-btn {
   width: 22px;
   height: 22px;
   border-radius: 999px;
@@ -386,6 +721,10 @@ function typeLabel(type) {
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.28);
 }
 
+.player-pin-btn {
+  background: transparent;
+}
+
 .player-pin--me .player-pin-btn {
   width: 26px;
   height: 26px;
@@ -394,6 +733,9 @@ function typeLabel(type) {
 
 .test-pin {
   z-index: 5;
+}
+
+.test-pin-btn {
   background: #f4d03f;
   color: #09111f;
   box-shadow: 0 0 0 6px rgba(244, 208, 63, 0.2), 0 4px 10px rgba(0, 0, 0, 0.28);
@@ -409,6 +751,11 @@ function typeLabel(type) {
   font-weight: 800;
   line-height: 1;
   pointer-events: none;
+}
+
+.player-pin-label--debug {
+  color: #09111f;
+  background: rgba(244, 208, 63, 0.92);
 }
 
 .board-sidebar {
@@ -510,6 +857,10 @@ function typeLabel(type) {
   padding: 0.25rem 0.55rem;
 }
 
+.focus-btn--primary {
+  background: rgba(244, 208, 63, 0.2);
+}
+
 .test-toggle,
 .test-controls {
   display: flex;
@@ -518,8 +869,142 @@ function typeLabel(type) {
   flex-wrap: wrap;
 }
 
-.test-controls + .test-controls {
-  margin-top: 0.5rem;
+.debug-player-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  margin-top: 0.85rem;
+}
+
+.debug-player-header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.debug-player-header strong {
+  color: #eef4ff;
+}
+
+.debug-badge {
+  margin-left: auto;
+  border-radius: 999px;
+  background: rgba(244, 208, 63, 0.18);
+  border: 1px solid rgba(244, 208, 63, 0.28);
+  color: #fff3bf;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.16rem 0.45rem;
+}
+
+.focus-btn--inventory {
+  margin-left: 0.25rem;
+  background: rgba(100, 180, 255, 0.12);
+  border-color: rgba(100, 180, 255, 0.25);
+  color: #9ec7ff;
+}
+
+.debug-pending-block {
+  background: rgba(255, 200, 80, 0.07);
+  border: 1px solid rgba(255, 200, 80, 0.2);
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.debug-pending-block--info {
+  background: rgba(100, 180, 255, 0.06);
+  border-color: rgba(100, 180, 255, 0.18);
+}
+
+.debug-pending-title {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #fff3bf;
+}
+
+.debug-move-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+}
+
+.debug-number-input {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 0.48rem 0.6rem;
+}
+
+.error-copy {
+  margin: 0;
+  color: #ff9a9a;
+  font-size: 0.78rem;
+}
+
+.debug-inventory-grid {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.inventory-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.inventory-title {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+
+.inventory-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.inventory-chip {
+  font-size: 0.68rem;
+  color: #dfe9ff;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 0.18rem 0.48rem;
+}
+
+.debug-result-card,
+.debug-log {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 0.75rem;
+}
+
+.debug-result-card strong {
+  display: block;
+  color: #eef4ff;
+}
+
+.debug-log {
+  display: flex;
+  flex-direction: column;
+  gap: 0.24rem;
+}
+
+.debug-log-entry {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+
+.log-player {
+  color: var(--color-accent);
+  font-weight: 600;
 }
 
 .warning-copy {
@@ -528,6 +1013,12 @@ function typeLabel(type) {
 
 @media (max-width: 1100px) {
   .board-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .debug-move-form {
     grid-template-columns: 1fr;
   }
 }
