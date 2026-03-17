@@ -59,6 +59,7 @@ def _new_player(name: str, index: int) -> dict:
         'starter_slot_applied': False,
         'starter_pokemon': None,
         'pokemon': [],
+        'capture_sequence_counter': 0,
         'items': starting_defaults['items'],
         'badges': [],
         'master_points': 0,

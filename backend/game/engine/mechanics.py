@@ -89,6 +89,11 @@ def roll_battle_dice() -> int:
     return roll_dice()
 
 
+def roll_team_rocket_dice() -> int:
+    """Rola o dado usado apenas no tile da Equipe Rocket."""
+    return roll_dice()
+
+
 # ── Score de batalha ──────────────────────────────────────────────────────────
 
 def _score_with_effect(bp: int, roll: int, battle_effect: str | None) -> int:

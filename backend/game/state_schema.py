@@ -12,6 +12,53 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _normalize_player_pokemon_metadata(player: dict[str, Any]) -> None:
+    starter = player.get('starter_pokemon')
+    if isinstance(starter, dict):
+        starter.setdefault('knocked_out', False)
+        starter['acquisition_origin'] = 'starter'
+        starter['capture_sequence'] = None
+        starter.setdefault('capture_context', None)
+
+    highest_sequence = 0
+    for pokemon in player.get('pokemon', []):
+        if not isinstance(pokemon, dict):
+            continue
+        pokemon.setdefault('knocked_out', False)
+        if pokemon.get('acquisition_origin') == 'captured':
+            try:
+                sequence = int(pokemon.get('capture_sequence'))
+            except (TypeError, ValueError):
+                sequence = None
+            if sequence is not None:
+                pokemon['capture_sequence'] = sequence
+                highest_sequence = max(highest_sequence, sequence)
+        elif pokemon.get('capture_sequence') is None:
+            pokemon['capture_sequence'] = None
+        pokemon.setdefault('capture_context', None)
+
+    for pokemon in player.get('pokemon', []):
+        if not isinstance(pokemon, dict):
+            continue
+        origin = pokemon.get('acquisition_origin')
+        if origin:
+            if origin != 'captured' and pokemon.get('capture_sequence') is None:
+                pokemon['capture_sequence'] = None
+            continue
+
+        # Estados antigos não rastreavam a origem. Como a coleção extra era
+        # majoritariamente formada por capturas, migramos pela ordem do time.
+        highest_sequence += 1
+        pokemon['acquisition_origin'] = 'captured'
+        pokemon['capture_sequence'] = highest_sequence
+
+    try:
+        current_counter = int(player.get('capture_sequence_counter', 0) or 0)
+    except (TypeError, ValueError):
+        current_counter = 0
+    player['capture_sequence_counter'] = max(current_counter, highest_sequence)
+
+
 
 def build_initial_state(room_code: str) -> dict[str, Any]:
     return {
@@ -89,11 +136,8 @@ def _normalize_player(player: dict[str, Any], index: int) -> dict[str, Any]:
     normalized.setdefault('starter_slot_applied', False)
     normalized.setdefault('starter_pokemon', None)
     normalized.setdefault('pokemon', [])
-    for pokemon in normalized.get('pokemon', []):
-        if isinstance(pokemon, dict):
-            pokemon.setdefault('knocked_out', False)
-    if isinstance(normalized.get('starter_pokemon'), dict):
-        normalized['starter_pokemon'].setdefault('knocked_out', False)
+    normalized.setdefault('capture_sequence_counter', 0)
+    _normalize_player_pokemon_metadata(normalized)
     normalized.setdefault('last_pokemon_center', None)
     normalized.setdefault('deferred_pokecenter_heal', None)
     normalized['items'] = normalize_items(normalized.get('items'), normalized.get('full_restores', starting_defaults['full_restores']))

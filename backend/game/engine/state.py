@@ -90,6 +90,7 @@ from .mechanics import (
     roll_battle_dice,
     roll_capture_dice,
     roll_movement_dice,
+    roll_team_rocket_dice,
 )
 
 # Habilidades que se reiniciam a cada turno (demais são uma vez por partida)
@@ -394,6 +395,132 @@ def _sync_player(state: dict, player_id: str) -> dict | None:
     return player
 
 
+def _ensure_player_capture_counter(player: dict) -> int:
+    highest_sequence = 0
+    for pokemon in player.get('pokemon', []):
+        try:
+            sequence = int(pokemon.get('capture_sequence'))
+        except (TypeError, ValueError):
+            sequence = None
+        if sequence is not None:
+            highest_sequence = max(highest_sequence, sequence)
+    try:
+        current_counter = int(player.get('capture_sequence_counter', 0) or 0)
+    except (TypeError, ValueError):
+        current_counter = 0
+    player['capture_sequence_counter'] = max(current_counter, highest_sequence)
+    return int(player['capture_sequence_counter'])
+
+
+def _apply_pokemon_acquisition_metadata(
+    pokemon: dict,
+    *,
+    acquisition_origin: str,
+    capture_sequence: int | None = None,
+    capture_context: str | None = None,
+) -> dict:
+    if not isinstance(pokemon, dict):
+        return pokemon
+    pokemon['acquisition_origin'] = acquisition_origin
+    pokemon['capture_sequence'] = None if capture_sequence is None else int(capture_sequence)
+    if capture_context is None:
+        pokemon.setdefault('capture_context', None)
+    else:
+        pokemon['capture_context'] = capture_context
+    return pokemon
+
+
+def _ensure_player_pokemon_acquisition_metadata(player: dict) -> None:
+    starter = player.get('starter_pokemon')
+    if isinstance(starter, dict):
+        _apply_pokemon_acquisition_metadata(starter, acquisition_origin='starter')
+
+    counter = _ensure_player_capture_counter(player)
+    for pokemon in player.get('pokemon', []):
+        origin = pokemon.get('acquisition_origin')
+        if origin == 'captured':
+            try:
+                sequence = int(pokemon.get('capture_sequence'))
+            except (TypeError, ValueError):
+                sequence = None
+            if sequence is None:
+                counter += 1
+                _apply_pokemon_acquisition_metadata(
+                    pokemon,
+                    acquisition_origin='captured',
+                    capture_sequence=counter,
+                    capture_context=pokemon.get('capture_context'),
+                )
+            continue
+        if origin:
+            _apply_pokemon_acquisition_metadata(
+                pokemon,
+                acquisition_origin=origin,
+                capture_sequence=pokemon.get('capture_sequence'),
+                capture_context=pokemon.get('capture_context'),
+            )
+            continue
+
+        # Estados antigos não tinham metadado de captura. Preservamos a ordem
+        # do time como melhor aproximação da ordem real de captura.
+        counter += 1
+        _apply_pokemon_acquisition_metadata(
+            pokemon,
+            acquisition_origin='captured',
+            capture_sequence=counter,
+            capture_context=pokemon.get('capture_context'),
+        )
+
+    player['capture_sequence_counter'] = counter
+
+
+def _next_capture_sequence(player: dict) -> int:
+    _ensure_player_pokemon_acquisition_metadata(player)
+    next_sequence = int(player.get('capture_sequence_counter', 0) or 0) + 1
+    player['capture_sequence_counter'] = next_sequence
+    return next_sequence
+
+
+def _copy_pokemon_acquisition_metadata(source: dict, target: dict) -> dict:
+    return _apply_pokemon_acquisition_metadata(
+        target,
+        acquisition_origin=source.get('acquisition_origin', 'captured'),
+        capture_sequence=source.get('capture_sequence'),
+        capture_context=source.get('capture_context'),
+    )
+
+
+def _is_captured_team_pokemon(pokemon: dict | None) -> bool:
+    return bool(pokemon) and pokemon.get('acquisition_origin') == 'captured'
+
+
+def _get_last_captured_team_pokemon_index(player: dict) -> int | None:
+    _ensure_player_pokemon_acquisition_metadata(player)
+    candidates: list[tuple[int, int]] = []
+    for index, pokemon in enumerate(player.get('pokemon', [])):
+        if not _is_captured_team_pokemon(pokemon):
+            continue
+        try:
+            sequence = int(pokemon.get('capture_sequence'))
+        except (TypeError, ValueError):
+            sequence = -1
+        candidates.append((sequence, index))
+    if not candidates:
+        return None
+    candidates.sort()
+    return candidates[-1][1]
+
+
+def _remove_last_captured_team_pokemon(player: dict) -> dict | None:
+    index = _get_last_captured_team_pokemon_index(player)
+    if index is None:
+        return None
+    removed = player['pokemon'].pop(index)
+    player['pokeballs'] = max(0, int(player.get('pokeballs', 0) or 0) + pokemon_slot_cost(removed))
+    sync_player_inventory(player)
+    return removed
+
+
 def _iter_player_battle_slots(player: dict, *, include_knocked_out: bool = True) -> list[tuple[str, dict]]:
     slots: list[tuple[str, dict]] = []
     for index, pokemon in enumerate(player.get('pokemon', [])):
@@ -490,6 +617,12 @@ def _is_pokemon_center_tile(tile: dict | None) -> bool:
     if not isinstance(tile, dict):
         return False
     return tile.get('type') == 'city' and (tile.get('data') or {}).get('city_kind') == 'pokemon_center'
+
+
+def _is_team_rocket_tile(tile: dict | None) -> bool:
+    if not isinstance(tile, dict):
+        return False
+    return tile.get('type') == 'special' and (tile.get('data') or {}).get('special_effect') == 'team_rocket'
 
 
 def _is_start_tile(tile: dict | None) -> bool:
@@ -1053,6 +1186,8 @@ def _grant_reward_pokemon(
         pokemon,
         capture_cost=required_slots,
         use_full_restore=False,
+        acquisition_origin='reward',
+        capture_context=source,
     )
     if finalized is None:
         return None, result
@@ -1195,6 +1330,9 @@ def _finalize_capture(
     pokemon: dict,
     capture_cost: int,
     use_full_restore: bool = False,
+    *,
+    acquisition_origin: str = 'captured',
+    capture_context: str | None = None,
 ) -> tuple[dict | None, str | dict]:
     player = _get_player(state, player_id)
     if not player:
@@ -1211,6 +1349,20 @@ def _finalize_capture(
         player['pokeballs'] -= capture_cost
 
     pokemon_copy = _init_pokemon(pokemon)
+    if acquisition_origin == 'captured':
+        _apply_pokemon_acquisition_metadata(
+            pokemon_copy,
+            acquisition_origin='captured',
+            capture_sequence=_next_capture_sequence(player),
+            capture_context=capture_context,
+        )
+    else:
+        _apply_pokemon_acquisition_metadata(
+            pokemon_copy,
+            acquisition_origin=acquisition_origin,
+            capture_sequence=None,
+            capture_context=capture_context,
+        )
     player['pokemon'].append(pokemon_copy)
     player['master_points'] += pokemon.get('master_points', 0)
     sync_player_inventory(player)
@@ -1274,6 +1426,7 @@ def _build_debug_visual_player() -> tuple[dict | None, str | None]:
         'starter_slot_applied': False,
         'starter_pokemon': None,
         'pokemon': [],
+        'capture_sequence_counter': 0,
         'last_pokemon_center': None,
         'deferred_pokecenter_heal': None,
         'items': copy.deepcopy(starting_defaults['items']),
@@ -1283,7 +1436,10 @@ def _build_debug_visual_player() -> tuple[dict | None, str | None]:
         'skip_turns': 0,
     }
 
-    player['starter_pokemon'] = _init_pokemon(starter)
+    player['starter_pokemon'] = _apply_pokemon_acquisition_metadata(
+        _init_pokemon(starter),
+        acquisition_origin='starter',
+    )
     player['pokeballs'] = max(0, player['pokeballs'] - pokemon_slot_cost(player['starter_pokemon']))
     player['starter_slot_applied'] = True
     sync_player_inventory(player)
@@ -1508,7 +1664,10 @@ def select_starter(state: dict, player_id: str, starter_id: int) -> dict | None:
     if not player:
         return None
 
-    player['starter_pokemon'] = _init_pokemon(starter)
+    player['starter_pokemon'] = _apply_pokemon_acquisition_metadata(
+        _init_pokemon(starter),
+        acquisition_origin='starter',
+    )
     player['pokeballs'] = max(0, player.get('pokeballs', 6) - pokemon_slot_cost(player['starter_pokemon']))
     player['starter_slot_applied'] = True
     sync_player_inventory(player)
@@ -1549,15 +1708,21 @@ def _should_force_stop_at_gym(player: dict, gym_definition: dict | None) -> bool
     return gym_id not in attempted and gym_id not in defeated
 
 
-def _find_forced_gym_stop(player: dict, start_position: int, dice_result: int, board_data: dict) -> tuple[int | None, dict | None]:
+def _find_forced_special_stop(
+    player: dict,
+    start_position: int,
+    dice_result: int,
+    board_data: dict,
+) -> tuple[int | None, dict | None, str | None]:
     for position in get_path_positions(start_position, dice_result, board_data):
         tile = get_tile(board_data, position)
-        if tile.get('type') != 'gym':
-            continue
-        gym_definition = get_gym_definition(tile_id=tile.get('id'))
-        if _should_force_stop_at_gym(player, gym_definition):
-            return position, tile
-    return None, None
+        if tile.get('type') == 'gym':
+            gym_definition = get_gym_definition(tile_id=tile.get('id'))
+            if _should_force_stop_at_gym(player, gym_definition):
+                return position, tile, 'gym'
+        if _is_team_rocket_tile(tile):
+            return position, tile, 'team_rocket'
+    return None, None, None
 
 
 def process_move(state: dict, player_id: str, dice_result: int) -> dict:
@@ -1569,7 +1734,7 @@ def process_move(state: dict, player_id: str, dice_result: int) -> dict:
     board_data = state['board']
 
     old_pos = player['position']
-    forced_stop_position, forced_tile = _find_forced_gym_stop(player, old_pos, dice_result, board_data)
+    forced_stop_position, forced_tile, forced_stop_kind = _find_forced_special_stop(player, old_pos, dice_result, board_data)
     new_pos = forced_stop_position if forced_stop_position is not None else calculate_new_position(old_pos, dice_result, board_data)
     player['position'] = new_pos
 
@@ -1580,7 +1745,10 @@ def process_move(state: dict, player_id: str, dice_result: int) -> dict:
     state['turn']['current_tile'] = tile
 
     if forced_tile and forced_tile.get('id') == new_pos:
-        _log(state, player['name'], f"Moveu {dice_result} casa(s), mas foi obrigado a parar no ginásio {tile['name']}")
+        if forced_stop_kind == 'team_rocket':
+            _log(state, player['name'], f"Moveu {dice_result} casa(s), mas foi obrigado a parar no tile da Equipe Rocket {tile['name']}")
+        else:
+            _log(state, player['name'], f"Moveu {dice_result} casa(s), mas foi obrigado a parar no ginásio {tile['name']}")
     else:
         _log(state, player['name'], f"Moveu {dice_result} casa(s) e foi para {tile['name']}")
 
@@ -1699,11 +1867,59 @@ def _resolve_tile_effect(state: dict, player_id: str, tile: dict, effect: dict) 
     return state
 
 
+def _resolve_team_rocket_tile(state: dict, player_id: str, tile: dict) -> dict:
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    _ensure_player_pokemon_acquisition_metadata(player)
+    _log(state, player['name'], f"Caiu no tile da Equipe Rocket em {tile.get('name', 'Team Rocket')}! A Equipe Rocket vai rolar o dado.")
+
+    rocket_roll = roll_team_rocket_dice()
+    _record_roll(
+        state,
+        roll_type='Equipe Rocket',
+        player_id=player_id,
+        player_name='Equipe Rocket',
+        raw_result=rocket_roll,
+        final_result=rocket_roll,
+        context='team_rocket_tile',
+        metadata={'tile_id': tile.get('id'), 'target_player_id': player_id},
+    )
+
+    if rocket_roll <= 3:
+        stolen_pokemon = _remove_last_captured_team_pokemon(player)
+        if stolen_pokemon:
+            _log(
+                state,
+                'Equipe Rocket',
+                f"Rolou {rocket_roll} e roubou {stolen_pokemon['name']}, o último Pokémon capturado de {player['name']}.",
+            )
+        else:
+            _log(
+                state,
+                'Equipe Rocket',
+                f"Rolou {rocket_roll}, mas {player['name']} não tinha Pokémon capturado elegível para roubo. O inicial nunca pode ser roubado.",
+            )
+    else:
+        _log(
+            state,
+            'Equipe Rocket',
+            f"Rolou {rocket_roll}. {player['name']} escapou sem perder nenhum Pokémon capturado.",
+        )
+
+    state['turn']['phase'] = 'end'
+    return end_turn(state)
+
+
 def _resolve_special_tile(state: dict, player_id: str, tile: dict) -> dict:
     player = _get_player(state, player_id)
     special = tile.get('data', {}).get('special_effect', 'none')
 
-    if special == 'safari_zone':
+    if special == 'team_rocket':
+        state = _resolve_team_rocket_tile(state, player_id, tile)
+
+    elif special == 'safari_zone':
         # Pode capturar até 2 Pokémon sequencialmente
         cards = []
         for _ in range(2):
@@ -2340,6 +2556,8 @@ def _resolve_successful_capture(
         pokemon,
         capture_cost=capture_cost,
         use_full_restore=use_full_restore,
+        acquisition_origin='captured',
+        capture_context=capture_context,
     )
     if state is None:
         return None, result
@@ -4056,6 +4274,7 @@ def _try_evolve(state: dict, player_id: str, pokemon: dict, *, heal_on_evolve: b
         if slot_target is not None:
             evolved_copy = copy.deepcopy(evolved)
             evolved_copy['knocked_out'] = False if heal_on_evolve else pokemon.get('knocked_out', False)
+            _copy_pokemon_acquisition_metadata(slot_target, evolved_copy)
             if slot_key == 'starter':
                 player['starter_pokemon'] = evolved_copy
                 sync_player_inventory(player)
@@ -4074,6 +4293,7 @@ def _try_evolve(state: dict, player_id: str, pokemon: dict, *, heal_on_evolve: b
     if isinstance(starter, dict) and starter.get('id') == pokemon['id']:
         evolved_copy = copy.deepcopy(evolved)
         evolved_copy['knocked_out'] = False if heal_on_evolve else pokemon.get('knocked_out', False)
+        _copy_pokemon_acquisition_metadata(starter, evolved_copy)
         player['starter_pokemon'] = evolved_copy
         sync_player_inventory(player)
         return evolved
@@ -4083,6 +4303,7 @@ def _try_evolve(state: dict, player_id: str, pokemon: dict, *, heal_on_evolve: b
         if p['id'] == pokemon['id']:
             evolved_copy = copy.deepcopy(evolved)
             evolved_copy['knocked_out'] = False if heal_on_evolve else pokemon.get('knocked_out', False)
+            _copy_pokemon_acquisition_metadata(p, evolved_copy)
             player['pokemon'][i] = evolved_copy
             sync_player_inventory(player)
             return evolved
@@ -4370,6 +4591,11 @@ def debug_add_pokemon_to_test_player(state: dict, pokemon_name: str) -> tuple[di
     pokemon = _init_pokemon(pokemon)
     pokemon['types'] = [str(poke_type).title() for poke_type in pokemon.get('types', [])]
     pokemon['knocked_out'] = False
+    _apply_pokemon_acquisition_metadata(
+        pokemon,
+        acquisition_origin='debug',
+        capture_context='debug_add',
+    )
 
     player.setdefault('pokemon', []).append(pokemon)
     player['pokeballs'] = max(0, int(player.get('pokeballs', 0)) - pokemon_slot_cost(pokemon))

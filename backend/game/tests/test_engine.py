@@ -17,7 +17,7 @@ from game.engine.mechanics import (
 )
 from game.engine.models import PokemonCard, EventCard, ALL_BATTLE_EFFECTS
 from game.state_schema import build_initial_state, normalize_state
-from game.engine.inventory import get_starting_resource_defaults, sync_player_inventory
+from game.engine.inventory import get_starting_resource_defaults, pokemon_slot_cost, sync_player_inventory
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -35,6 +35,7 @@ def _make_player(name: str, host: bool = False, **kwargs) -> dict:
         'full_restores': 2,
         'starter_pokemon': None,
         'pokemon': [],
+        'capture_sequence_counter': 0,
         'items': {'pokeballs': 6, 'full_restores': 2},
         'badges': [],
         'master_points': 0,
@@ -433,6 +434,160 @@ class TestMovement(TestCase):
         state = _land_on_tile(state, p1_id, 8)
         p1_after = next(p for p in state['players'] if p['id'] == p1_id)
         self.assertEqual(p1_after['full_restores'], fr_before + 1)
+
+
+class TestTeamRocketTile(TestCase):
+
+    def _ready_state(self) -> tuple[dict, str, str]:
+        state, p1_id, p2_id = _init_two_player_game()
+        starters = state['turn']['available_starters']
+        state = engine.select_starter(state, p1_id, starters[0]['id'])
+        state = engine.select_starter(state, p2_id, starters[1]['id'])
+        return state, p1_id, p2_id
+
+    def _captured_pokemon(self, name: str, *, sequence: int, bp: int = 5, knocked_out: bool = False, evolves_to: int | None = None) -> dict:
+        return {
+            **_make_pokemon(name=name, bp=bp, evolves_to=evolves_to),
+            'acquisition_origin': 'captured',
+            'capture_sequence': sequence,
+            'capture_context': 'grass',
+            'knocked_out': knocked_out,
+        }
+
+    def _reward_pokemon(self, name: str, *, bp: int = 5) -> dict:
+        return {
+            **_make_pokemon(name=name, bp=bp),
+            'acquisition_origin': 'reward',
+            'capture_sequence': None,
+            'capture_context': 'victory',
+        }
+
+    def _set_team(self, state: dict, player_id: str, pokemon_list: list[dict]) -> dict:
+        player = next(p for p in state['players'] if p['id'] == player_id)
+        player['pokemon'] = copy.deepcopy(pokemon_list)
+        used_slots = sum(pokemon_slot_cost(pokemon) for pokemon in player['pokemon'])
+        used_slots += pokemon_slot_cost(player.get('starter_pokemon'))
+        player['pokeballs'] = max(0, get_starting_resource_defaults()['pokeballs'] - used_slots)
+        sync_player_inventory(player)
+        return player
+
+    def test_team_rocket_forces_stop_and_rolls_separately_from_movement(self):
+        state, p1_id, p2_id = self._ready_state()
+        player = next(p for p in state['players'] if p['id'] == p1_id)
+        player['position'] = 36
+
+        with patch('game.engine.state.roll_movement_dice', return_value=4), \
+             patch('game.engine.state.roll_team_rocket_dice', return_value=6):
+            rolled_state, roll_entry = engine.perform_movement_roll(state, p1_id)
+            new_state = engine.process_move(rolled_state, p1_id, int(roll_entry['final_result']))
+
+        player_after = next(p for p in new_state['players'] if p['id'] == p1_id)
+        self.assertEqual(player_after['position'], 38)
+        self.assertEqual(new_state['turn']['current_player_id'], p2_id)
+        recent_rolls = new_state['turn']['roll_history'][-2:]
+        self.assertEqual([entry['roll_type'] for entry in recent_rolls], ['movimento', 'Equipe Rocket'])
+        self.assertEqual(recent_rolls[1]['context'], 'team_rocket_tile')
+
+    def test_team_rocket_roll_1_steals_only_captured_pokemon_and_keeps_starter(self):
+        state, p1_id, _ = self._ready_state()
+        player = self._set_team(state, p1_id, [self._captured_pokemon('Caterpie', sequence=1, bp=2)])
+        player['position'] = 37
+        starter_name = player['starter_pokemon']['name']
+
+        with patch('game.engine.state.roll_team_rocket_dice', return_value=1):
+            state = engine.process_move(state, p1_id, 1)
+
+        player_after = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertEqual(player_after['position'], 38)
+        self.assertEqual(player_after['starter_pokemon']['name'], starter_name)
+        self.assertEqual(player_after['pokemon'], [])
+        self.assertEqual(player_after['pokeball_slots_used'], pokemon_slot_cost(player_after['starter_pokemon']))
+
+    def test_team_rocket_roll_2_steals_only_the_last_captured_pokemon(self):
+        state, p1_id, _ = self._ready_state()
+        player = self._set_team(state, p1_id, [
+            self._captured_pokemon('Pidgey', sequence=1, bp=3),
+            self._reward_pokemon('Lapras', bp=6),
+            self._captured_pokemon('Bulbasaur', sequence=2, bp=4),
+            self._captured_pokemon('Squirtle', sequence=3, bp=4),
+        ])
+        player['position'] = 37
+
+        with patch('game.engine.state.roll_team_rocket_dice', return_value=2):
+            state = engine.process_move(state, p1_id, 1)
+
+        player_after = next(p for p in state['players'] if p['id'] == p1_id)
+        remaining_names = [pokemon['name'] for pokemon in player_after['pokemon']]
+        self.assertEqual(remaining_names, ['Pidgey', 'Lapras', 'Bulbasaur'])
+        self.assertNotIn('Squirtle', remaining_names)
+        self.assertIn('Lapras', remaining_names)
+
+    def test_team_rocket_roll_3_with_only_starter_does_not_remove_anything(self):
+        state, p1_id, p2_id = self._ready_state()
+        player = next(p for p in state['players'] if p['id'] == p1_id)
+        player['position'] = 37
+        starter_name = player['starter_pokemon']['name']
+
+        with patch('game.engine.state.roll_team_rocket_dice', return_value=3):
+            state = engine.process_move(state, p1_id, 1)
+
+        player_after = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertEqual(player_after['starter_pokemon']['name'], starter_name)
+        self.assertEqual(len(player_after['pokemon']), 0)
+        self.assertEqual(state['turn']['current_player_id'], p2_id)
+        self.assertTrue(any('não tinha Pokémon capturado elegível' in entry['message'] for entry in state['log']))
+
+    def test_team_rocket_rolls_4_to_6_do_not_remove_any_pokemon(self):
+        for rocket_roll in (4, 5, 6):
+            with self.subTest(rocket_roll=rocket_roll):
+                state, p1_id, _ = self._ready_state()
+                player = self._set_team(state, p1_id, [
+                    self._captured_pokemon('Oddish', sequence=1, bp=3),
+                    self._captured_pokemon('Psyduck', sequence=2, bp=3),
+                ])
+                player['position'] = 37
+
+                with patch('game.engine.state.roll_team_rocket_dice', return_value=rocket_roll):
+                    state = engine.process_move(state, p1_id, 1)
+
+                player_after = next(p for p in state['players'] if p['id'] == p1_id)
+                self.assertEqual([pokemon['name'] for pokemon in player_after['pokemon']], ['Oddish', 'Psyduck'])
+
+    def test_team_rocket_steals_evolved_last_captured_pokemon_by_capture_sequence(self):
+        state, p1_id, _ = self._ready_state()
+        player = self._set_team(state, p1_id, [
+            self._captured_pokemon('Pidgey', sequence=1, bp=3),
+            self._captured_pokemon('Bulbasaur', sequence=2, bp=4, evolves_to=2),
+        ])
+        player['position'] = 37
+
+        evolved = engine._try_evolve(  # noqa: SLF001 - valida persistência do metadado real na engine
+            state,
+            p1_id,
+            {**player['pokemon'][1], 'battle_slot_key': 'pokemon:1'},
+        )
+        self.assertEqual(evolved['name'], 'Ivysaur')
+        self.assertEqual(player['pokemon'][1]['capture_sequence'], 2)
+
+        with patch('game.engine.state.roll_team_rocket_dice', return_value=1):
+            state = engine.process_move(state, p1_id, 1)
+
+        player_after = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertEqual([pokemon['name'] for pokemon in player_after['pokemon']], ['Pidgey'])
+
+    def test_team_rocket_can_steal_last_captured_pokemon_even_when_knocked_out(self):
+        state, p1_id, _ = self._ready_state()
+        player = self._set_team(state, p1_id, [
+            self._captured_pokemon('Geodude', sequence=1, bp=4),
+            self._captured_pokemon('Gastly', sequence=2, bp=4, knocked_out=True),
+        ])
+        player['position'] = 37
+
+        with patch('game.engine.state.roll_team_rocket_dice', return_value=1):
+            state = engine.process_move(state, p1_id, 1)
+
+        player_after = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertEqual([pokemon['name'] for pokemon in player_after['pokemon']], ['Geodude'])
 
 
 # ── Testes de Ginásio ────────────────────────────────────────────────────────
@@ -1217,6 +1372,15 @@ class TestCapture(TestCase):
         self.assertIsNotNone(new_state)
         p1 = next(p for p in new_state['players'] if p['id'] == p1_id)
         self.assertEqual(len(p1['pokemon']), 1)
+
+    def test_capture_marks_pokemon_as_captured_with_sequence(self):
+        state, p1_id = self._state_with_pending_pokemon()
+
+        new_state, _ = engine.capture_pokemon(state, p1_id)
+
+        p1 = next(p for p in new_state['players'] if p['id'] == p1_id)
+        self.assertEqual(p1['pokemon'][0]['acquisition_origin'], 'captured')
+        self.assertEqual(p1['pokemon'][0]['capture_sequence'], 1)
 
     def test_capture_adds_master_points(self):
         state, p1_id = self._state_with_pending_pokemon()

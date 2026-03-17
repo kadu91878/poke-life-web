@@ -26,7 +26,14 @@ const props = defineProps({
 })
 
 const ICONS = { start:'🏁', grass:'🌿', event:'📋', duel:'⚔️', gym:'🏆', city:'🏙️', special:'⭐', league:'👑' }
-const icon = computed(() => ICONS[props.tile.type] ?? '▪')
+const SPECIAL_ICONS = { team_rocket: '🚀' }
+const icon = computed(() => {
+  const specialEffect = props.tile?.data?.special_effect
+  if (props.tile?.type === 'special' && specialEffect && SPECIAL_ICONS[specialEffect]) {
+    return SPECIAL_ICONS[specialEffect]
+  }
+  return ICONS[props.tile.type] ?? '▪'
+})
 </script>
 
 <style scoped>

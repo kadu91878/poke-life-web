@@ -74,7 +74,7 @@
 
       <aside class="board-sidebar">
         <div class="info-card">
-          <div class="info-icon">{{ tileIcon(activeTile?.type) }}</div>
+          <div class="info-icon">{{ tileIcon(activeTile?.type, activeTile) }}</div>
           <div>
             <strong>{{ activeTile?.name ?? 'Casa sem detalhes' }}</strong>
             <p>{{ activeTile?.description ?? 'Selecione um pino ou tile para inspecionar.' }}</p>
@@ -610,7 +610,10 @@ function tileName(position) {
 
 function describeTile(tile) {
   if (!tile) return ''
-  const parts = [typeLabel(tile.type)]
+  const parts = [typeLabel(tile.type, tile)]
+  if (tile?.type === 'special' && tile?.data?.special_effect === 'team_rocket') {
+    parts.push('parada obrigatória')
+  }
   if (tile?.data?.terrain === 'water') {
     parts.push('aquática')
   }
@@ -630,6 +633,9 @@ const ICONS = {
   special: '⭐',
   league: '👑',
 }
+const SPECIAL_ICONS = {
+  team_rocket: '🚀',
+}
 
 const TYPE_LABELS = {
   start: 'Inicio',
@@ -642,11 +648,18 @@ const TYPE_LABELS = {
   league: 'Liga',
 }
 
-function tileIcon(type) {
+function tileIcon(type, tile = null) {
+  const specialEffect = tile?.data?.special_effect
+  if (type === 'special' && specialEffect && SPECIAL_ICONS[specialEffect]) {
+    return SPECIAL_ICONS[specialEffect]
+  }
   return ICONS[type] ?? '▪'
 }
 
-function typeLabel(type) {
+function typeLabel(type, tile = null) {
+  if (type === 'special' && tile?.data?.special_effect === 'team_rocket') {
+    return 'Equipe Rocket'
+  }
   return TYPE_LABELS[type] ?? type ?? ''
 }
 </script>
