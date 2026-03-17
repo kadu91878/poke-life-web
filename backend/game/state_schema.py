@@ -94,6 +94,8 @@ def _normalize_player(player: dict[str, Any], index: int) -> dict[str, Any]:
             pokemon.setdefault('knocked_out', False)
     if isinstance(normalized.get('starter_pokemon'), dict):
         normalized['starter_pokemon'].setdefault('knocked_out', False)
+    normalized.setdefault('last_pokemon_center', None)
+    normalized.setdefault('deferred_pokecenter_heal', None)
     normalized['items'] = normalize_items(normalized.get('items'), normalized.get('full_restores', starting_defaults['full_restores']))
     normalized.setdefault('badges', [])
     normalized.setdefault('master_points', 0)

@@ -160,7 +160,8 @@ def resolve_duel(
     Retorna dict com:
       challenger_roll, defender_roll — dados (após modificações pré-batalha)
       challenger_score, defender_score — scores finais
-      challenger_wins — bool (empate = derrota do desafiante)
+      challenger_wins — bool
+      is_tie — bool indicando empate de score
       challenger_battle_effect, defender_battle_effect — para pós-batalha
     """
     ch_roll = challenger_roll if challenger_roll is not None else battle_roll_fn()
@@ -225,7 +226,7 @@ def resolve_duel(
     score_ch = _score_with_effect(ch_bp, ch_roll, ch_effect)
     score_def = _score_with_effect(def_bp, def_roll, def_effect)
 
-    # Empate: derrota do desafiante
+    is_tie = score_ch == score_def
     challenger_wins = score_ch > score_def
 
     return {
@@ -234,6 +235,7 @@ def resolve_duel(
         'challenger_score': score_ch,
         'defender_score': score_def,
         'challenger_wins': challenger_wins,
+        'is_tie': is_tie,
         # Efeitos originais (para pós-batalha em state.py)
         'challenger_battle_effect': ch_effect_orig,
         'defender_battle_effect': def_effect_orig,

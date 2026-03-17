@@ -37,11 +37,11 @@
           <p class="hint">{{ choosingHint }}</p>
           <div class="pokemon-list">
             <button
-              v-for="(p, i) in myPokemon" :key="i"
+              v-for="p in myPokemon" :key="p.battle_slot_key"
               class="pokemon-btn"
-              :class="{ selected: selectedIndex === i, 'pokemon-btn--ko': p.knocked_out }"
+              :class="{ selected: selectedSlotKey === p.battle_slot_key, 'pokemon-btn--ko': p.knocked_out }"
               :disabled="p.knocked_out"
-              @click="selectedIndex = i"
+              @click="selectedSlotKey = p.battle_slot_key"
             >
               <img v-if="p.image_path" :src="p.image_path" :alt="p.name" class="pokemon-btn-img" />
               <strong>{{ p.name }}</strong>
@@ -54,7 +54,7 @@
             <input v-model="usePlusPower" type="checkbox" />
             Usar PlusPower (+2 BP nesta batalha) · x{{ pluspowerQuantity }}
           </label>
-          <button class="btn-primary" :disabled="selectedIndex === null" @click="confirmChoice">
+          <button class="btn-primary" :disabled="!selectedPokemon" @click="confirmChoice">
             Confirmar escolha
           </button>
           <div v-if="canUseGustNow" class="gust-panel">
@@ -176,7 +176,7 @@ import { ref, computed, watch } from 'vue'
 import { useGameStore } from '@/stores/gameStore'
 
 const store = useGameStore()
-const selectedIndex = ref(null)
+const selectedSlotKey = ref(null)
 const usePlusPower  = ref(false)
 const rolling       = ref(false)
 const showWinnerBanner = ref(false)
@@ -309,6 +309,9 @@ const myPokemon = computed(() => {
   }
   return pool
 })
+const selectedPokemon = computed(() =>
+  myPokemon.value.find(pokemon => pokemon.battle_slot_key === selectedSlotKey.value) ?? null
+)
 
 const canUseBattleItems = computed(() => localBattleActorId.value === store.playerId)
 const inventoryItems    = computed(() => canUseBattleItems.value ? (localBattlePlayer.value?.items ?? []) : [])
@@ -347,17 +350,17 @@ const canUseGustNow = computed(() =>
 )
 
 function confirmChoice() {
-  if (selectedIndex.value === null) return
-  if (myPokemon.value[selectedIndex.value]?.knocked_out) return
+  const chosenPokemon = selectedPokemon.value
+  if (!chosenPokemon || chosenPokemon.knocked_out) return
   if (usePlusPower.value && canUseBattleItems.value && pluspowerQuantity.value > 0) {
-    store.actions.useItem('pluspower', { pokemon_index: selectedIndex.value })
+    store.actions.useItem('pluspower', { pokemon_slot_key: chosenPokemon.battle_slot_key })
   }
   if (isDebugBattleActor.value) {
-    store.actions.debugDuelChoosePokemon(selectedIndex.value)
+    store.actions.debugDuelChoosePokemon({ pokemon_slot_key: chosenPokemon.battle_slot_key })
   } else {
-    store.actions.battleChoice(selectedIndex.value)
+    store.actions.battleChoice({ pokemon_slot_key: chosenPokemon.battle_slot_key })
   }
-  selectedIndex.value = null
+  selectedSlotKey.value = null
   usePlusPower.value  = false
 }
 
@@ -392,6 +395,16 @@ watch(() => store.lastEvent, (event) => {
     }
     showWinnerBanner.value = true
     setTimeout(() => { showWinnerBanner.value = false }, 3500)
+  }
+})
+
+watch([myPokemon, subPhase], () => {
+  if (subPhase.value !== 'choosing') {
+    selectedSlotKey.value = null
+    return
+  }
+  if (selectedSlotKey.value && !myPokemon.value.some(pokemon => pokemon.battle_slot_key === selectedSlotKey.value && !pokemon.knocked_out)) {
+    selectedSlotKey.value = null
   }
 })
 </script>

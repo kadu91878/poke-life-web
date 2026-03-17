@@ -30,11 +30,16 @@ def calculate_new_position(current_position: int, dice_roll: int, board_data: di
     return min(new_pos, total - 1)
 
 
+def get_positions_between(start_position: int, end_position: int) -> list[int]:
+    if end_position == start_position:
+        return []
+    step = 1 if end_position > start_position else -1
+    return list(range(start_position + step, end_position + step, step))
+
+
 def get_path_positions(current_position: int, dice_roll: int, board_data: dict) -> list[int]:
     final_position = calculate_new_position(current_position, dice_roll, board_data)
-    if final_position <= current_position:
-        return []
-    return list(range(current_position + 1, final_position + 1))
+    return get_positions_between(current_position, final_position)
 
 
 def get_tile_effect(tile: dict) -> dict:

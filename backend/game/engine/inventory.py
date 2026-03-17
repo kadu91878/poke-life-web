@@ -194,6 +194,11 @@ def normalize_items(items, full_restores: int = 0) -> list[dict]:
     return [item for item in normalized.values() if item['quantity'] > 0]
 
 
+def _ensure_normalized_item_list(player: dict) -> list[dict]:
+    player['items'] = normalize_items(player.get('items'), player.get('full_restores', 0))
+    return player['items']
+
+
 def pokemon_slot_cost(pokemon: dict | None) -> int:
     if not pokemon:
         return 0
@@ -207,11 +212,11 @@ def team_slot_usage(player: dict) -> int:
 
 
 def total_item_count(player: dict) -> int:
-    return sum(max(0, int(item.get('quantity', 0))) for item in player.get('items', []))
+    return sum(max(0, int(item.get('quantity', 0))) for item in _ensure_normalized_item_list(player))
 
 
 def get_item_quantity(player: dict, item_key: str) -> int:
-    for item in player.get('items', []):
+    for item in _ensure_normalized_item_list(player):
         if item.get('key') == item_key:
             return max(0, int(item.get('quantity', 0)))
     return 0
@@ -221,7 +226,7 @@ def add_item(player: dict, item_key: str, quantity: int = 1, name: str | None = 
     if quantity <= 0:
         return
 
-    for item in player.setdefault('items', []):
+    for item in _ensure_normalized_item_list(player):
         if item.get('key') == item_key:
             current_quantity = max(0, int(item.get('quantity', 0)))
             if item_key == 'full_restore':
@@ -249,7 +254,7 @@ def remove_item(player: dict, item_key: str, quantity: int = 1) -> bool:
 
     removed = False
     next_items = []
-    for item in player.get('items', []):
+    for item in _ensure_normalized_item_list(player):
         if item.get('key') != item_key:
             next_items.append(item)
             continue

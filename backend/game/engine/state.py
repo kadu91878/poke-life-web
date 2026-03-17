@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from .board import (
     load_board,
     calculate_new_position,
-    find_previous_pokemon_center_tile,
+    get_positions_between,
     get_path_positions,
     get_tile,
     get_tile_effect,
@@ -325,6 +325,36 @@ def _log_battle_result_summary(
     _log(state, log_player, winner_message)
 
 
+def _prepare_tied_battle_reroll(
+    state: dict,
+    battle: dict,
+    *,
+    log_player: str,
+    message: str,
+    result_payload: dict,
+) -> tuple[dict, dict]:
+    battle['challenger_roll'] = None
+    battle['defender_roll'] = None
+    battle['sub_phase'] = 'rolling'
+    battle['choice_stage'] = 'complete'
+    state['turn']['battle'] = battle
+    state['turn']['phase'] = 'battle'
+    _log(state, log_player, message)
+    return state, {
+        **result_payload,
+        'winner_id': None,
+        'loser_id': None,
+        'winner_name': None,
+        'loser_name': None,
+        'winner_pokemon': None,
+        'loser_pokemon': None,
+        'battle_finished': False,
+        'continues': True,
+        'reroll_required': True,
+        'tied_round': True,
+    }
+
+
 def _get_debug_test_player(state: dict) -> dict | None:
     debug_visual = state.get('debug_visual') or {}
     session = debug_visual.get('session_state')
@@ -387,6 +417,26 @@ def _build_player_battle_pool(player: dict, *, include_knocked_out: bool = True)
     return pool
 
 
+def _resolve_battle_pool_choice(
+    pool: list[dict],
+    *,
+    pokemon_index: int | None = None,
+    pokemon_slot_key: str | None = None,
+) -> tuple[dict | None, int | None]:
+    normalized_slot_key = (pokemon_slot_key or '').strip()
+    if normalized_slot_key:
+        for index, pokemon in enumerate(pool):
+            if pokemon.get('battle_slot_key') == normalized_slot_key:
+                return copy.deepcopy(pokemon), index
+        return None, None
+
+    if not pool or pokemon_index is None:
+        return None, None
+
+    resolved_index = max(0, min(int(pokemon_index), len(pool) - 1))
+    return copy.deepcopy(pool[resolved_index]), resolved_index
+
+
 def _get_player_pokemon_slot(player: dict, slot_key: str | None) -> dict | None:
     if not slot_key:
         return None
@@ -430,6 +480,370 @@ def _count_knocked_out_pokemon(player: dict) -> int:
 def _build_gym_slot_label(player: dict, slot_key: str) -> str:
     pokemon = _get_player_pokemon_slot(player, slot_key)
     return pokemon.get('name', slot_key) if pokemon else slot_key
+
+
+def _is_current_turn_player(state: dict, player_id: str) -> bool:
+    return state.get('turn', {}).get('current_player_id') == player_id
+
+
+def _is_pokemon_center_tile(tile: dict | None) -> bool:
+    if not isinstance(tile, dict):
+        return False
+    return tile.get('type') == 'city' and (tile.get('data') or {}).get('city_kind') == 'pokemon_center'
+
+
+def _is_start_tile(tile: dict | None) -> bool:
+    if not isinstance(tile, dict):
+        return False
+    if tile.get('type') == 'start':
+        return True
+    try:
+        return int(tile.get('id', -1)) == 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_safe_heal_tile(tile: dict | None) -> bool:
+    return _is_pokemon_center_tile(tile) or _is_start_tile(tile)
+
+
+def _get_pokemon_center_tile(board_data: dict, tile_id: int | None) -> dict | None:
+    if tile_id is None:
+        return None
+    try:
+        position = int(tile_id)
+    except (TypeError, ValueError):
+        return None
+    tiles = board_data.get('tiles') or []
+    if not (0 <= position < len(tiles)):
+        return None
+    tile = get_tile(board_data, position)
+    return tile if _is_pokemon_center_tile(tile) else None
+
+
+def _get_safe_heal_tile(board_data: dict, tile_id: int | None) -> dict | None:
+    if tile_id is None:
+        return None
+    try:
+        position = int(tile_id)
+    except (TypeError, ValueError):
+        return None
+    tile = get_tile(board_data, position)
+    return tile if _is_safe_heal_tile(tile) else None
+
+
+def _get_pokecenters_on_path(board_data: dict, start_position: int, end_position: int) -> list[dict]:
+    centers: list[dict] = []
+    for position in get_positions_between(int(start_position), int(end_position)):
+        tile = get_tile(board_data, position)
+        if _is_pokemon_center_tile(tile):
+            centers.append(tile)
+    return centers
+
+
+def _set_last_pokemon_center(player: dict, tile: dict, visit_kind: str) -> dict | None:
+    if not player or not _is_pokemon_center_tile(tile):
+        return None
+    record = {
+        'tile_id': int(tile.get('id', player.get('position', 0) or 0)),
+        'tile_name': tile.get('name', 'Pokemon Center'),
+        'visit_kind': visit_kind,
+    }
+    player['last_pokemon_center'] = record
+    return record
+
+
+def _clear_deferred_pokecenter_heal(player: dict) -> None:
+    if player is not None:
+        player['deferred_pokecenter_heal'] = None
+
+
+def _store_deferred_pokecenter_heal(
+    player: dict,
+    center_tile: dict,
+    *,
+    heal_limit: int,
+    source: str,
+) -> None:
+    if not player or not _is_pokemon_center_tile(center_tile) or heal_limit <= 0:
+        return
+    player['deferred_pokecenter_heal'] = {
+        'tile_id': int(center_tile.get('id', player.get('position', 0) or 0)),
+        'tile_name': center_tile.get('name', 'Pokemon Center'),
+        'heal_limit': int(heal_limit),
+        'source': source,
+    }
+
+
+def _get_last_pokemon_center_tile(state: dict, player: dict) -> dict | None:
+    last_center = player.get('last_pokemon_center') or {}
+    return _get_pokemon_center_tile(state.get('board', {}), last_center.get('tile_id'))
+
+
+def _update_pokecenter_progress(state: dict, player_id: str, start_position: int, end_position: int) -> list[dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return []
+    center_tiles = _get_pokecenters_on_path(state.get('board', {}), start_position, end_position)
+    final_position = int(end_position)
+    for center_tile in center_tiles:
+        visit_kind = 'stopped' if int(center_tile.get('id', -1)) == final_position else 'passed'
+        _set_last_pokemon_center(player, center_tile, visit_kind)
+    return center_tiles
+
+
+def _build_pokecenter_heal_prompt(center_name: str, heal_limit: int, visit_kind: str) -> str:
+    heal_text = '1 Pokémon nocauteado' if int(heal_limit) == 1 else f"até {int(heal_limit)} Pokémon nocauteados"
+    if visit_kind == 'passed':
+        return f"Você passou por {center_name}. Escolha {heal_text} para curar."
+    if visit_kind == 'returned':
+        return f"Você retornou para {center_name}. Escolha {heal_text} para curar."
+    if visit_kind == 'remained':
+        return f"Você já está em {center_name}. Escolha {heal_text} para curar."
+    return f"Você parou em {center_name}. Escolha {heal_text} para curar."
+
+
+def _queue_pokecenter_heal_action(
+    state: dict,
+    player_id: str,
+    *,
+    center_tile: dict,
+    heal_limit: int,
+    visit_kind: str,
+    healed_slots: list[str] | None = None,
+    completion: dict | None = None,
+) -> bool:
+    player = _get_player(state, player_id)
+    if not player or not _is_safe_heal_tile(center_tile) or heal_limit <= 0:
+        return False
+
+    healed_slots = list(healed_slots or [])
+    knockouts = [
+        slot_key
+        for slot_key, pokemon in _iter_player_battle_slots(player, include_knocked_out=True)
+        if pokemon.get('knocked_out')
+    ]
+    healable_slots = [slot_key for slot_key in knockouts if slot_key not in healed_slots]
+    if not healable_slots:
+        return False
+
+    options = [
+        {'id': slot_key, 'label': f"Curar {_build_gym_slot_label(player, slot_key)}", 'slot_key': slot_key}
+        for slot_key in healable_slots
+    ]
+    options.append({'id': 'finish', 'label': 'Concluir cura'})
+    tile_name = center_tile.get('name', 'Pokemon Center')
+    _set_pending_action(state, {
+        'type': 'pokecenter_heal',
+        'player_id': player_id,
+        'center_tile_id': int(center_tile.get('id', player.get('position', 0) or 0)),
+        'center_tile_name': tile_name,
+        'visit_kind': visit_kind,
+        'remaining_heals': int(heal_limit),
+        'healed_slots': healed_slots,
+        'completion': copy.deepcopy(completion) if completion else {'kind': 'resume_turn'},
+        'prompt': _build_pokecenter_heal_prompt(tile_name, int(heal_limit), visit_kind),
+        'options': options,
+        'allowed_actions': ['resolve_pending_action'],
+    })
+    state['turn']['phase'] = 'action'
+    return True
+
+
+def _complete_pokecenter_heal_action(state: dict, player_id: str, pending_action: dict) -> dict:
+    player = _get_player(state, player_id)
+    completion = copy.deepcopy(pending_action.get('completion') or {})
+    completion_kind = completion.get('kind')
+    safe_tile = _get_safe_heal_tile(state.get('board', {}), pending_action.get('center_tile_id'))
+
+    if completion_kind == 'resolve_tile_effect':
+        tile = copy.deepcopy(completion.get('tile') or {})
+        if not tile:
+            return state
+        effect = copy.deepcopy(completion.get('effect') or get_tile_effect(tile))
+        state['turn']['current_tile'] = tile
+        return _resolve_tile_effect(state, player_id, tile, effect)
+
+    if completion_kind == 'finish_pokecenter_stop':
+        center_tile = _get_pokemon_center_tile(state.get('board', {}), pending_action.get('center_tile_id'))
+        if player and completion.get('grant_full_restore', True):
+            add_item(player, 'full_restore', 1)
+            _log(
+                state,
+                player['name'],
+                f"Concluiu a parada em {pending_action.get('center_tile_name', 'Pokemon Center')} e recuperou 1 Full Restore.",
+            )
+        if center_tile:
+            state['turn']['current_tile'] = center_tile
+        if not _queue_item_choice(state, player_id, f"Parou em {pending_action.get('center_tile_name', 'Pokemon Center')}"):
+            state['turn']['phase'] = 'end'
+            state = end_turn(state)
+        return state
+
+    if completion_kind == 'end_turn':
+        if safe_tile:
+            state['turn']['current_tile'] = safe_tile
+        state['turn']['phase'] = 'end'
+        return end_turn(state)
+
+    if safe_tile:
+        state['turn']['current_tile'] = safe_tile
+    state['turn']['phase'] = 'roll'
+    return state
+
+
+def _activate_deferred_pokecenter_heal_for_current_player(state: dict) -> bool:
+    player_id = state.get('turn', {}).get('current_player_id')
+    player = _get_player(state, player_id) if player_id else None
+    if not player:
+        return False
+
+    deferred = copy.deepcopy(player.get('deferred_pokecenter_heal') or {})
+    if not deferred:
+        return False
+
+    _clear_deferred_pokecenter_heal(player)
+    center_tile = _get_pokemon_center_tile(state.get('board', {}), deferred.get('tile_id'))
+    if not center_tile:
+        return False
+
+    queued = _queue_pokecenter_heal_action(
+        state,
+        player_id,
+        center_tile=center_tile,
+        heal_limit=int(deferred.get('heal_limit', 3) or 3),
+        visit_kind='returned',
+        completion={'kind': 'resume_turn'},
+    )
+    if queued:
+        _log(
+            state,
+            player['name'],
+            f"Começou o turno em {center_tile.get('name', 'Pokemon Center')} e pode curar seus Pokémon nocauteados antes de rolar.",
+        )
+    return queued
+
+
+def _handle_pokecenter_pass_through(
+    state: dict,
+    player_id: str,
+    *,
+    start_position: int,
+    end_position: int,
+    final_tile: dict,
+    final_effect: dict,
+) -> bool:
+    player = _get_player(state, player_id)
+    if not player:
+        return False
+
+    center_tiles = _update_pokecenter_progress(state, player_id, start_position, end_position)
+    if not center_tiles or _is_pokemon_center_tile(final_tile) or not _is_current_turn_player(state, player_id):
+        return False
+
+    if _count_knocked_out_pokemon(player) <= 0:
+        return False
+
+    last_center = center_tiles[-1]
+    queued = _queue_pokecenter_heal_action(
+        state,
+        player_id,
+        center_tile=last_center,
+        heal_limit=1,
+        visit_kind='passed',
+        completion={
+            'kind': 'resolve_tile_effect',
+            'tile': copy.deepcopy(final_tile),
+            'effect': copy.deepcopy(final_effect),
+        },
+    )
+    if queued:
+        _log(
+            state,
+            player['name'],
+            f"Passou por {last_center.get('name', 'Pokemon Center')} e pode curar 1 Pokémon nocauteado antes de continuar.",
+        )
+    return queued
+
+
+def _return_player_to_last_pokecenter_or_start(state: dict, player_id: str, *, source: str) -> dict:
+    player = _get_player(state, player_id)
+    if not player:
+        return {
+            'returned_to_tile_id': 0,
+            'returned_to_tile_name': 'Pallet Town',
+            'returned_to_center': False,
+            'stayed_on_safe_tile': False,
+            'turn_ended': False,
+            'return_source': source,
+        }
+
+    board_data = state.get('board', {})
+    current_tile = get_tile(board_data, player.get('position', 0))
+    current_position = int(player.get('position', 0) or 0)
+    stayed_on_safe_tile = _is_safe_heal_tile(current_tile)
+    center_tile = None if stayed_on_safe_tile else _get_last_pokemon_center_tile(state, player)
+
+    if stayed_on_safe_tile:
+        destination_tile = current_tile or get_tile(board_data, current_position)
+    elif center_tile:
+        destination_tile = center_tile
+        player['position'] = int(center_tile.get('id', 0) or 0)
+        _set_last_pokemon_center(player, center_tile, 'returned')
+    else:
+        destination_tile = get_tile(board_data, 0)
+        player['position'] = 0
+
+    _clear_deferred_pokecenter_heal(player)
+    if stayed_on_safe_tile and _is_pokemon_center_tile(destination_tile):
+        _set_last_pokemon_center(player, destination_tile, 'stopped')
+
+    sync_player_inventory(player)
+    if _is_current_turn_player(state, player_id):
+        state['turn']['current_tile'] = destination_tile
+
+    destination_name = destination_tile.get('name', 'Pallet Town') if destination_tile else 'Pallet Town'
+    movement_label = f"permaneceu em {destination_name}" if stayed_on_safe_tile else f"voltou para {destination_name}"
+    _log(state, player['name'], f"Ficou sem Pokémon utilizáveis após {source} e {movement_label}.")
+    return {
+        'returned_to_tile_id': int(destination_tile.get('id', 0) if destination_tile else 0),
+        'returned_to_tile_name': destination_name,
+        'returned_to_center': bool(center_tile),
+        'stayed_on_safe_tile': stayed_on_safe_tile,
+        'turn_ended': False,
+        'return_source': source,
+    }
+
+
+def _handle_total_knockout_recovery(state: dict, player_id: str, *, source: str) -> tuple[dict, dict]:
+    player = _get_player(state, player_id)
+    return_data = _return_player_to_last_pokecenter_or_start(state, player_id, source=source)
+    if not player:
+        state['turn']['phase'] = 'end'
+        return end_turn(state), return_data
+
+    destination_tile = _get_safe_heal_tile(state.get('board', {}), return_data.get('returned_to_tile_id'))
+    visit_kind = 'remained' if return_data.get('stayed_on_safe_tile') else 'returned'
+    queued = False
+    if destination_tile:
+        queued = _queue_pokecenter_heal_action(
+            state,
+            player_id,
+            center_tile=destination_tile,
+            heal_limit=1,
+            visit_kind=visit_kind,
+            completion={'kind': 'end_turn'},
+        )
+
+    return_data['recovery_pending'] = queued
+    if queued:
+        place_label = 'nesse ponto seguro' if _is_start_tile(destination_tile) else destination_tile.get('name', 'Pokemon Center')
+        _log(state, player['name'], f"Pode curar 1 Pokémon nocauteado em {place_label} antes do turno passar.")
+        return state, return_data
+
+    state['turn']['phase'] = 'end'
+    return_data['turn_ended'] = True
+    return end_turn(state), return_data
 
 
 def _queue_item_choice(state: dict, player_id: str, reason: str) -> bool:
@@ -860,6 +1274,8 @@ def _build_debug_visual_player() -> tuple[dict | None, str | None]:
         'starter_slot_applied': False,
         'starter_pokemon': None,
         'pokemon': [],
+        'last_pokemon_center': None,
+        'deferred_pokecenter_heal': None,
         'items': copy.deepcopy(starting_defaults['items']),
         'badges': [],
         'master_points': 0,
@@ -1168,6 +1584,16 @@ def process_move(state: dict, player_id: str, dice_result: int) -> dict:
     else:
         _log(state, player['name'], f"Moveu {dice_result} casa(s) e foi para {tile['name']}")
 
+    if _handle_pokecenter_pass_through(
+        state,
+        player_id,
+        start_position=old_pos,
+        end_position=new_pos,
+        final_tile=tile,
+        final_effect=effect,
+    ):
+        return state
+
     # Resolve o efeito da casa automaticamente ou aguarda ação do jogador
     return _resolve_tile_effect(state, player_id, tile, effect)
 
@@ -1234,10 +1660,18 @@ def _resolve_tile_effect(state: dict, player_id: str, tile: dict, effect: dict) 
     elif tile_type == 'city':
         city_kind = tile.get('data', {}).get('city_kind')
         if city_kind == 'pokemon_center':
-            healed = _heal_player_pokemon_slots(player)
-            if healed:
-                healed_names = ', '.join(_build_gym_slot_label(player, slot_key) for slot_key in healed)
-                _log(state, player['name'], f"Curou os Pokémon fora de combate em {tile['name']}: {healed_names}")
+            _set_last_pokemon_center(player, tile, 'stopped')
+            queued = _queue_pokecenter_heal_action(
+                state,
+                player_id,
+                center_tile=tile,
+                heal_limit=3,
+                visit_kind='stopped',
+                completion={'kind': 'finish_pokecenter_stop', 'grant_full_restore': True},
+            )
+            if queued:
+                _log(state, player['name'], f"Parou em {tile['name']} e pode curar até 3 Pokémon nocauteados.")
+                return state
         # Cidade: recupera 1 Full Restore gratuitamente
         add_item(player, 'full_restore', 1)
         _log(state, player['name'], f"Chegou em {tile['name']} e recuperou 1 Full Restore")
@@ -1556,14 +1990,40 @@ def resolve_event(state: dict, player_id: str, use_run_away: bool = False) -> tu
             state.setdefault('consumed', {}).setdefault('events', []).append(card.get('id'))
             return state, 'ok'
         if effect_type == 'move_backward_trigger':
+            old_position = player['position']
             player['position'] = max(0, player['position'] - int(result.get('spaces', 3)))
             tile = get_tile(state['board'], player['position'])
             state['turn']['current_tile'] = tile
+            if _handle_pokecenter_pass_through(
+                state,
+                player_id,
+                start_position=old_position,
+                end_position=player['position'],
+                final_tile=tile,
+                final_effect=get_tile_effect(tile),
+            ):
+                state['decks']['event_discard'] = append_to_discard(state['decks']['event_discard'], card)
+                state.setdefault('consumed', {}).setdefault('events', []).append(card.get('id'))
+                state['turn']['pending_event'] = None
+                return state, 'ok'
             state = _resolve_tile_effect(state, player_id, tile, get_tile_effect(tile))
         elif effect_type == 'move_forward_trigger':
+            old_position = player['position']
             player['position'] = calculate_new_position(player['position'], int(result.get('spaces', 5)), state['board'])
             tile = get_tile(state['board'], player['position'])
             state['turn']['current_tile'] = tile
+            if _handle_pokecenter_pass_through(
+                state,
+                player_id,
+                start_position=old_position,
+                end_position=player['position'],
+                final_tile=tile,
+                final_effect=get_tile_effect(tile),
+            ):
+                state['decks']['event_discard'] = append_to_discard(state['decks']['event_discard'], card)
+                state.setdefault('consumed', {}).setdefault('events', []).append(card.get('id'))
+                state['turn']['pending_event'] = None
+                return state, 'ok'
             state = _resolve_tile_effect(state, player_id, tile, get_tile_effect(tile))
         elif result.get('category') == 'special_event' and result.get('effect') == 'gift_pokemon_from_area':
             tile = state['turn'].get('current_tile') or get_tile(state['board'], player.get('position', 0))
@@ -1598,7 +2058,8 @@ def _handle_movement_replace(state: dict, player: dict, pokemon: dict, steps: in
     if turn.get('phase') != 'roll':
         return None, 'Use esta habilidade na fase de rolagem (em vez de rolar o dado)'
     board_data = state.get('board', {})
-    new_pos = calculate_new_position(player['position'], steps, board_data)
+    old_pos = player['position']
+    new_pos = calculate_new_position(old_pos, steps, board_data)
     player['position'] = new_pos
     tile = get_tile(board_data, new_pos)
     effect = get_tile_effect(tile)
@@ -1607,6 +2068,15 @@ def _handle_movement_replace(state: dict, player: dict, pokemon: dict, steps: in
     pokemon['ability_used'] = True
     _log(state, player['name'],
          f"Usou {pokemon['ability']}! Avançou {steps} casas para {tile['name']}")
+    if _handle_pokecenter_pass_through(
+        state,
+        player['id'],
+        start_position=old_pos,
+        end_position=new_pos,
+        final_tile=tile,
+        final_effect=effect,
+    ):
+        return state, {}
     state = _resolve_tile_effect(state, player['id'], tile, effect)
     return state, {}
 
@@ -1646,7 +2116,8 @@ def _handle_water_gun(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
     if turn.get('phase') != 'action':
         return None, 'Use Water Gun após rolar o dado (fase de ação)'
     board_data = state.get('board', {})
-    new_pos = calculate_new_position(player['position'], 2, board_data)
+    old_pos = player['position']
+    new_pos = calculate_new_position(old_pos, 2, board_data)
     player['position'] = new_pos
     tile = get_tile(board_data, new_pos)
     effect = get_tile_effect(tile)
@@ -1656,6 +2127,15 @@ def _handle_water_gun(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
     turn['current_tile'] = tile
     pokemon['ability_used'] = True
     _log(state, player['name'], f"Usou Water Gun! Avançou +2 casas para {tile['name']}")
+    if _handle_pokecenter_pass_through(
+        state,
+        player['id'],
+        start_position=old_pos,
+        end_position=new_pos,
+        final_tile=tile,
+        final_effect=effect,
+    ):
+        return state, {}
     state = _resolve_tile_effect(state, player['id'], tile, effect)
     return state, {}
 
@@ -2176,7 +2656,7 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
 
     pending_action = state['turn'].get('pending_action') or {}
     pending_type = pending_action.get('type')
-    if pending_type not in ('reward_choice', 'gym_heal'):
+    if pending_type not in ('reward_choice', 'gym_heal', 'pokecenter_heal'):
         return None, 'Nenhuma escolha pendente'
     if pending_action.get('player_id') != player_id:
         return None, 'Esta escolha não pertence a você'
@@ -2188,6 +2668,52 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
 
     prompt = pending_action.get('prompt') or 'Escolha pendente'
     _log(state, player['name'], f"{prompt}: {chosen.get('label', option_id)}")
+
+    if pending_type == 'pokecenter_heal':
+        _clear_pending_action(state)
+        remaining_heals = int(pending_action.get('remaining_heals', 0) or 0)
+        healed_slots = list(pending_action.get('healed_slots') or [])
+        center_tile = _get_pokemon_center_tile(state.get('board', {}), pending_action.get('center_tile_id'))
+        visit_kind = pending_action.get('visit_kind', 'stopped')
+
+        if chosen.get('id') != 'finish':
+            slot_key = chosen.get('slot_key') or chosen.get('id')
+            healed_now = _heal_player_pokemon_slots(player, [slot_key])
+            if not healed_now:
+                return None, 'Este Pokémon não precisa de cura'
+            healed_slots.extend(healed_now)
+            remaining_heals = max(0, remaining_heals - len(healed_now))
+            healed_names = ', '.join(_build_gym_slot_label(player, healed_key) for healed_key in healed_now)
+            _log(state, player['name'], f"Curou {healed_names} no PokéCenter.")
+
+        if chosen.get('id') == 'finish' or remaining_heals <= 0 or not center_tile:
+            state = _complete_pokecenter_heal_action(state, player_id, pending_action)
+            return state, {
+                'success': True,
+                'type': 'pokecenter_heal',
+                'visit_kind': visit_kind,
+                'healed_slots': healed_slots,
+                'remaining_heals': remaining_heals,
+            }
+
+        queued = _queue_pokecenter_heal_action(
+            state,
+            player_id,
+            center_tile=center_tile,
+            heal_limit=remaining_heals,
+            visit_kind=visit_kind,
+            healed_slots=healed_slots,
+            completion=pending_action.get('completion'),
+        )
+        if not queued:
+            state = _complete_pokecenter_heal_action(state, player_id, pending_action)
+        return state, {
+            'success': True,
+            'type': 'pokecenter_heal',
+            'visit_kind': visit_kind,
+            'healed_slots': healed_slots,
+            'remaining_heals': remaining_heals,
+        }
 
     if pending_type == 'gym_heal':
         _clear_pending_action(state)
@@ -2418,7 +2944,7 @@ def _apply_deferred_gym_evolutions(state: dict, player_id: str, slot_keys: list[
         original_name = pokemon.get('name', '?')
         pokemon_for_evolution = copy.deepcopy(pokemon)
         pokemon_for_evolution['battle_slot_key'] = slot_key
-        evolved_pokemon = _try_evolve(state, player_id, pokemon_for_evolution)
+        evolved_pokemon = _try_evolve(state, player_id, pokemon_for_evolution, heal_on_evolve=True)
         if not evolved_pokemon:
             continue
         evolved.append({
@@ -2507,8 +3033,6 @@ def _finalize_gym_loss(state: dict, battle: dict, result: dict) -> tuple[dict, d
     player = _get_player(state, battle['challenger_id'])
     leader_name = battle.get('defender_name', 'Lider')
     gym_id = battle['gym_id']
-    center_tile = find_previous_pokemon_center_tile(state.get('board', {}), int(battle.get('gym_tile_id', 0) or 0))
-    returned_position = center_tile.get('id', 0) if center_tile else 0
 
     evolved = _apply_deferred_gym_evolutions(
         state,
@@ -2517,23 +3041,29 @@ def _finalize_gym_loss(state: dict, battle: dict, result: dict) -> tuple[dict, d
         leader_name,
     )
 
-    player['position'] = returned_position
-    healed_slots = _heal_player_pokemon_slots(player)
     sync_player_inventory(player)
 
     state['turn']['battle'] = None
     state['turn']['pending_action'] = None
-    state['turn']['current_tile'] = get_tile(state.get('board', {}), returned_position)
     state['turn']['phase'] = 'end'
 
-    destination_name = center_tile.get('name', 'Pallet Town') if center_tile else 'Pallet Town'
     _log(state, leader_name, f"{player['name']} perdeu o desafio do ginasio.")
-    _log(state, player['name'], f"Foi enviado de volta para {destination_name}.")
-    if healed_slots:
-        healed_names = ', '.join(_build_gym_slot_label(player, slot_key) for slot_key in healed_slots)
-        _log(state, player['name'], f"Seus Pokemon foram curados no Pokemon Center: {healed_names}")
-
-    state = end_turn(state)
+    return_data = {
+        'returned_to_tile_id': None,
+        'returned_to_tile_name': None,
+        'stayed_on_safe_tile': False,
+        'recovery_pending': False,
+        'turn_ended': False,
+    }
+    if not _build_player_battle_pool(player, include_knocked_out=False):
+        state, return_data = _handle_total_knockout_recovery(
+            state,
+            battle['challenger_id'],
+            source=f"perder o desafio do ginásio contra {leader_name}",
+        )
+    else:
+        state['turn']['current_tile'] = get_tile(state.get('board', {}), player.get('position', 0))
+        state = end_turn(state)
     return state, {
         **result,
         'mode': 'gym',
@@ -2549,8 +3079,10 @@ def _finalize_gym_loss(state: dict, battle: dict, result: dict) -> tuple[dict, d
         'gym_victory': False,
         'battle_finished': True,
         'continues': False,
-        'returned_to_tile_id': returned_position,
-        'returned_to_tile_name': destination_name,
+        'returned_to_tile_id': return_data.get('returned_to_tile_id'),
+        'returned_to_tile_name': return_data.get('returned_to_tile_name'),
+        'stayed_on_safe_tile': return_data.get('stayed_on_safe_tile', False),
+        'recovery_pending': return_data.get('recovery_pending', False),
         'evolved': evolved,
     }
 
@@ -2635,6 +3167,7 @@ def _resolve_gym_battle(state: dict) -> tuple[dict, dict]:
     defender_bonus = result.get('defender_type_bonus', 0)
     challenger_bp = challenger_choice.get('battle_points', 1)
     defender_bp = defender_choice.get('battle_points', 1)
+    battle_tied = bool(result.get('is_tie'))
 
     _log(state, 'Ginasio', f"{player['name']} escolheu {challenger_choice['name']} (BP {challenger_bp})")
     _log(state, 'Ginasio', f"{leader_name} usou {defender_choice['name']} (BP {defender_bp})")
@@ -2659,7 +3192,9 @@ def _resolve_gym_battle(state: dict) -> tuple[dict, dict]:
         defender_bonus=defender_bonus,
         challenger_score=result['challenger_score'],
         defender_score=result['defender_score'],
-        winner_message=f"{player['name'] if result['challenger_wins'] else leader_name} venceu o round.",
+        winner_message='Empate no round do ginásio. Role novamente.'
+        if battle_tied
+        else f"{player['name'] if result['challenger_wins'] else leader_name} venceu o round.",
     )
 
     current_slot = challenger_choice.get('battle_slot_key')
@@ -2675,6 +3210,21 @@ def _resolve_gym_battle(state: dict) -> tuple[dict, dict]:
         'current_leader_pokemon': defender_choice['name'],
         'player_pokemon': challenger_choice['name'],
     }
+
+    if battle_tied:
+        return _prepare_tied_battle_reroll(
+            state,
+            battle,
+            log_player='Ginasio',
+            message=f"{challenger_choice['name']} e {defender_choice['name']} empataram. O round continua com nova rolagem.",
+            result_payload={
+                **result_payload,
+                'mode': 'gym',
+                'leader_name': leader_name,
+                'challenger_name': player['name'],
+                'defender_name': leader_name,
+            },
+        )
 
     if result['challenger_wins']:
         if current_slot and can_evolve(challenger_choice) and not challenger_choice.get('is_baby', False):
@@ -2792,6 +3342,7 @@ def _start_trainer_battle(state: dict, player_id: str, trainer_context: dict, so
         'source_card_title': trainer_context.get('card_title', 'Trainer Battle'),
         'source_card_category': trainer_context.get('card_category'),
         'remaining_rounds': int((trainer_context.get('reward_plan') or {}).get('max_battles', 1) or 1),
+        'pending_evolution_slots': [],
     }
     clear_revealed_card(state)
     _log(state, player['name'], f"Iniciou batalha de treinador contra {state['turn']['battle']['defender_name']} ({source})")
@@ -2834,6 +3385,35 @@ def _apply_trainer_battle_rewards(state: dict, player_id: str, battle: dict) -> 
     return rewards
 
 
+def _apply_deferred_trainer_evolutions(state: dict, player_id: str, slot_keys: list[str], defender_name: str) -> list[dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return []
+
+    evolved: list[dict] = []
+    seen: set[str] = set()
+    for slot_key in slot_keys:
+        if slot_key in seen:
+            continue
+        seen.add(slot_key)
+        pokemon = _get_player_pokemon_slot(player, slot_key)
+        if not pokemon or not can_evolve(pokemon) or pokemon.get('is_baby', False):
+            continue
+        original_name = pokemon.get('name', '?')
+        pokemon_for_evolution = copy.deepcopy(pokemon)
+        pokemon_for_evolution['battle_slot_key'] = slot_key
+        evolved_pokemon = _try_evolve(state, player_id, pokemon_for_evolution, heal_on_evolve=True)
+        if not evolved_pokemon:
+            continue
+        evolved.append({
+            'slot_key': slot_key,
+            'from': original_name,
+            'to': evolved_pokemon['name'],
+        })
+        _log(state, player['name'], f"{original_name} evoluiu para {evolved_pokemon['name']} e foi curado automaticamente após a batalha contra {defender_name}!")
+    return evolved
+
+
 def _resolve_trainer_battle(state: dict) -> tuple[dict, dict]:
     battle = copy.deepcopy(state['turn']['battle'])
     player = _get_player(state, battle['challenger_id'])
@@ -2856,6 +3436,7 @@ def _resolve_trainer_battle(state: dict) -> tuple[dict, dict]:
     trainer_bonus = result.get('defender_type_bonus', 0)
     player_bp = player_pokemon.get('battle_points', 1)
     trainer_bp = trainer_card.get('battle_points', 1)
+    battle_tied = bool(result.get('is_tie'))
     player_wins = bool(result['challenger_wins'])
 
     _log(state, 'Duelo', f"{player['name']} escolheu {player_pokemon['name']} (BP {player_bp})")
@@ -2881,13 +3462,42 @@ def _resolve_trainer_battle(state: dict) -> tuple[dict, dict]:
         defender_bonus=trainer_bonus,
         challenger_score=result['challenger_score'],
         defender_score=result['defender_score'],
-        winner_message=f"{player['name'] if player_wins else battle['defender_name']} venceu a batalha.",
+        winner_message='Empate na batalha de treinador. Role novamente.'
+        if battle_tied
+        else f"{player['name'] if player_wins else battle['defender_name']} venceu a batalha.",
     )
 
     rewards: list[dict] = []
     continues = False
+    evolved: list[dict] = []
+    return_data = {
+        'returned_to_tile_id': None,
+        'returned_to_tile_name': None,
+        'stayed_on_safe_tile': False,
+        'recovery_pending': False,
+        'turn_ended': False,
+    }
+    current_slot = player_pokemon.get('battle_slot_key')
+
+    if battle_tied:
+        return _prepare_tied_battle_reroll(
+            state,
+            battle,
+            log_player='Duelo',
+            message=f"{player_pokemon['name']} e {trainer_card['name']} empataram. A batalha continua com nova rolagem.",
+            result_payload={
+                **result,
+                'mode': 'trainer',
+                'challenger_name': player['name'],
+                'defender_name': battle['defender_name'],
+            },
+        )
 
     if player_wins:
+        if current_slot and can_evolve(player_pokemon) and not player_pokemon.get('is_baby', False):
+            pending = battle.setdefault('pending_evolution_slots', [])
+            if current_slot not in pending:
+                pending.append(current_slot)
         rewards = _apply_trainer_battle_rewards(state, player['id'], battle)
         follow_up_battle = state['turn'].get('phase') == 'battle' and (state['turn'].get('battle') or {}).get('source') == 'victory_card'
         if battle.get('reward_plan', {}).get('repeat_battle') and int(battle.get('remaining_rounds', 1) or 1) > 1:
@@ -2903,11 +3513,23 @@ def _resolve_trainer_battle(state: dict) -> tuple[dict, dict]:
             continues = True
             _log(state, 'Duelo', f"{player['name']} venceu e pode batalhar novamente contra {battle['defender_name']}")
         elif follow_up_battle:
+            evolved = _apply_deferred_trainer_evolutions(
+                state,
+                player['id'],
+                battle.get('pending_evolution_slots') or [],
+                battle['defender_name'],
+            )
             continues = True
             _log(state, 'Duelo', f"{player['name']} venceu a batalha contra {battle['defender_name']} e iniciou uma nova batalha de recompensa")
         else:
             state['turn']['battle'] = None
             state['turn']['phase'] = 'end'
+            evolved = _apply_deferred_trainer_evolutions(
+                state,
+                player['id'],
+                battle.get('pending_evolution_slots') or [],
+                battle['defender_name'],
+            )
             reward_summary = ', '.join(
                 f"{reward['count']} carta(s) de vitória" if reward['type'] == 'victory_card'
                 else f"{reward['amount']} Master Points" if reward['type'] == 'master_points'
@@ -2919,10 +3541,28 @@ def _resolve_trainer_battle(state: dict) -> tuple[dict, dict]:
             _log(state, 'Duelo', f"{player['name']} venceu a batalha contra {battle['defender_name']}" + (f" e recebeu {reward_summary}" if reward_summary else ''))
             state = end_turn(state)
     else:
+        if current_slot:
+            knocked_out = _set_pokemon_knocked_out(player, current_slot, True)
+            if knocked_out is not None:
+                sync_player_inventory(player)
+                _log(state, player['name'], f"{player_pokemon['name']} ficou nocauteado e não pode ser usado até ser curado.")
         state['turn']['battle'] = None
         state['turn']['phase'] = 'end'
+        evolved = _apply_deferred_trainer_evolutions(
+            state,
+            player['id'],
+            battle.get('pending_evolution_slots') or [],
+            battle['defender_name'],
+        )
+        if not _build_player_battle_pool(player, include_knocked_out=False):
+            state, return_data = _handle_total_knockout_recovery(
+                state,
+                player['id'],
+                source=f"perder a batalha contra {battle['defender_name']}",
+            )
         _log(state, 'Duelo', f"{battle['defender_name']} venceu a batalha contra {player['name']}")
-        state = end_turn(state)
+        if not (return_data.get('recovery_pending') or return_data.get('turn_ended')):
+            state = end_turn(state)
 
     return state, {
         **result,
@@ -2937,6 +3577,12 @@ def _resolve_trainer_battle(state: dict) -> tuple[dict, dict]:
         'mode': 'trainer',
         'rewards': rewards,
         'continues': continues,
+        'evolved': evolved,
+        'knocked_out_pokemon': None if player_wins else player_pokemon['name'],
+        'returned_to_tile_id': return_data.get('returned_to_tile_id'),
+        'returned_to_tile_name': return_data.get('returned_to_tile_name'),
+        'stayed_on_safe_tile': return_data.get('stayed_on_safe_tile', False),
+        'recovery_pending': return_data.get('recovery_pending', False),
     }
 
 def start_duel(state: dict, challenger_id: str, defender_id: str) -> dict | None:
@@ -2975,7 +3621,12 @@ def start_duel(state: dict, challenger_id: str, defender_id: str) -> dict | None
     return state
 
 
-def register_battle_choice(state: dict, player_id: str, pokemon_index: int) -> tuple[dict, dict | None]:
+def register_battle_choice(
+    state: dict,
+    player_id: str,
+    pokemon_index: int | None = None,
+    pokemon_slot_key: str | None = None,
+) -> tuple[dict, dict | None]:
     """
     Registra a escolha de Pokémon de um jogador no duelo.
     Quando ambos escolheram, avança para sub_phase='rolling' (rolagem individual).
@@ -3018,11 +3669,24 @@ def register_battle_choice(state: dict, player_id: str, pokemon_index: int) -> t
     if not pool:
         return state, {'error': 'Você não possui Pokémon disponíveis'}
 
-    pokemon_index = max(0, min(pokemon_index, len(pool) - 1))
-    chosen = copy.deepcopy(pool[pokemon_index])
+    chosen, resolved_index = _resolve_battle_pool_choice(
+        pool,
+        pokemon_index=pokemon_index,
+        pokemon_slot_key=pokemon_slot_key,
+    )
+    if not chosen:
+        return state, {'error': 'Pokémon inválido'}
+    resolved_slot_key = chosen.get('battle_slot_key')
 
     pending_pluspower = battle.get('pluspower_pending') or {}
-    if pending_pluspower.get('player_id') == player_id and pending_pluspower.get('pokemon_index') == pokemon_index:
+    pluspower_matches = False
+    if pending_pluspower.get('player_id') == player_id:
+        pending_slot_key = (pending_pluspower.get('pokemon_slot_key') or '').strip()
+        if pending_slot_key:
+            pluspower_matches = pending_slot_key == resolved_slot_key
+        else:
+            pluspower_matches = pending_pluspower.get('pokemon_index') == resolved_index
+    if pluspower_matches:
         chosen['battle_points'] = chosen.get('battle_points', 0) + 2
         chosen['pluspower_applied'] = True
 
@@ -3177,6 +3841,8 @@ def _apply_post_battle_effects(
         if loser['pokeballs'] > 0:
             loser['pokeballs'] -= 1
             winner['pokeballs'] += 1
+            sync_player_inventory(loser)
+            sync_player_inventory(winner)
             _log(state, winner['name'],
                  f"Super Fang: {winner['name']} roubou 1 Pokébola de {loser['name']}!")
 
@@ -3193,15 +3859,19 @@ def _apply_post_battle_effects(
 
     # ── Wing Attack: vencedor avança 1 casa ─────────────────────────────────
     elif winner_effect == 'wing_attack':
-        new_pos = calculate_new_position(winner['position'], 1, board_data)
+        old_pos = winner['position']
+        new_pos = calculate_new_position(old_pos, 1, board_data)
         winner['position'] = new_pos
+        _update_pokecenter_progress(state, winner['id'], old_pos, new_pos)
         _log(state, winner['name'],
              f"Wing Attack: {winner['name']} avançou 1 casa extra (posição {new_pos})!")
 
     # ── Hyper Voice: perdedor recua 2 casas ─────────────────────────────────
     elif winner_effect == 'hyper_voice':
         if not loser_immune_pushback:
+            old_pos = loser['position']
             loser['position'] = max(0, loser['position'] - 2)
+            _update_pokecenter_progress(state, loser['id'], old_pos, loser['position'])
             _log(state, winner['name'],
                  f"Hyper Voice: {loser['name']} recuou 2 casas (posição {loser['position']})!")
         else:
@@ -3243,6 +3913,7 @@ def _resolve_duel(state: dict) -> tuple[dict, dict]:
     def_type_bonus = result.get('defender_type_bonus', 0)
     challenger_bp = ch_pokemon.get('battle_points', 1)
     defender_bp = def_pokemon.get('battle_points', 1)
+    battle_tied = bool(result.get('is_tie'))
 
     _log(state, 'Duelo', f"{challenger['name']} escolheu {ch_pokemon['name']} (BP {challenger_bp})")
     _log(state, 'Duelo', f"{defender['name']} escolheu {def_pokemon['name']} (BP {defender_bp})")
@@ -3267,13 +3938,36 @@ def _resolve_duel(state: dict) -> tuple[dict, dict]:
         defender_bonus=def_type_bonus,
         challenger_score=result['challenger_score'],
         defender_score=result['defender_score'],
-        winner_message=f"{challenger['name'] if result['challenger_wins'] else defender['name']} venceu a batalha.",
+        winner_message='Empate na batalha. Ambos devem rolar novamente.'
+        if battle_tied
+        else f"{challenger['name'] if result['challenger_wins'] else defender['name']} venceu a batalha.",
     )
+
+    if battle_tied:
+        return _prepare_tied_battle_reroll(
+            state,
+            battle,
+            log_player='Duelo',
+            message=f"{ch_pokemon['name']} e {def_pokemon['name']} empataram. A batalha continua com nova rolagem.",
+            result_payload={
+                **result,
+                'mode': 'player',
+                'challenger_name': challenger['name'],
+                'defender_name': defender['name'],
+            },
+        )
 
     winner = challenger if result['challenger_wins'] else defender
     loser = defender if result['challenger_wins'] else challenger
     winner_pokemon = ch_pokemon if result['challenger_wins'] else def_pokemon
     loser_pokemon = def_pokemon if result['challenger_wins'] else ch_pokemon
+    loser_slot = loser_pokemon.get('battle_slot_key')
+
+    if loser_slot:
+        knocked_out = _set_pokemon_knocked_out(loser, loser_slot, True)
+        if knocked_out is not None:
+            sync_player_inventory(loser)
+            _log(state, loser['name'], f"{loser_pokemon['name']} ficou nocauteado e não pode ser usado até ser curado.")
 
     winner['master_points'] += 5
     _log(state, winner['name'], f"Venceu o duelo! +5 Master Points")
@@ -3288,9 +3982,23 @@ def _resolve_duel(state: dict) -> tuple[dict, dict]:
     if can_evolve(winner_pokemon):
         is_baby = winner_pokemon.get('is_baby', False)
         if not is_baby:
-            evolved = _try_evolve(state, winner['id'], winner_pokemon)
+            evolved = _try_evolve(state, winner['id'], winner_pokemon, heal_on_evolve=True)
             if evolved:
-                _log(state, winner['name'], f"{winner_pokemon['name']} evoluiu para {evolved['name']}!")
+                _log(state, winner['name'], f"{winner_pokemon['name']} evoluiu para {evolved['name']} e foi curado automaticamente após a batalha!")
+
+    return_data = {
+        'returned_to_tile_id': None,
+        'returned_to_tile_name': None,
+        'stayed_on_safe_tile': False,
+        'recovery_pending': False,
+        'turn_ended': False,
+    }
+    if not _build_player_battle_pool(loser, include_knocked_out=False):
+        state, return_data = _handle_total_knockout_recovery(
+            state,
+            loser['id'],
+            source=f"perder o duelo contra {winner['name']}",
+        )
 
     reward_summary = 'comprou uma carta de vitória'
     _log(state, 'Duelo', f"{winner['name']} venceu a batalha e {reward_summary}")
@@ -3308,18 +4016,23 @@ def _resolve_duel(state: dict) -> tuple[dict, dict]:
         'winner_pokemon': winner_pokemon['name'],
         'loser_pokemon': loser_pokemon['name'],
         'pluspower_used': bool(winner_pokemon.get('pluspower_applied') or loser_pokemon.get('pluspower_applied')),
+        'knocked_out_pokemon': loser_pokemon['name'],
+        'returned_to_tile_id': return_data.get('returned_to_tile_id'),
+        'returned_to_tile_name': return_data.get('returned_to_tile_name'),
+        'stayed_on_safe_tile': return_data.get('stayed_on_safe_tile', False),
+        'recovery_pending': return_data.get('recovery_pending', False),
     }
 
     if battle_source == _DEBUG_SHARED_BATTLE_SOURCE:
         state = _restore_debug_shared_battle_state(state)
         return state, battle_result
 
-    if state['turn'].get('phase') != 'battle':
+    if state['turn'].get('phase') != 'battle' and not (return_data.get('recovery_pending') or return_data.get('turn_ended')):
         state = end_turn(state)
     return state, battle_result
 
 
-def _try_evolve(state: dict, player_id: str, pokemon: dict) -> dict | None:
+def _try_evolve(state: dict, player_id: str, pokemon: dict, *, heal_on_evolve: bool = False) -> dict | None:
     """Tenta evoluir um Pokémon, atualizando a coleção do jogador."""
     evolves_to_id = pokemon.get('evolves_to')
     if not evolves_to_id:
@@ -3342,9 +4055,10 @@ def _try_evolve(state: dict, player_id: str, pokemon: dict) -> dict | None:
         slot_target = _get_player_pokemon_slot(player, slot_key)
         if slot_target is not None:
             evolved_copy = copy.deepcopy(evolved)
-            evolved_copy['knocked_out'] = pokemon.get('knocked_out', False)
+            evolved_copy['knocked_out'] = False if heal_on_evolve else pokemon.get('knocked_out', False)
             if slot_key == 'starter':
                 player['starter_pokemon'] = evolved_copy
+                sync_player_inventory(player)
                 return evolved
             else:
                 try:
@@ -3353,21 +4067,24 @@ def _try_evolve(state: dict, player_id: str, pokemon: dict) -> dict | None:
                     index = None
                 if index is not None and 0 <= index < len(player.get('pokemon', [])):
                     player['pokemon'][index] = evolved_copy
+                    sync_player_inventory(player)
                     return evolved
 
     starter = player.get('starter_pokemon') if player else None
     if isinstance(starter, dict) and starter.get('id') == pokemon['id']:
         evolved_copy = copy.deepcopy(evolved)
-        evolved_copy['knocked_out'] = pokemon.get('knocked_out', False)
+        evolved_copy['knocked_out'] = False if heal_on_evolve else pokemon.get('knocked_out', False)
         player['starter_pokemon'] = evolved_copy
+        sync_player_inventory(player)
         return evolved
 
     # Verifica na coleção
     for i, p in enumerate(player['pokemon']):
         if p['id'] == pokemon['id']:
             evolved_copy = copy.deepcopy(evolved)
-            evolved_copy['knocked_out'] = pokemon.get('knocked_out', False)
+            evolved_copy['knocked_out'] = False if heal_on_evolve else pokemon.get('knocked_out', False)
             player['pokemon'][i] = evolved_copy
+            sync_player_inventory(player)
             return evolved
 
     return None
@@ -3412,6 +4129,7 @@ def use_item(
     item_key: str,
     *,
     pokemon_index: int | None = None,
+    pokemon_slot_key: str | None = None,
     target_pokemon_index: int | None = None,
 ) -> tuple[dict | None, str | dict]:
     state = copy.deepcopy(state)
@@ -3539,24 +4257,69 @@ def use_item(
             return None, 'PlusPower só pode ser usado no início de uma batalha'
         if player_id not in (battle.get('challenger_id'), battle.get('defender_id')):
             return None, 'Você não está nesta batalha'
-        if pokemon_index is None:
+        if pokemon_index is None and not (pokemon_slot_key or '').strip():
             return None, 'Escolha qual Pokémon seu receberá o bônus'
 
         choice_key = 'challenger_choice' if battle.get('challenger_id') == player_id else 'defender_choice'
         if battle.get(choice_key):
             return None, 'PlusPower só pode ser usado antes de confirmar seu Pokémon na batalha'
 
+        pool = _build_player_battle_pool(player, include_knocked_out=False)
+        chosen, resolved_index = _resolve_battle_pool_choice(
+            pool,
+            pokemon_index=pokemon_index,
+            pokemon_slot_key=pokemon_slot_key,
+        )
+        if not chosen:
+            return None, 'Pokémon inválido'
+
         remove_item(player, item_key, 1)
         battle['pluspower_pending'] = {
             'player_id': player_id,
-            'pokemon_index': int(pokemon_index),
+            'pokemon_index': int(resolved_index),
+            'pokemon_slot_key': chosen.get('battle_slot_key'),
         }
         sync_player_inventory(player)
         _log(state, player['name'], 'Usou PlusPower para preparar +2 BP na batalha')
-        return state, {'item_key': item_key, 'pokemon_index': int(pokemon_index), 'battle_bonus': 2}
+        return state, {
+            'item_key': item_key,
+            'pokemon_index': int(resolved_index),
+            'pokemon_slot_key': chosen.get('battle_slot_key'),
+            'battle_bonus': 2,
+        }
 
     if item_key == 'full_restore':
-        return None, 'No estado atual do jogo, Full Restore permanece disponível apenas no fluxo de captura já existente'
+        if turn.get('phase') == 'battle':
+            return None, 'Full Restore não pode ser usado durante batalha'
+        if turn.get('current_player_id') != player_id:
+            return None, 'Use Full Restore no seu turno'
+
+        pool = _build_player_battle_pool(player, include_knocked_out=True)
+        knocked_out_pool = [pokemon for pokemon in pool if pokemon.get('knocked_out')]
+        if not knocked_out_pool:
+            return None, 'Você não possui Pokémon nocauteados para curar'
+        if pokemon_index is None:
+            return None, 'Escolha um Pokémon nocauteado para curar'
+
+        pokemon_index = max(0, min(int(pokemon_index), len(pool) - 1))
+        chosen = pool[pokemon_index]
+        if not chosen.get('knocked_out'):
+            return None, 'Este Pokémon não está nocauteado'
+
+        if not remove_item(player, item_key, 1):
+            return None, 'Item indisponível no inventário'
+        healed_slots = _heal_player_pokemon_slots(player, [chosen.get('battle_slot_key')])
+        sync_player_inventory(player)
+        if not healed_slots:
+            return None, 'Não foi possível curar este Pokémon'
+
+        _log(state, player['name'], f"Usou Full Restore em {chosen['name']} e removeu o nocaute.")
+        return state, {
+            'item_key': item_key,
+            'pokemon': chosen['name'],
+            'healed_slots': healed_slots,
+            'cleared_knockout': True,
+        }
 
     if item_key == 'master_points_nugget':
         return None, 'Master Points Nugget permanece sem efeito implementado por falta de regra operacional explícita'
@@ -3831,7 +4594,11 @@ def debug_start_duel_with_player(state: dict, target_player_id: str) -> tuple[di
     }
 
 
-def debug_duel_choose_pokemon(state: dict, pokemon_index: int) -> tuple[dict | None, str | dict]:
+def debug_duel_choose_pokemon(
+    state: dict,
+    pokemon_index: int | None = None,
+    pokemon_slot_key: str | None = None,
+) -> tuple[dict | None, str | dict]:
     """
     Registra a escolha de Pokémon do player de teste no duelo compartilhado.
     """
@@ -3847,7 +4614,12 @@ def debug_duel_choose_pokemon(state: dict, pokemon_index: int) -> tuple[dict | N
         if shared_battle.get('sub_phase') != 'choosing':
             return None, 'Duelo não está na fase de escolha'
 
-        new_state, err = register_battle_choice(state, _DEBUG_TEST_PLAYER_ID, pokemon_index)
+        new_state, err = register_battle_choice(
+            state,
+            _DEBUG_TEST_PLAYER_ID,
+            pokemon_index,
+            pokemon_slot_key=pokemon_slot_key,
+        )
         if err and err.get('error'):
             return None, err['error']
         return new_state, err or {'success': True}
@@ -3858,7 +4630,12 @@ def debug_duel_choose_pokemon(state: dict, pokemon_index: int) -> tuple[dict | N
     if battle.get('sub_phase') != 'choosing':
         return None, 'Batalha não está na fase de escolha'
 
-    new_session, err = register_battle_choice(session, _DEBUG_TEST_PLAYER_ID, pokemon_index)
+    new_session, err = register_battle_choice(
+        session,
+        _DEBUG_TEST_PLAYER_ID,
+        pokemon_index,
+        pokemon_slot_key=pokemon_slot_key,
+    )
     if err and err.get('error'):
         return None, err['error']
 
@@ -3997,6 +4774,7 @@ def end_turn(state: dict) -> dict:
 
     current_player = _get_player(state, next_id)
     if current_player:
-        _log(state, current_player['name'], 'Turno iniciado — role o dado!')
+        if not _activate_deferred_pokecenter_heal_for_current_player(state):
+            _log(state, current_player['name'], 'Turno iniciado — role o dado!')
 
     return state

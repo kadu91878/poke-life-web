@@ -209,19 +209,21 @@ export const useGameStore = defineStore('game', () => {
     const challengerScore = result.challenger_score ?? '?'
     const defenderScore = result.defender_score ?? '?'
     const winnerName = result.winner_name ?? 'Alguém'
+    const knockedOutLabel = result.knocked_out_pokemon ? ` ${result.knocked_out_pokemon} ficou nocauteado.` : ''
+    const returnLabel = result.returned_to_tile_name ? ` Voltou para ${result.returned_to_tile_name}.` : ''
 
     if (result.mode === 'gym') {
       const outcome = result.battle_finished
         ? (result.gym_victory ? `${winnerName} venceu o ginasio!` : `${winnerName} venceu o desafio!`)
         : `${winnerName} venceu o round!`
-      return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${outcome}`
+      return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${outcome}${knockedOutLabel}${returnLabel}`
     }
 
     if (result.mode === 'trainer') {
-      return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${winnerName} venceu a batalha!`
+      return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${winnerName} venceu a batalha!${knockedOutLabel}${returnLabel}`
     }
 
-    return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${winnerName} venceu o duelo!`
+    return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${winnerName} venceu o duelo!${knockedOutLabel}${returnLabel}`
   }
 
   function _showNotification(event) {
@@ -252,9 +254,22 @@ export const useGameStore = defineStore('game', () => {
       event_resolved:      () => 'Evento resolvido!',
       ability_used:        () => 'Habilidade usada!',
       item_discarded:      () => 'Item descartado',
-      item_used:           () => 'Item usado',
+      item_used:           (e) => {
+        if (e.item_key === 'full_restore' && e.result?.pokemon) {
+          return `Full Restore curou ${e.result.pokemon}!`
+        }
+        return 'Item usado'
+      },
       pokemon_released:    () => 'Pokémon liberado para abrir espaço',
-      pending_action_resolved: () => 'Escolha resolvida',
+      pending_action_resolved: (e) => {
+        if (e.result?.type === 'pokecenter_heal') {
+          const healedCount = e.result.healed_slots?.length ?? 0
+          return healedCount > 0
+            ? `PokéCenter curou ${healedCount} Pokémon(s)!`
+            : 'PokéCenter concluído'
+        }
+        return 'Escolha resolvida'
+      },
       debug_item_added:    () => 'Item de debug adicionado',
       debug_tile_triggered: () => 'Efeito do tile executado',
       debug_test_player_toggled: (e) => e.enabled ? 'Player de teste habilitado' : 'Player de teste desabilitado',
@@ -283,7 +298,7 @@ export const useGameStore = defineStore('game', () => {
     passTurn:         ()                          => send(gameActions.passTurn),
     challengePlayer:  (targetId)                  => send(gameActions.challengePlayer, { target_player_id: targetId }),
     skipChallenge:    ()                          => send(gameActions.skipChallenge),
-    battleChoice:     (index)                     => send(gameActions.battleChoice, { pokemon_index: index }),
+    battleChoice:     (selection = 0)             => send(gameActions.battleChoice, typeof selection === 'object' && selection !== null ? selection : { pokemon_index: selection }),
     rollBattleDice:   ()                          => send(gameActions.rollBattleDice),
     removePlayer:     (targetId)                  => send(gameActions.removePlayer, { player_id: targetId }),
     leaveGame:        ()                          => send(gameActions.leaveGame),
@@ -303,7 +318,7 @@ export const useGameStore = defineStore('game', () => {
     debugResolveEventForTestPlayer: (useRunAway = false)    => send(gameActions.debugResolveEventForTestPlayer, { use_run_away: useRunAway }),
     debugSkipTestPlayerPending: ()                          => send(gameActions.debugSkipTestPlayerPending),
     debugStartDuelWithPlayer: (targetPlayerId)              => send(gameActions.debugStartDuelWithPlayer, { target_player_id: targetPlayerId }),
-    debugDuelChoosePokemon: (pokemonIndex)                  => send(gameActions.debugDuelChoosePokemon, { pokemon_index: pokemonIndex }),
+    debugDuelChoosePokemon: (selection = 0)                => send(gameActions.debugDuelChoosePokemon, typeof selection === 'object' && selection !== null ? selection : { pokemon_index: selection }),
     debugDuelRollBattle: ()                                 => send(gameActions.debugDuelRollBattle),
     debugResolvePendingActionForTestPlayer: (optionId)      => send(gameActions.debugResolvePendingActionForTestPlayer, { option_id: optionId }),
     dismissRevealedCard: ()                        => send(gameActions.dismissRevealedCard),

@@ -1,10 +1,25 @@
 <template>
   <div class="action-panel">
     <div class="phase-label">{{ phaseLabel }}</div>
-    <template v-if="isMyTurn">
+    <template v-if="canHandlePendingChoice">
+      <div class="event-card">
+        <div class="event-title">{{ pendingChoiceTitle }}</div>
+        <div class="event-description">{{ pendingAction.prompt }}</div>
+      </div>
+      <button
+        v-for="option in pendingAction.options ?? []"
+        :key="option.id"
+        class="btn-secondary duel-btn"
+        :disabled="!canResolvePendingChoice"
+        @click="store.actions.resolvePendingAction(option.id)"
+      >
+        ✨ {{ option.label }}
+      </button>
+    </template>
+    <template v-else-if="isMyTurn && !hasForeignPendingAction">
       <template v-if="isPendingChoiceAction">
         <div class="event-card">
-          <div class="event-title">{{ pendingAction?.type === 'gym_heal' ? '🏆 Cura pós-ginásio' : '🎁 Escolha pendente' }}</div>
+          <div class="event-title">{{ pendingChoiceTitle }}</div>
           <div class="event-description">{{ pendingAction.prompt }}</div>
         </div>
         <button
@@ -81,7 +96,13 @@
         </template>
         <template v-else-if="isDuelTile">
           <p class="hint">Desafie um oponente para duelar:</p>
-          <button v-for="p in otherActivePlayers" :key="p.id" class="btn-secondary duel-btn" @click="store.actions.challengePlayer(p.id)">
+          <button
+            v-for="p in otherActivePlayers"
+            :key="p.id"
+            class="btn-secondary duel-btn"
+            :disabled="!playerHasAvailablePokemon(p)"
+            @click="store.actions.challengePlayer(p.id)"
+          >
             ⚔️ Desafiar {{ p.name }}<span class="duel-stats">BP: {{ bestBP(p) }}</span>
           </button>
           <button class="btn-ghost" @click="store.actions.skipAction()">Pular Duelo</button>
@@ -150,6 +171,22 @@
           ⬆️ {{ target.name }}<span class="duel-stats">x{{ miracleStoneQuantity }}</span>
         </button>
       </template>
+      <template v-if="canUseFullRestore && fullRestoreTargets.length">
+        <div class="event-card">
+          <div class="event-title">💊 Full Restore</div>
+          <div class="event-description">
+            Escolha um Pokémon nocauteado para remover o nocaute e voltar a usá-lo normalmente.
+          </div>
+        </div>
+        <button
+          v-for="target in fullRestoreTargets"
+          :key="target.key"
+          class="btn-secondary duel-btn"
+          @click="store.actions.useItem('full_restore', { pokemon_index: target.index })"
+        >
+          ❤️ {{ target.name }}<span class="duel-stats">x{{ fullRestoreQuantity }}</span>
+        </button>
+      </template>
       <template v-if="phase === 'end'">
         <p class="hint">⏳ Processando...</p>
       </template>
@@ -158,6 +195,10 @@
       <div class="waiting-info">
         <div class="waiting-avatar" :style="{ background: currentPlayer?.color ?? '#555' }">{{ currentPlayer?.name?.[0] ?? '?' }}</div>
         <p class="waiting">Vez de <strong>{{ currentPlayer?.name }}</strong></p>
+      </div>
+      <div v-if="waitingActionTitle" class="event-card waiting-card">
+        <div class="event-title">{{ waitingActionTitle }}</div>
+        <div class="event-description">{{ waitingActionDescription }}</div>
       </div>
     </template>
     <div class="mini-log">
@@ -199,10 +240,13 @@ const pendingEvent   = computed(() => store.turn?.pending_event ?? null)
 const players        = computed(() => store.players)
 const turn           = computed(() => store.turn)
 const pendingAction = computed(() => turn.value?.pending_action ?? null)
-const isPendingChoiceAction = computed(() => ['reward_choice', 'gym_heal'].includes(pendingAction.value?.type))
+const isPendingChoiceAction = computed(() => ['reward_choice', 'gym_heal', 'pokecenter_heal'].includes(pendingAction.value?.type))
 const pendingItemChoice = computed(() => turn.value?.pending_item_choice ?? null)
 const pendingReleaseChoice = computed(() => turn.value?.pending_release_choice ?? null)
 const pendingAllowedActions = computed(() => new Set(pendingAction.value?.allowed_actions ?? []))
+const ownsPendingAction = computed(() => !!me.value && pendingAction.value?.player_id === me.value.id)
+const hasForeignPendingAction = computed(() => !!pendingAction.value && !ownsPendingAction.value)
+const canHandlePendingChoice = computed(() => isPendingChoiceAction.value && ownsPendingAction.value)
 const canResolvePendingChoice = computed(() => pendingAllowedActions.value.has(gameActions.resolvePendingAction))
 const canRollPendingCapture = computed(() => pendingAllowedActions.value.has(gameActions.rollCaptureDice))
 const canSkipPendingCapture = computed(() => pendingAllowedActions.value.has(gameActions.skipAction))
@@ -269,10 +313,11 @@ const canUseRunAway = computed(() => {
 })
 
 function bestBP(player) {
-  const pool = [...(player.pokemon ?? [])]
+  const pool = [...(player.pokemon ?? [])].filter(pokemon => !pokemon?.knocked_out)
   if (player.starter_pokemon) pool.push(player.starter_pokemon)
-  if (!pool.length) return '?'
-  return Math.max(...pool.map(p => p.battle_points ?? 0))
+  const usable = pool.filter(pokemon => !pokemon?.knocked_out)
+  if (!usable.length) return 'KO'
+  return Math.max(...usable.map(p => p.battle_points ?? 0))
 }
 
 const CAPTURE_CONTEXT_LABELS = {
@@ -325,6 +370,33 @@ const PHASE_LABELS = {
   release_pokemon:'🎾 Liberar Pokémon', gym:'🏆 Ginásio', league:'👑 Liga Pokémon', end:'⏳ Encerrando...',
 }
 const phaseLabel = computed(() => PHASE_LABELS[phase.value] ?? phase.value)
+const pendingChoiceTitle = computed(() => {
+  if (pendingAction.value?.type === 'gym_heal') return '🏆 Cura pós-ginásio'
+  if (pendingAction.value?.type === 'pokecenter_heal') {
+    if (pendingAction.value?.center_tile_name === 'Pallet Town') return '🏡 Cura em Pallet Town'
+    if (['returned', 'remained'].includes(pendingAction.value?.visit_kind)) return '🏥 Cura de Retorno'
+    return '🏥 Cura de PokéCenter'
+  }
+  return '🎁 Escolha pendente'
+})
+const waitingActionTitle = computed(() => {
+  if (!pendingAction.value || ownsPendingAction.value) return ''
+  if (pendingAction.value.type === 'pokecenter_heal') return pendingChoiceTitle.value
+  if (pendingAction.value.type === 'capture_attempt') return '🎯 Ação pendente'
+  return '⏳ Aguardando resolução'
+})
+const waitingActionDescription = computed(() => {
+  if (!pendingAction.value || ownsPendingAction.value) return ''
+  const owner = players.value.find(player => player.id === pendingAction.value?.player_id)?.name ?? 'outro jogador'
+  if (pendingAction.value.type === 'pokecenter_heal') {
+    const place = pendingAction.value.center_tile_name ?? 'o ponto seguro'
+    return `Aguardando ${owner} concluir a cura em ${place} antes do turno continuar.`
+  }
+  if (pendingAction.value.type === 'capture_attempt') {
+    return `Aguardando ${owner} resolver a captura pendente.`
+  }
+  return `Aguardando ${owner} concluir a ação pendente.`
+})
 const moveDiceItems = computed(() =>
   inventoryItems.value
     .filter(item => ['bill', 'prof_oak'].includes(item.key) && item.quantity > 0)
@@ -337,8 +409,14 @@ const moveDiceItems = computed(() =>
 const miracleStoneQuantity = computed(() =>
   inventoryItems.value.find(item => item.key === 'miracle_stone')?.quantity ?? 0
 )
+const fullRestoreQuantity = computed(() =>
+  inventoryItems.value.find(item => item.key === 'full_restore')?.quantity ?? 0
+)
 const canUseMiracleStone = computed(() =>
   ['roll', 'action'].includes(phase.value) && isMyTurn.value && miracleStoneQuantity.value > 0
+)
+const canUseFullRestore = computed(() =>
+  ['roll', 'action', 'event'].includes(phase.value) && isMyTurn.value && fullRestoreQuantity.value > 0
 )
 const miracleStoneTargets = computed(() => {
   if (!canUseMiracleStone.value || !me.value) return []
@@ -354,6 +432,29 @@ const miracleStoneTargets = computed(() => {
   }
   return targets
 })
+const fullRestoreTargets = computed(() => {
+  if (!canUseFullRestore.value || !me.value) return []
+  const targets = []
+  const team = me.value.pokemon ?? []
+  team.forEach((pokemon, index) => {
+    if (pokemon?.knocked_out) {
+      targets.push({ key: `team-${index}`, index, name: pokemon.name })
+    }
+  })
+  if (me.value.starter_pokemon?.knocked_out) {
+    targets.push({ key: 'starter', index: team.length, name: `${me.value.starter_pokemon.name} (Starter)` })
+  }
+  return targets
+})
+
+function playerHasAvailablePokemon(player) {
+  if (!player) return false
+  const team = [...(player.pokemon ?? [])].filter(pokemon => !pokemon?.knocked_out)
+  if (player.starter_pokemon && !player.starter_pokemon.knocked_out) {
+    team.push(player.starter_pokemon)
+  }
+  return team.length > 0
+}
 </script>
 
 <style scoped>
@@ -385,6 +486,7 @@ button { width:100%; }
 .waiting-avatar { width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:.8rem; color:#fff; flex-shrink:0; }
 .waiting { font-size:.82rem; color:var(--color-text-muted); }
 .waiting strong { color:var(--color-text); }
+.waiting-card { border-color: rgba(255, 224, 102, 0.24); }
 .hint { font-size:.78rem; color:var(--color-text-muted); text-align:center; }
 .battle-hint { color:var(--color-primary); }
 .item-shortcuts { display:flex; flex-direction:column; gap:.4rem; }

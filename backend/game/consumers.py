@@ -124,6 +124,8 @@ class GameConsumer(AsyncWebsocketConsumer):
             'starter_slot_applied': False,
             'starter_pokemon': None,
             'pokemon': [],
+            'last_pokemon_center': None,
+            'deferred_pokecenter_heal': None,
             'items': starting_defaults['items'],
             'badges': [],
             'master_points': 0,
@@ -330,7 +332,12 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.broadcast_state(saved_state, {'type': 'duel_started', 'challenger_id': self.player_id, 'defender_id': target_id})
 
     async def handle_battle_choice(self, data):
-        pokemon_index = int(data.get('pokemon_index', 0))
+        pokemon_slot_key = (data.get('pokemon_slot_key') or '').strip() or None
+        try:
+            raw_index = data.get('pokemon_index')
+            pokemon_index = int(raw_index) if raw_index is not None else None
+        except (TypeError, ValueError):
+            pokemon_index = 0
         state = await self.get_game_state()
 
         if state.get('turn', {}).get('phase') != 'battle':
@@ -347,7 +354,12 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.send_error('Você não está nesta batalha')
             return
 
-        new_state, result = game_state.register_battle_choice(state, self.player_id, pokemon_index)
+        new_state, result = game_state.register_battle_choice(
+            state,
+            self.player_id,
+            pokemon_index,
+            pokemon_slot_key=pokemon_slot_key,
+        )
         if result and result.get('error'):
             await self.send_error(result['error'])
             return
@@ -382,7 +394,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         saved_state = await self.save_game_state(new_state)
 
         event = {'type': 'battle_roll_registered', 'player_id': self.player_id}
-        if result and (
+        if result and not result.get('reroll_required') and (
             result.get('winner_id') is not None
             or result.get('mode') in ('trainer', 'gym')
             or result.get('battle_finished')
@@ -631,13 +643,19 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.send_error('Player de teste visual só está disponível em ambiente de desenvolvimento')
             return
 
+        pokemon_slot_key = (data.get('pokemon_slot_key') or '').strip() or None
         try:
-            pokemon_index = int(data.get('pokemon_index', 0))
+            raw_index = data.get('pokemon_index')
+            pokemon_index = int(raw_index) if raw_index is not None else None
         except (TypeError, ValueError):
             pokemon_index = 0
 
         state = await self.get_game_state()
-        new_state, result = game_state.debug_duel_choose_pokemon(state, pokemon_index)
+        new_state, result = game_state.debug_duel_choose_pokemon(
+            state,
+            pokemon_index,
+            pokemon_slot_key=pokemon_slot_key,
+        )
         if new_state is None:
             await self.send_error(result)
             return
@@ -661,7 +679,7 @@ class GameConsumer(AsyncWebsocketConsumer):
 
         saved_state = await self.save_game_state(new_state)
         event = {'type': 'battle_roll_registered', 'player_id': game_state._DEBUG_TEST_PLAYER_ID}
-        if result and (
+        if result and not result.get('reroll_required') and (
             result.get('winner_id') is not None
             or result.get('mode') in ('trainer', 'gym')
             or result.get('battle_finished')

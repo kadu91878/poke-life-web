@@ -272,7 +272,13 @@
 
               <div v-if="debugPendingAction" class="debug-pending-block">
                 <p class="debug-pending-title">
-                  {{ debugPendingAction.type === 'gym_heal' ? 'Cura pós-ginásio' : 'Escolha pendente' }}
+                  {{
+                    debugPendingAction.type === 'gym_heal'
+                      ? 'Cura pós-ginásio'
+                      : debugPendingAction.type === 'pokecenter_heal'
+                        ? 'Cura de PokéCenter'
+                        : 'Escolha pendente'
+                  }}
                 </p>
                 <p v-if="debugPendingAction.prompt" class="test-meta">{{ debugPendingAction.prompt }}</p>
                 <template v-if="debugPendingAction.options?.length">

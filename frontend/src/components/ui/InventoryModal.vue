@@ -48,7 +48,7 @@
       <section v-if="activeTab === 'pokemon'" class="tab-panel">
         <div class="section-head">
           <h3>Slots de Pokebola</h3>
-          <span>{{ pokemonInventory.length }} Pokemon · {{ usedSlots }} ocupados · {{ freeSlots }} livres</span>
+          <span>{{ pokemonInventory.length }} Pokemon · {{ usedSlots }} ocupados · {{ freeSlots }} livres<span v-if="knockedOutCount"> · {{ knockedOutCount }} nocauteado(s)</span></span>
         </div>
 
         <div class="slot-layout">
@@ -71,14 +71,25 @@
                 <div
                   v-if="group.kind === 'pokemon' && slot.offset === 0"
                   class="pokemon-slot-card"
+                  :class="{ 'pokemon-slot-card--ko': group.pokemon.knocked_out }"
                   :style="{ width: `calc(${group.pokemon.slotCost} * 48px + ${(group.pokemon.slotCost - 1) * 0.45}rem)` }"
                 >
+                  <div v-if="group.pokemon.knocked_out" class="pokemon-card-ribbon">Nocauteado</div>
                   <img
                     v-if="group.pokemon.image_path"
                     :src="group.pokemon.image_path"
                     :alt="group.pokemon.name"
                     class="pokemon-card-image"
                   />
+                  <div class="pokemon-card-overlay">
+                    <span class="pokemon-card-name">{{ group.pokemon.name }}</span>
+                    <span
+                      class="pokemon-card-state"
+                      :class="group.pokemon.knocked_out ? 'pokemon-card-state--ko' : 'pokemon-card-state--ready'"
+                    >
+                      {{ group.pokemon.knocked_out ? 'KO' : 'OK' }}
+                    </span>
+                  </div>
                   <div class="pokemon-hover-card">
                     <img
                       v-if="group.pokemon.image_path"
@@ -86,6 +97,15 @@
                       :alt="group.pokemon.name"
                       class="pokemon-hover-image"
                     />
+                    <div class="pokemon-hover-meta">
+                      <strong>{{ group.pokemon.name }}</strong>
+                      <span
+                        class="pokemon-hover-status"
+                        :class="group.pokemon.knocked_out ? 'pokemon-hover-status--ko' : 'pokemon-hover-status--ready'"
+                      >
+                        {{ group.pokemon.knocked_out ? 'Nocauteado' : 'Disponivel' }}
+                      </span>
+                    </div>
                   </div>
                 </div>
                 <img
@@ -133,7 +153,7 @@ import { computed, ref } from 'vue'
 const POKEBALL_SLOT_IMAGE = '/assets/items/pokeball-slot.png'
 
 const ITEM_DESCRIPTIONS = {
-  full_restore: 'Item presente no inventário atual.',
+  full_restore: 'Remove o nocaute de um Pokémon fora de batalha.',
   bill: 'Modificador de dado de movimento.',
   gust_of_wind: 'Item de batalha para decidir o Pokémon inimigo.',
   pluspower: 'Bônus temporário de BP em batalha.',
@@ -189,6 +209,9 @@ const freeSlots = computed(() =>
 const totalCapacity = computed(() => props.player.pokeball_capacity ?? (usedSlots.value + freeSlots.value))
 const itemCount = computed(() => props.player.item_count ?? 0)
 const itemCapacity = computed(() => props.player.item_capacity ?? 8)
+const knockedOutCount = computed(() =>
+  pokemonInventory.value.filter(pokemon => pokemon?.knocked_out).length
+)
 
 const slotGroups = computed(() => {
   const groups = []
@@ -407,6 +430,9 @@ h3 {
   transform: translate(-50%, -50%);
   z-index: 2;
 }
+.pokemon-slot-card--ko {
+  z-index: 3;
+}
 
 .pokemon-card-image {
   width: 100%;
@@ -415,6 +441,66 @@ h3 {
   border-radius: 10px;
   transition: transform 0.18s ease, box-shadow 0.18s ease;
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+}
+.pokemon-slot-card--ko .pokemon-card-image {
+  filter: grayscale(1) saturate(0.12) brightness(0.5);
+  box-shadow: 0 10px 20px rgba(126, 24, 24, 0.42);
+}
+
+.pokemon-card-ribbon {
+  position: absolute;
+  left: 50%;
+  top: -16px;
+  transform: translateX(-50%);
+  background: rgba(147, 25, 25, 0.92);
+  color: #ffe2e2;
+  border: 1px solid rgba(255, 168, 168, 0.45);
+  border-radius: 999px;
+  padding: 0.08rem 0.38rem;
+  font-size: 0.56rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  box-shadow: 0 8px 14px rgba(0, 0, 0, 0.28);
+}
+
+.pokemon-card-overlay {
+  position: absolute;
+  inset: auto 2px -12px 2px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem;
+  pointer-events: none;
+}
+
+.pokemon-card-name,
+.pokemon-card-state {
+  font-size: 0.52rem;
+  line-height: 1;
+  border-radius: 999px;
+  padding: 0.12rem 0.28rem;
+  backdrop-filter: blur(4px);
+}
+
+.pokemon-card-name {
+  max-width: calc(100% - 2rem);
+  color: #eef4ff;
+  background: rgba(6, 14, 28, 0.85);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pokemon-card-state {
+  font-weight: 800;
+  background: rgba(24, 49, 76, 0.85);
+  color: #d7eeff;
+}
+
+.pokemon-card-state--ko {
+  background: rgba(147, 25, 25, 0.9);
+  color: #ffe2e2;
 }
 
 .pokemon-hover-card {
@@ -440,6 +526,32 @@ h3 {
   height: auto;
   object-fit: contain;
   border-radius: 10px;
+}
+
+.pokemon-hover-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+  color: #eef4ff;
+}
+
+.pokemon-hover-status {
+  font-size: 0.68rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 0.16rem 0.5rem;
+}
+
+.pokemon-hover-status--ready {
+  background: rgba(40, 118, 76, 0.24);
+  color: #b8ffd4;
+}
+
+.pokemon-hover-status--ko {
+  background: rgba(147, 25, 25, 0.26);
+  color: #ffbcbc;
 }
 
 .pokemon-slot-card:hover .pokemon-card-image {

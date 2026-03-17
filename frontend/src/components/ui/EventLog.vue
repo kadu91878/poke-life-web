@@ -22,19 +22,25 @@ function formatBattleToast(event) {
   const challengerScore = result.challenger_score ?? '?'
   const defenderScore = result.defender_score ?? '?'
   const winnerName = result.winner_name ?? 'Alguém'
+  const knockedOutLabel = result.knocked_out_pokemon ? ` ${result.knocked_out_pokemon} ficou nocauteado.` : ''
+  const returnLabel = result.returned_to_tile_name
+    ? (result.stayed_on_safe_tile
+      ? ` Permaneceu em ${result.returned_to_tile_name}.`
+      : ` Voltou para ${result.returned_to_tile_name}.`)
+    : ''
 
   if (result.mode === 'gym') {
     const outcome = result.battle_finished
       ? (result.gym_victory ? `${winnerName} venceu o ginasio!` : `${winnerName} venceu o desafio!`)
       : `${winnerName} venceu o round!`
-    return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${outcome}`
+    return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${outcome}${knockedOutLabel}${returnLabel}`
   }
 
   if (result.mode === 'trainer') {
-    return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${winnerName} venceu a batalha!`
+    return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${winnerName} venceu a batalha!${knockedOutLabel}${returnLabel}`
   }
 
-  return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${winnerName} venceu o duelo!`
+  return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${winnerName} venceu o duelo!${knockedOutLabel}${returnLabel}`
 }
 
 watch(() => store.lastEvent, (event) => {
