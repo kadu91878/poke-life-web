@@ -147,6 +147,20 @@
                 <p v-if="debugMoveError" class="error-copy">{{ debugMoveError }}</p>
               </template>
 
+              <form class="debug-move-form" @submit.prevent="submitDebugPokemon">
+                <input
+                  v-model="debugPokemonName"
+                  class="debug-number-input"
+                  type="text"
+                  placeholder="Adicionar Pokemon ao player de teste"
+                />
+                <button class="focus-btn focus-btn--primary" type="submit">
+                  adicionar Pokemon
+                </button>
+              </form>
+
+              <p v-if="debugPokemonError" class="error-copy">{{ debugPokemonError }}</p>
+
               <!-- Pending: captura de Pokémon -->
               <div v-if="debugPendingPokemon" class="debug-pending-block">
                 <p class="debug-pending-title">
@@ -218,9 +232,9 @@
               <!-- Battle phase: escolha de pokémon (challenge stage) -->
               <div v-if="debugBattleIsChoosing" class="debug-pending-block">
                 <p class="debug-pending-title">
-                  Duelo — escolha seu Pokémon
+                  {{ debugBattleLabel }} — escolha seu Pokémon
                   <template v-if="debugBattle.defender_choice">
-                    (oponente já escolheu: {{ debugBattle.defender_choice.name }})
+                    (em campo: {{ debugBattle.defender_choice.name }})
                   </template>
                 </p>
                 <button
@@ -240,7 +254,7 @@
               <!-- Battle phase: rolagem de dados -->
               <div v-if="debugBattleIsRolling" class="debug-pending-block">
                 <p class="debug-pending-title">
-                  Duelo — rolar dado de batalha
+                  {{ debugBattleLabel }} — rolar dado de batalha
                 </p>
                 <p class="test-meta">
                   Você: <strong>{{ debugBattle.challenger_choice?.name }}</strong>
@@ -253,6 +267,26 @@
                 </button>
                 <button class="focus-btn" @click="store.actions.debugSkipTestPlayerPending()">
                   cancelar duelo
+                </button>
+              </div>
+
+              <div v-if="debugPendingAction" class="debug-pending-block">
+                <p class="debug-pending-title">
+                  {{ debugPendingAction.type === 'gym_heal' ? 'Cura pós-ginásio' : 'Escolha pendente' }}
+                </p>
+                <p v-if="debugPendingAction.prompt" class="test-meta">{{ debugPendingAction.prompt }}</p>
+                <template v-if="debugPendingAction.options?.length">
+                  <button
+                    v-for="option in debugPendingAction.options"
+                    :key="option.id"
+                    class="focus-btn focus-btn--primary"
+                    @click="store.actions.debugResolvePendingActionForTestPlayer(option.id)"
+                  >
+                    {{ option.label }}
+                  </button>
+                </template>
+                <button class="focus-btn" @click="store.actions.debugSkipTestPlayerPending()">
+                  pular
                 </button>
               </div>
 
@@ -361,6 +395,8 @@ const selectedTileId = ref(null)
 const showDebugOverlay = ref(true)
 const debugMoveValue = ref('1')
 const debugMoveError = ref('')
+const debugPokemonName = ref('')
+const debugPokemonError = ref('')
 const debugInventoryOpen = ref(false)
 
 const tiles = computed(() => store.gameState?.board?.tiles ?? [])
@@ -432,6 +468,8 @@ const debugSharedBattle = computed(() => {
 const debugBattle = computed(() => store.debugTurn?.battle ?? null)
 const debugBattleSubPhase = computed(() => debugBattle.value?.sub_phase ?? null)
 const debugBattleChoiceStage = computed(() => debugBattle.value?.choice_stage ?? null)
+const debugBattleMode = computed(() => debugBattle.value?.mode ?? null)
+const debugBattleLabel = computed(() => debugBattleMode.value === 'gym' ? 'Ginásio' : 'Duelo')
 const debugBattleIsChoosing = computed(() =>
   store.debugTurn?.phase === 'battle' && debugBattleSubPhase.value === 'choosing'
 )
@@ -444,13 +482,14 @@ const debugDuelPokemonPool = computed(() => {
   if (!player) return []
   const pool = [...(player.pokemon ?? [])]
   if (player.starter_pokemon) pool.push(player.starter_pokemon)
-  return pool
+  return pool.filter(pokemon => !pokemon?.knocked_out)
 })
 
 const debugHasPending = computed(() =>
   !!(
     debugPendingPokemon.value ||
     debugPendingEvent.value ||
+    debugPendingAction.value ||
     debugPendingItemChoice.value ||
     debugIsDuelPending.value ||
     debugSharedBattle.value ||
@@ -474,6 +513,8 @@ watch(() => debugTestPlayer.value?.position, position => {
 watch(debugEnabled, enabled => {
   if (!enabled) {
     debugMoveError.value = ''
+    debugPokemonError.value = ''
+    debugPokemonName.value = ''
   }
 })
 
@@ -512,6 +553,7 @@ function playerHasMappedPosition(tileId) {
 
 function toggleDebugTestPlayer(event) {
   debugMoveError.value = ''
+  debugPokemonError.value = ''
   store.actions.debugToggleTestPlayer(event.target.checked)
 }
 
@@ -536,6 +578,18 @@ function focusDebugTestPlayer() {
   if (debugTestPlayer.value) {
     selectedTileId.value = debugTestPlayer.value.position
   }
+}
+
+function submitDebugPokemon() {
+  const value = debugPokemonName.value.trim()
+  if (!value) {
+    debugPokemonError.value = 'Digite o nome de um Pokemon.'
+    return
+  }
+
+  debugPokemonError.value = ''
+  store.actions.debugAddPokemonToTestPlayer(value)
+  debugPokemonName.value = ''
 }
 
 function spaceTooltip(space) {

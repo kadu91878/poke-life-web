@@ -1,0 +1,270 @@
+{
+  "total_images_found": 33,
+  "total_unique_filenames": 33,
+  "victories": [
+    {
+      "id": 1,
+      "reference_image": "victory_1.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_1_2x/victory_1.png",
+      "title": "Victory Card",
+      "description": "You encounter a pack of wild Pokémon! Throw the dice in order to capture one of them. If the first roll is 1, roll again: 1,2 = Growlithe; 3,4 = Sunkern; 5,6 = Tyrogue. If the first roll is 6, roll again: 1,2,3 = Girafarig; 4 = Magnemite; 5,6 = M. Fossil.",
+      "category": "wild_pokemon_choice"
+    },
+    {
+      "id": 2,
+      "reference_image": "victory_2.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_1_2x/victory_2.png",
+      "title": "Victory Card",
+      "description": "Well done! You may draw three event cards from the event pile! x3",
+      "category": "draw_event_cards"
+    },
+    {
+      "id": 3,
+      "reference_image": "victory_3.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_1_2x/victory_3.png",
+      "title": "Victory Card",
+      "description": "You encounter a pack of wild Pokémon! Throw the dice in order to capture one of them. If the first roll is 3, roll again: 1,2 = Scyther; 3,4 = Krabby; 5,6 = Ekans. If the first roll is 5, roll again: 1,2,3 = Spearow; 4 = Voltorb; 5,6 = Kangaskhan.",
+      "category": "wild_pokemon_choice"
+    },
+    {
+      "id": 4,
+      "reference_image": "victory_4.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_1_2x/victory_4.png",
+      "title": "Victory Card",
+      "description": "Congratulations! You receive a Voltorb!",
+      "category": "gift_pokemon"
+    },
+    {
+      "id": 5,
+      "reference_image": "victory_5.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_1_2x/victory_5.png",
+      "title": "Victory Card",
+      "description": "You encounter a pack of wild Pokémon! Throw the dice in order to capture one of them. If the first roll is 1, roll again: 1,2 = Growlithe; 3,4 = Sunkern; 5,6 = Tyrogue. If the first roll is 6, roll again: 1,2,3 = Girafarig; 4 = Magnemite; 5,6 = M. Fossil.",
+      "category": "wild_pokemon_choice"
+    },
+    {
+      "id": 6,
+      "reference_image": "victory_6.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_1_2x/victory_6.png",
+      "title": "Victory Card",
+      "description": "Congratulations! You receive a Wooper!",
+      "category": "gift_pokemon"
+    },
+    {
+      "id": 7,
+      "reference_image": "victory_7.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_1_2x/victory_7.png",
+      "title": "Victory Card",
+      "description": "You encounter a pack of wild Pokémon! Throw the dice in order to capture one of them. If the first roll is 3, roll again: 1,2 = Scyther; 3,4 = Krabby; 5,6 = Ekans. If the first roll is 5, roll again: 1,2,3 = Spearow; 4 = Voltorb; 5,6 = Kangaskhan.",
+      "category": "wild_pokemon_choice"
+    },
+    {
+      "id": 8,
+      "reference_image": "victory_8.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_1_2x/victory_8.png",
+      "title": "Victory Card",
+      "description": "Congratulations! You receive a Wooper!",
+      "category": "gift_pokemon"
+    },
+    {
+      "id": 9,
+      "reference_image": "victory_9.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_2_5x/victory_9.png",
+      "title": "Victory Card",
+      "description": "Nice battle! You receive 10 Master Points!",
+      "category": "master_points"
+    },
+    {
+      "id": 10,
+      "reference_image": "victory_10.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_2_5x/victory_10.png",
+      "title": "Victory Card",
+      "description": "Nice battle! You receive 10 Master Points!",
+      "category": "master_points"
+    },
+    {
+      "id": 11,
+      "reference_image": "victory_11.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_2_5x/victory_11.png",
+      "title": "Victory Card",
+      "description": "Nice battle! You receive 10 Master Points!",
+      "category": "master_points"
+    },
+    {
+      "id": 12,
+      "reference_image": "victory_12.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_2_5x/victory_12.png",
+      "title": "Victory Card",
+      "description": "Nice battle! You receive 10 Master Points!",
+      "category": "master_points"
+    },
+    {
+      "id": 13,
+      "reference_image": "victory_13.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_2_5x/victory_13.png",
+      "title": "Victory Card",
+      "description": "You encounter a pack of wild Pokémon! Throw the dice in order to capture one of them. If the first roll is 2, roll again: 1,2 = Eevee; 3,4,5 = Seel; 6 = Magnemite. If the first roll is 4, roll again: 1,2 = Doduo; 3,4 = Koffing; 5,6 = Gligar.",
+      "category": "wild_pokemon_choice"
+    },
+    {
+      "id": 14,
+      "reference_image": "victory_14.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_2_5x/victory_14.png",
+      "title": "Victory Card",
+      "description": "Good battle! You receive 20 Master Points!",
+      "category": "master_points"
+    },
+    {
+      "id": 15,
+      "reference_image": "victory_15.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_2_5x/victory_15.png",
+      "title": "Victory Card",
+      "description": "Good battle! You receive 20 Master Points!",
+      "category": "master_points"
+    },
+    {
+      "id": 16,
+      "reference_image": "victory_16.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_2_5x/victory_16.png",
+      "title": "Victory Card",
+      "description": "Amazing battle! You receive 30 Master Points!",
+      "category": "master_points"
+    },
+    {
+      "id": 17,
+      "reference_image": "victory_17.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_3_1x/victory_17.png",
+      "title": "Victory Card",
+      "description": "If any other player has more Pokéballs than you, you receive a Pokéball. Otherwise, you receive a Miracle Stone. +1",
+      "category": "item_reward"
+    },
+    {
+      "id": 18,
+      "reference_image": "victory_18.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_3_1x/victory_18.png",
+      "title": "Gift Pokémon",
+      "description": "You may choose one of the above Pokémon to receive as a gift! Girafarig, Doduo, Growlithe, Magnemite, Koffing, Sunkern, M. Fossil, Gligar, Tyrogue.",
+      "category": "gift_pokemon_choice"
+    },
+    {
+      "id": 19,
+      "reference_image": "victory_19.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_3_1x/victory_19.png",
+      "title": "Gift Pokémon",
+      "description": "You may choose one of the above Pokémon to receive as a gift! Eevee, Scyther, Spearow, Seel, Krabby, Voltorb, Magnemite, Ekans, Kangaskhan.",
+      "category": "gift_pokemon_choice"
+    },
+    {
+      "id": 20,
+      "reference_image": "victory_20.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_3_1x/victory_20.png",
+      "title": "Victory Card",
+      "description": "You may draw three extra Victory Cards! x3",
+      "category": "draw_victory_cards"
+    },
+    {
+      "id": 21,
+      "reference_image": "victory_21.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_3_1x/victory_21.png",
+      "title": "Victory Card Celebi",
+      "description": "Throw the dice to capture this Pokémon! 2 You cannot rethrow the capture dice.",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 22,
+      "reference_image": "victory_22.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_3_1x/victory_22.png",
+      "title": "Victory Card Luck",
+      "description": "Jynx foresees luck in your future. Lots of it! You lucky bastard...",
+      "category": "special_reward"
+    },
+    {
+      "id": 23,
+      "reference_image": "victory_23.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_3_1x/victory_23.png",
+      "title": "Victory Card",
+      "description": "Wow! Awesome battle! You receive as many Magikarp as you want!",
+      "category": "gift_pokemon"
+    },
+    {
+      "id": 24,
+      "reference_image": "victory_24.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_3_1x/victory_24.png",
+      "title": "Victory Card",
+      "description": "Glorious battle! You receive 60 Master Points!",
+      "category": "master_points"
+    },
+    {
+      "id": 25,
+      "reference_image": "victory_25.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_4_2x/victory_25.png",
+      "title": "Victory Card",
+      "description": "If any other player has more Pokéballs than you, you receive a Pokéball. Otherwise, you receive a Miracle Stone. +1",
+      "category": "item_reward"
+    },
+    {
+      "id": 26,
+      "reference_image": "victory_26.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_4_2x/victory_26.png",
+      "title": "Victory Card",
+      "description": "You receive a Full Restore and a Gust of Wind! +1",
+      "category": "item_reward"
+    },
+    {
+      "id": 27,
+      "reference_image": "victory_27.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_4_2x/victory_27.png",
+      "title": "Victory Card",
+      "description": "You receive a PlusPower and a Defender! +1",
+      "category": "item_reward"
+    },
+    {
+      "id": 28,
+      "reference_image": "victory_28.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_4_2x/victory_28.png",
+      "title": "Victory Card",
+      "description": "You receive a Bill and a Prof. Oak! +1",
+      "category": "item_reward"
+    },
+    {
+      "id": 29,
+      "reference_image": "victory_29.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_4_2x/victory_29.png",
+      "title": "Victory Card",
+      "description": "If any other player has more Pokéballs than you, you receive a Pokéball. Otherwise, you receive a Miracle Stone. +1",
+      "category": "item_reward"
+    },
+    {
+      "id": 30,
+      "reference_image": "victory_30.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_4_2x/victory_30.png",
+      "title": "Victory Card",
+      "description": "You receive a Full Restore and a Gust of Wind! +1",
+      "category": "item_reward"
+    },
+    {
+      "id": 31,
+      "reference_image": "victory_31.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_4_2x/victory_31.png",
+      "title": "Victory Card",
+      "description": "You receive a PlusPower and a Defender! +1",
+      "category": "item_reward"
+    },
+    {
+      "id": 32,
+      "reference_image": "victory_32.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_4_2x/victory_32.png",
+      "title": "Victory Card",
+      "description": "You receive a Bill and a Prof. Oak! +1",
+      "category": "item_reward"
+    },
+    {
+      "id": 33,
+      "reference_image": "victory_33_victory_background.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Victory Pile/victory_background/victory_33_victory_background.png",
+      "title": "Victory Background",
+      "description": "Background image with victory card backs marked by fist icons.",
+      "category": "background"
+    }
+  ]
+}

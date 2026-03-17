@@ -202,6 +202,28 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
+  function formatBattleResolvedMessage(event) {
+    const result = event?.result ?? {}
+    const challengerName = result.challenger_name ?? 'Desafiante'
+    const defenderName = result.defender_name ?? 'Oponente'
+    const challengerScore = result.challenger_score ?? '?'
+    const defenderScore = result.defender_score ?? '?'
+    const winnerName = result.winner_name ?? 'Alguém'
+
+    if (result.mode === 'gym') {
+      const outcome = result.battle_finished
+        ? (result.gym_victory ? `${winnerName} venceu o ginasio!` : `${winnerName} venceu o desafio!`)
+        : `${winnerName} venceu o round!`
+      return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${outcome}`
+    }
+
+    if (result.mode === 'trainer') {
+      return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${winnerName} venceu a batalha!`
+    }
+
+    return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${winnerName} venceu o duelo!`
+  }
+
   function _showNotification(event) {
     if (!event?.type) return
 
@@ -222,10 +244,7 @@ export const useGameStore = defineStore('game', () => {
       },
       pokemon_captured:    (e) => `Capturou ${e.result?.pokemon?.name ?? 'Pokémon'}!`,
       capture_roll_resolved: (e) => e.result?.success === false ? 'Captura falhou' : 'Rolagem de captura resolvida',
-      battle_resolved:     (e) => {
-        const isWinner = e.result?.winner_id === playerId.value
-        return `Batalha resolvida! ${isWinner ? 'Você venceu!' : 'Adversário venceu.'}`
-      },
+      battle_resolved:     (e) => formatBattleResolvedMessage(e),
       battle_choice_registered: (e) => `${e.player_id === playerId.value ? 'Você escolheu' : 'Oponente escolheu'} um Pokémon!`,
       battle_roll_registered:   (e) => `${e.player_id === playerId.value ? 'Você rolou' : 'Oponente rolou'} o dado de batalha!`,
       duel_started:        () => 'Duelo iniciado!',
@@ -239,6 +258,7 @@ export const useGameStore = defineStore('game', () => {
       debug_item_added:    () => 'Item de debug adicionado',
       debug_tile_triggered: () => 'Efeito do tile executado',
       debug_test_player_toggled: (e) => e.enabled ? 'Player de teste habilitado' : 'Player de teste desabilitado',
+      debug_test_player_pokemon_added: (e) => `Player de teste recebeu ${e.result?.pokemon?.name ?? e.pokemon_name ?? 'um Pokémon'}`,
       debug_test_player_moved: (e) => `Player de teste moveu ${e.result?.steps ?? e.steps ?? 0} casa(s)`,
       debug_test_player_rolled: (e) => `Player de teste rolou ${e.result?.roll ?? '?'}`,
       debug_test_player_tile_triggered: () => 'Tile do player de teste executado',
@@ -273,6 +293,7 @@ export const useGameStore = defineStore('game', () => {
     releasePokemon:   (pokemonIndex)              => send(gameActions.releasePokemon, { pokemon_index: pokemonIndex }),
     useItem:          (itemKey, payload = {})     => send(gameActions.useItem, { item_key: itemKey, ...payload }),
     debugAddItem:     (itemKey, quantity = 1)     => send(gameActions.debugAddItem, { item_key: itemKey, quantity }),
+    debugAddPokemonToTestPlayer: (pokemonName)    => send(gameActions.debugAddPokemonToTestPlayer, { pokemon_name: pokemonName }),
     debugTriggerCurrentTile: ()                   => send(gameActions.debugTriggerCurrentTile),
     debugToggleTestPlayer: (enabled)              => send(gameActions.debugToggleTestPlayer, { enabled }),
     debugMoveTestPlayer: (steps)                  => send(gameActions.debugMoveTestPlayer, { steps }),
@@ -284,6 +305,7 @@ export const useGameStore = defineStore('game', () => {
     debugStartDuelWithPlayer: (targetPlayerId)              => send(gameActions.debugStartDuelWithPlayer, { target_player_id: targetPlayerId }),
     debugDuelChoosePokemon: (pokemonIndex)                  => send(gameActions.debugDuelChoosePokemon, { pokemon_index: pokemonIndex }),
     debugDuelRollBattle: ()                                 => send(gameActions.debugDuelRollBattle),
+    debugResolvePendingActionForTestPlayer: (optionId)      => send(gameActions.debugResolvePendingActionForTestPlayer, { option_id: optionId }),
     dismissRevealedCard: ()                        => send(gameActions.dismissRevealedCard),
     useAbility:       (abilityAction, targetId, targetPosition) =>
       send(gameActions.useAbility, { ability_action: abilityAction, target_id: targetId, target_position: targetPosition }),

@@ -2,9 +2,9 @@
   <div class="action-panel">
     <div class="phase-label">{{ phaseLabel }}</div>
     <template v-if="isMyTurn">
-      <template v-if="pendingAction?.type === 'reward_choice'">
+      <template v-if="isPendingChoiceAction">
         <div class="event-card">
-          <div class="event-title">🎁 Escolha pendente</div>
+          <div class="event-title">{{ pendingAction?.type === 'gym_heal' ? '🏆 Cura pós-ginásio' : '🎁 Escolha pendente' }}</div>
           <div class="event-description">{{ pendingAction.prompt }}</div>
         </div>
         <button
@@ -199,6 +199,7 @@ const pendingEvent   = computed(() => store.turn?.pending_event ?? null)
 const players        = computed(() => store.players)
 const turn           = computed(() => store.turn)
 const pendingAction = computed(() => turn.value?.pending_action ?? null)
+const isPendingChoiceAction = computed(() => ['reward_choice', 'gym_heal'].includes(pendingAction.value?.type))
 const pendingItemChoice = computed(() => turn.value?.pending_item_choice ?? null)
 const pendingReleaseChoice = computed(() => turn.value?.pending_release_choice ?? null)
 const pendingAllowedActions = computed(() => new Set(pendingAction.value?.allowed_actions ?? []))

@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.venv
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.claude/
+assets/
+frontend/
+db.sqlite3
+staticfiles/
+Base Game - Kanto (Latest, password golem).rar

@@ -1,0 +1,462 @@
+{
+  "total_images_found": 57,
+  "total_unique_filenames": 57,
+  "events": [
+    {
+      "id": 1,
+      "reference_image": "evento_1.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_1_2x/evento_1.png",
+      "title": "Wild Pokémon Bellsprout",
+      "description": "Throw the dice to capture this Pokémon! 4,6",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 2,
+      "reference_image": "evento_2.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_1_2x/evento_2.png",
+      "title": "Wild Pokémon Sneasel",
+      "description": "Throw the dice to capture this Pokémon! 3,6",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 3,
+      "reference_image": "evento_3.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_1_2x/evento_3.png",
+      "title": "Wild Pokémon Meowth",
+      "description": "Throw the dice to capture this Pokémon! 1,5",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 4,
+      "reference_image": "evento_4.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_1_2x/evento_4.png",
+      "title": "Wild Pokémon Abra",
+      "description": "Throw the dice to capture this Pokémon! 1/3",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 5,
+      "reference_image": "evento_5.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_1_2x/evento_5.png",
+      "title": "Wild Pokémon Mankey",
+      "description": "Throw the dice to capture this Pokémon! 4/6",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 6,
+      "reference_image": "evento_6.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_1_2x/evento_6.png",
+      "title": "Wild Pokémon Nidoran",
+      "description": "Throw the dice to capture these Pokémon! ♂ 3,4 ♀ 1,2",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 7,
+      "reference_image": "evento_7.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_1_2x/evento_7.png",
+      "title": "Wild Pokémon Slowpoke",
+      "description": "Throw the dice to capture this Pokémon! 2,4",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 8,
+      "reference_image": "evento_8.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_1_2x/evento_8.png",
+      "title": "Wild Pokémon Shellder",
+      "description": "Throw the dice to capture this Pokémon! 2,3",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 9,
+      "reference_image": "evento_9.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_2_2x/evento_9.png",
+      "title": "Wild Pokémon Swinub",
+      "description": "Throw the dice to capture this Pokémon! 2,4",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 10,
+      "reference_image": "evento_10.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_2_2x/evento_10.png",
+      "title": "Wild Pokémon Mareep",
+      "description": "Throw the dice to capture this Pokémon! 1,2",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 11,
+      "reference_image": "evento_11.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_2_2x/evento_11.png",
+      "title": "Wild Pokémon Pineco",
+      "description": "Throw the dice to capture this Pokémon! 1,3",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 12,
+      "reference_image": "evento_12.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_2_2x/evento_12.png",
+      "title": "Wild Pokémon Slugma",
+      "description": "Throw the dice to capture this Pokémon! 5,6",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 13,
+      "reference_image": "evento_13.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_2_2x/evento_13.png",
+      "title": "Wild Pokémon Wobbuffet",
+      "description": "Throw the dice to capture this Pokémon! 2,6",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 14,
+      "reference_image": "evento_14.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_2_2x/evento_14.png",
+      "title": "Wild Pokémon Delibird",
+      "description": "Throw the dice to capture this Pokémon! 4,5",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 15,
+      "reference_image": "evento_15.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_2_2x/evento_15.png",
+      "title": "Wild Pokémon Raticate",
+      "description": "Throw the dice to capture this Pokémon! 2/5",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 16,
+      "reference_image": "evento_16.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_2_2x/evento_16.png",
+      "title": "Wild Pokémon Ponyta",
+      "description": "Throw the dice to capture this Pokémon! 3,4",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 17,
+      "reference_image": "evento_17.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_3_1x/evento_17.png",
+      "title": "Wild Pokémon Raikou",
+      "description": "Throw the dice to capture this Pokémon! 1 You cannot rethrow the capture dice.",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 18,
+      "reference_image": "evento_18.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_3_1x/evento_18.png",
+      "title": "Wild Pokémon Suicune",
+      "description": "Throw the dice to capture this Pokémon! 3 You cannot rethrow the capture dice.",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 19,
+      "reference_image": "evento_19.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_3_1x/evento_19.png",
+      "title": "Wild Pokémon Entei",
+      "description": "Throw the dice to capture this Pokémon! 5 You cannot rethrow the capture dice.",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 20,
+      "reference_image": "evento_20.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_3_1x/evento_20.png",
+      "title": "Wild Pokémon Staryu",
+      "description": "Throw the dice to capture this Pokémon! 4/6",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 21,
+      "reference_image": "evento_21.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_3_1x/evento_21.png",
+      "title": "Wild Pokémon Geodude",
+      "description": "Throw the dice to capture this Pokémon! 1/5",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 22,
+      "reference_image": "evento_22.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_3_1x/evento_22.png",
+      "title": "Wild Pokémon Tentacool",
+      "description": "Throw the dice to capture this Pokémon! 1/4",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 23,
+      "reference_image": "evento_23.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_3_1x/evento_23.png",
+      "title": "Wild Pokémon Dunsparce",
+      "description": "Throw the dice to capture this Pokémon! 1,6",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 24,
+      "reference_image": "evento_24.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_3_1x/evento_24.png",
+      "title": "Wild Pokémon Venonat",
+      "description": "Throw the dice to capture this Pokémon! 3/6",
+      "category": "wild_pokemon"
+    },
+    {
+      "id": 25,
+      "reference_image": "evento_25.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_4_4x/evento_25.png",
+      "title": "Trainer Emiel",
+      "description": "Battle Emiel using one Pokémon. If you win, you may play an additional turn and you receive 10 Master Points!",
+      "category": "trainer_battle"
+    },
+    {
+      "id": 26,
+      "reference_image": "evento_26.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_4_4x/evento_26.png",
+      "title": "Trainer Lieke",
+      "description": "Battle Lieke using one Pokémon. If you win, you may draw two Victory Cards!",
+      "category": "trainer_battle"
+    },
+    {
+      "id": 27,
+      "reference_image": "evento_27.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_4_4x/evento_27.png",
+      "title": "Trainer Joris",
+      "description": "Battle Joris using one Pokémon. If you win, you may battle him again (you may use another Pokémon). You can only battle Joris four times.",
+      "category": "trainer_battle"
+    },
+    {
+      "id": 28,
+      "reference_image": "evento_28.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_4_4x/evento_28.png",
+      "title": "Trainer Annemei",
+      "description": "Battle Annemei using one Pokémon. If you win, you may recharge one ability charge of one of your Pokémon.",
+      "category": "trainer_battle"
+    },
+    {
+      "id": 29,
+      "reference_image": "evento_29.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_4_4x/evento_29.png",
+      "title": "Breeder",
+      "description": "Kanto: Receive a Pokémon from the area you are in. No legends. Johto: Receive one egg of a Pokémon from the area you are in. No legends.",
+      "category": "special_event"
+    },
+    {
+      "id": 30,
+      "reference_image": "evento_30.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_4_4x/evento_30.png",
+      "title": "Teleporter",
+      "description": "You may teleport to another player on another tile. The tile you land on will be triggered instantly.",
+      "category": "special_event"
+    },
+    {
+      "id": 31,
+      "reference_image": "evento_31.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_4_4x/evento_31.png",
+      "title": "Mr. Fuji",
+      "description": "You may give one of your Pokémon to Mr. Fuji, receiving half its value in Master Points (rounded to the nearest 10).",
+      "category": "special_event"
+    },
+    {
+      "id": 32,
+      "reference_image": "evento_32.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_4_4x/evento_32.png",
+      "title": "PokéCenter",
+      "description": "You may instantly heal as many of your Pokémon as you like.",
+      "category": "special_event"
+    },
+    {
+      "id": 33,
+      "reference_image": "evento_33.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_5_2x/evento_33.png",
+      "title": "Trainer Johnny",
+      "description": "Battle Johnny using one Pokémon. If you win, you may draw a Victory Card.",
+      "category": "trainer_battle"
+    },
+    {
+      "id": 34,
+      "reference_image": "evento_34.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_5_2x/evento_34.png",
+      "title": "Trainer Amanda",
+      "description": "Battle Amanda using one Pokémon. If you win, you may draw a Victory Card.",
+      "category": "trainer_battle"
+    },
+    {
+      "id": 35,
+      "reference_image": "evento_35.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_5_2x/evento_35.png",
+      "title": "Trainer Nigel",
+      "description": "Battle Nigel using one Pokémon. If you win, you may draw a Victory Card.",
+      "category": "trainer_battle"
+    },
+    {
+      "id": 36,
+      "reference_image": "evento_36.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_5_2x/evento_36.png",
+      "title": "Trainer Bob",
+      "description": "Battle Bob using one Pokémon. If you win, you may draw a Victory Card.",
+      "category": "trainer_battle"
+    },
+    {
+      "id": 37,
+      "reference_image": "evento_37.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_5_2x/evento_37.png",
+      "title": "Trainer Jack",
+      "description": "Battle Jack using one Pokémon. If you win, you may draw a Victory Card.",
+      "category": "trainer_battle"
+    },
+    {
+      "id": 38,
+      "reference_image": "evento_38.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_5_2x/evento_38.png",
+      "title": "Trainer Joffrey",
+      "description": "Battle Joffrey using one Pokémon. If you win, you may draw a Victory Card.",
+      "category": "trainer_battle"
+    },
+    {
+      "id": 39,
+      "reference_image": "evento_39.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_5_2x/evento_39.png",
+      "title": "Trainer May",
+      "description": "Battle May using one Pokémon. If you win, you may draw a Victory Card and you receive 10 Master Points.",
+      "category": "trainer_battle"
+    },
+    {
+      "id": 40,
+      "reference_image": "evento_40.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_5_2x/evento_40.png",
+      "title": "Trainer Ash",
+      "description": "Battle Ash using one Pokémon. If you win, you may draw a Victory Card and you receive 20 Master Points.",
+      "category": "trainer_battle"
+    },
+    {
+      "id": 41,
+      "reference_image": "evento_41.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_6_2x/evento_41.png",
+      "title": "Event Lass",
+      "description": "Every player has to throw away an item.",
+      "category": "event"
+    },
+    {
+      "id": 42,
+      "reference_image": "evento_42.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_6_2x/evento_42.png",
+      "title": "Event",
+      "description": "An angry Voltorb paralyzes you for one turn. You have to skip your next turn.",
+      "category": "event"
+    },
+    {
+      "id": 43,
+      "reference_image": "evento_43.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_6_2x/evento_43.png",
+      "title": "Beedrill Attack!",
+      "description": "Run three tiles back! The tile you land on will be triggered instantly.",
+      "category": "event"
+    },
+    {
+      "id": 44,
+      "reference_image": "evento_44.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_6_2x/evento_44.png",
+      "title": "PokéMarket",
+      "description": "Throw the dice in order to receive any of these items! 2 = Pokéball, 3 = Bill, 4 = PlusPower, 5 = Master Points Nugget.",
+      "category": "market"
+    },
+    {
+      "id": 45,
+      "reference_image": "evento_45.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_6_2x/evento_45.png",
+      "title": "Event",
+      "description": "Oh no! Two wild Magnemite attack you with discharge! One of your Pokémon loses a charge!",
+      "category": "event"
+    },
+    {
+      "id": 46,
+      "reference_image": "evento_46.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_6_2x/evento_46.png",
+      "title": "Event Suffocation",
+      "description": "A wild Weezing releases smog, knocking out 2 of your Pokémon.",
+      "category": "event"
+    },
+    {
+      "id": 47,
+      "reference_image": "evento_47.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_6_2x/evento_47.png",
+      "title": "Oak's Assistant",
+      "description": "Prof. Oak strives for equality. The player(s) with the lowest amount of Pokéballs can buy a Pokéball from Oak's assistant at the cost of one item. If every player has the same amount of Pokéballs, nobody can buy one. Pokéballs received for free at a Dept. Store do not count as Pokéballs when determining the amount of Pokéballs you have.",
+      "category": "special_event"
+    },
+    {
+      "id": 48,
+      "reference_image": "evento_48.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_6_2x/evento_48.png",
+      "title": "PokéMarket",
+      "description": "Throw the dice in order to receive any of these items! 1,2 = wind item icon, 3 = Defender, 4 = Miracle Stone, 5,6 = boy icon item.",
+      "category": "market"
+    },
+    {
+      "id": 49,
+      "reference_image": "evento_49.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_7_3x/evento_49.png",
+      "title": "PokéMarket",
+      "description": "Throw the dice in order to receive any of these items! 1,2 = PlusPower, 3 = Pokéball, 4 = Miracle Stone, 5,6 = Defender.",
+      "category": "market"
+    },
+    {
+      "id": 50,
+      "reference_image": "evento_50.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_7_3x/evento_50.png",
+      "title": "Oak's Assistant",
+      "description": "Prof. Oak strives for equality. The player(s) with the lowest amount of Pokéballs can buy a Pokéball from Oak's assistant at the cost of one item. If every player has the same amount of Pokéballs, nobody can buy one. Pokéballs received for free at a Dept. Store do not count as Pokéballs when determining the amount of Pokéballs you have.",
+      "category": "special_event"
+    },
+    {
+      "id": 51,
+      "reference_image": "evento_51.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_7_3x/evento_51.png",
+      "title": "Beedrill Attack!",
+      "description": "Run three tiles back!",
+      "category": "event"
+    },
+    {
+      "id": 52,
+      "reference_image": "evento_52.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_7_3x/evento_52.png",
+      "title": "PokéMarket",
+      "description": "Throw the dice in order to receive any of these items! 2 = Pokéball, 3 = Bill, 4 = PlusPower, 5 = Master Points Nugget.",
+      "category": "market"
+    },
+    {
+      "id": 53,
+      "reference_image": "evento_53.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_7_3x/evento_53.png",
+      "title": "PokéMarket",
+      "description": "Throw the dice in order to receive any of these items! 1,2 = wind item icon, 3 = Defender, 4 = Miracle Stone, 5,6 = boy icon item.",
+      "category": "market"
+    },
+    {
+      "id": 54,
+      "reference_image": "evento_54.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_7_3x/evento_54.png",
+      "title": "Team Rocket!",
+      "description": "Oh no! If you throw 1 to 3, Team Rocket will steal two of your items!",
+      "category": "team_rocket"
+    },
+    {
+      "id": 55,
+      "reference_image": "evento_55.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_7_3x/evento_55.png",
+      "title": "Team Rocket!",
+      "description": "Oh no! If you throw 1 to 3, Team Rocket will steal 20 of your Master Points!",
+      "category": "team_rocket"
+    },
+    {
+      "id": 56,
+      "reference_image": "evento_56.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_7_3x/evento_56.png",
+      "title": "Team Rocket!",
+      "description": "Oh no! Team Rocket! Run five tiles forward to escape from them!",
+      "category": "team_rocket"
+    },
+    {
+      "id": 57,
+      "reference_image": "evento_57_events_background.png",
+      "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_background/evento_57_events_background.png",
+      "title": "Event Background",
+      "description": "Background image with event card backs marked by question symbols.",
+      "category": "background"
+    }
+  ]
+}

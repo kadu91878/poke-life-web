@@ -20,3 +20,22 @@ rad.json
 *.flf
 #Test results file
 TestResults.xml
+
+# Local Python/Node artifacts
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Frontend local tooling
+frontend/node_modules/
+frontend/.vite/
+frontend/dist/
+
+# Backend local-only files
+backend/.git/
+backend/.venv/
+backend/.env
+backend/db.sqlite3
+backend/.claude/
+backend/**/__pycache__/

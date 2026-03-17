@@ -1,0 +1,3463 @@
+{
+  "name": "Kanto",
+  "tiles": [
+    {
+      "id": 0,
+      "type": "start",
+      "name": "Pallet Town",
+      "description": "Cidade natal dos treinadores. Inicio da jornada!",
+      "data": {}
+    },
+    {
+      "id": 1,
+      "type": "duel",
+      "name": "Pallet Town / Route 1",
+      "description": "Espaco de Pallet Town / Route 1.",
+      "data": {}
+    },
+    {
+      "id": 2,
+      "type": "grass",
+      "name": "Pallet Town / Route 1",
+      "description": "Area de captura em Pallet Town / Route 1 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1
+            ],
+            "pokemon_name": "Tangela"
+          },
+          {
+            "roll": [
+              2,
+              3
+            ],
+            "pokemon_name": "Rattata",
+            "pokemon_id": 19
+          },
+          {
+            "roll": [
+              4,
+              5
+            ],
+            "pokemon_name": "Pidgey",
+            "pokemon_id": 16
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Mr. Mime"
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "type": "duel",
+      "name": "Pallet Town / Route 1",
+      "description": "Espaco de Pallet Town / Route 1.",
+      "data": {}
+    },
+    {
+      "id": 4,
+      "type": "grass",
+      "name": "Pallet Town / Route 1",
+      "description": "Area de captura em Pallet Town / Route 1 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1
+            ],
+            "pokemon_name": "Tangela"
+          },
+          {
+            "roll": [
+              2,
+              3
+            ],
+            "pokemon_name": "Rattata",
+            "pokemon_id": 19
+          },
+          {
+            "roll": [
+              4,
+              5
+            ],
+            "pokemon_name": "Pidgey",
+            "pokemon_id": 16
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Mr. Mime"
+          }
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "type": "grass",
+      "name": "Pallet Town / Route 1",
+      "description": "Area de captura em Pallet Town / Route 1 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1
+            ],
+            "pokemon_name": "Tangela"
+          },
+          {
+            "roll": [
+              2,
+              3
+            ],
+            "pokemon_name": "Rattata",
+            "pokemon_id": 19
+          },
+          {
+            "roll": [
+              4,
+              5
+            ],
+            "pokemon_name": "Pidgey",
+            "pokemon_id": 16
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Mr. Mime"
+          }
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "type": "duel",
+      "name": "Pallet Town / Route 1",
+      "description": "Espaco de Pallet Town / Route 1.",
+      "data": {}
+    },
+    {
+      "id": 7,
+      "type": "event",
+      "name": "Viridian City / Route 1",
+      "description": "Espaco de Viridian City / Route 1.",
+      "data": {}
+    },
+    {
+      "id": 8,
+      "type": "city",
+      "name": "Viridian City / Route 1 - Pokemon Center",
+      "description": "Pokemon Center em Viridian City / Route 1.",
+      "data": {
+        "city_kind": "pokemon_center"
+      }
+    },
+    {
+      "id": 9,
+      "type": "grass",
+      "name": "Viridian City / Route 1",
+      "description": "Area de captura em Viridian City / Route 1 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Rattata",
+            "pokemon_id": 19
+          },
+          {
+            "roll": [
+              3,
+              4,
+              5,
+              6
+            ],
+            "pokemon_name": "Grimer"
+          }
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "type": "grass",
+      "name": "Viridian City / Route 1",
+      "description": "Area de captura em Viridian City / Route 1 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Rattata",
+            "pokemon_id": 19
+          },
+          {
+            "roll": [
+              3,
+              4,
+              5,
+              6
+            ],
+            "pokemon_name": "Grimer"
+          }
+        ]
+      }
+    },
+    {
+      "id": 11,
+      "type": "event",
+      "name": "Viridian City / Route 1",
+      "description": "Espaco de Viridian City / Route 1.",
+      "data": {}
+    },
+    {
+      "id": 12,
+      "type": "event",
+      "name": "Viridian City / Route 1",
+      "description": "Espaco de Viridian City / Route 1.",
+      "data": {}
+    },
+    {
+      "id": 13,
+      "type": "duel",
+      "name": "Viridian City / Route 1",
+      "description": "Espaco de Viridian City / Route 1.",
+      "data": {}
+    },
+    {
+      "id": 14,
+      "type": "event",
+      "name": "Viridian City / Route 1",
+      "description": "Espaco de Viridian City / Route 1.",
+      "data": {}
+    },
+    {
+      "id": 15,
+      "type": "grass",
+      "name": "Viridian Forest",
+      "description": "Area de captura em Viridian Forest com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1
+            ],
+            "pokemon_name": "Pidgey",
+            "pokemon_id": 16
+          },
+          {
+            "roll": [
+              2,
+              3
+            ],
+            "pokemon_name": "Weedle",
+            "pokemon_id": 13
+          },
+          {
+            "roll": [
+              4,
+              5
+            ],
+            "pokemon_name": "Paras"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Farfetch'd",
+            "reroll": [
+              1,
+              2,
+              3,
+              4
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Pinsir",
+            "reroll": [
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 16,
+      "type": "grass",
+      "name": "Viridian Forest",
+      "description": "Area de captura em Viridian Forest com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1
+            ],
+            "pokemon_name": "Pidgey",
+            "pokemon_id": 16
+          },
+          {
+            "roll": [
+              2,
+              3
+            ],
+            "pokemon_name": "Weedle",
+            "pokemon_id": 13
+          },
+          {
+            "roll": [
+              4,
+              5
+            ],
+            "pokemon_name": "Paras"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Farfetch'd",
+            "reroll": [
+              1,
+              2,
+              3,
+              4
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Pinsir",
+            "reroll": [
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 17,
+      "type": "duel",
+      "name": "Victory Road",
+      "description": "Espaco de Victory Road.",
+      "data": {}
+    },
+    {
+      "id": 18,
+      "type": "grass",
+      "name": "Victory Road / Pewter Approach",
+      "description": "Area de captura em Victory Road / Pewter Approach com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1
+            ],
+            "pokemon_name": "Ditto",
+            "pokemon_id": 132,
+            "reroll": [
+              1,
+              2
+            ]
+          },
+          {
+            "roll": [
+              1
+            ],
+            "pokemon_name": "Dunsparce",
+            "reroll": [
+              5,
+              6
+            ]
+          },
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Graveler",
+            "pokemon_id": 75
+          },
+          {
+            "roll": [
+              3
+            ],
+            "pokemon_name": "Cubone"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Golbat"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Gengar",
+            "pokemon_id": 94
+          }
+        ]
+      }
+    },
+    {
+      "id": 19,
+      "type": "event",
+      "name": "Victory Road / Pewter Approach",
+      "description": "Espaco de Victory Road / Pewter Approach.",
+      "data": {}
+    },
+    {
+      "id": 20,
+      "type": "city",
+      "name": "Victory Road / Pewter Approach - Pokemon Center",
+      "description": "Pokemon Center em Victory Road / Pewter Approach.",
+      "data": {
+        "city_kind": "pokemon_center"
+      }
+    },
+    {
+      "id": 21,
+      "type": "city",
+      "name": "Victory Road / Pewter Approach - PokeMart",
+      "description": "PokeMart em Victory Road / Pewter Approach.",
+      "data": {
+        "city_kind": "pokemart"
+      }
+    },
+    {
+      "id": 22,
+      "type": "event",
+      "name": "Victory Road / Pewter Approach",
+      "description": "Espaco de Victory Road / Pewter Approach.",
+      "data": {}
+    },
+    {
+      "id": 23,
+      "type": "grass",
+      "name": "Victory Road / Pewter Approach",
+      "description": "Area de captura em Victory Road / Pewter Approach com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1
+            ],
+            "pokemon_name": "Grimer"
+          },
+          {
+            "roll": [
+              3,
+              4
+            ],
+            "pokemon_name": "Psyduck",
+            "pokemon_id": 54
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Magikarp",
+            "pokemon_id": 129
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Aerodactyl",
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 24,
+      "type": "gym",
+      "name": "Pewter City Gym",
+      "description": "Ginasio de Brock.",
+      "data": {
+        "leader_name": "Brock",
+        "badge": "Boulder Badge",
+        "leader_bp": 4,
+        "type": "rock"
+      }
+    },
+    {
+      "id": 25,
+      "type": "event",
+      "name": "Pewter City / Route 4",
+      "description": "Espaco de Pewter City / Route 4.",
+      "data": {}
+    },
+    {
+      "id": 26,
+      "type": "duel",
+      "name": "Pewter City / Route 4",
+      "description": "Espaco de Pewter City / Route 4.",
+      "data": {}
+    },
+    {
+      "id": 27,
+      "type": "grass",
+      "name": "Pewter City / Route 4",
+      "description": "Area de captura em Pewter City / Route 4 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              3
+            ],
+            "pokemon_name": "Machop",
+            "pokemon_id": 66
+          },
+          {
+            "roll": [
+              4
+            ],
+            "pokemon_name": "Aerodactyl",
+            "reroll": [
+              4,
+              5
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Jigglypuff",
+            "pokemon_id": 39
+          }
+        ]
+      }
+    },
+    {
+      "id": 28,
+      "type": "grass",
+      "name": "Pewter City / Route 4",
+      "description": "Area de captura em Pewter City / Route 4 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              3
+            ],
+            "pokemon_name": "Machop",
+            "pokemon_id": 66
+          },
+          {
+            "roll": [
+              4
+            ],
+            "pokemon_name": "Aerodactyl",
+            "reroll": [
+              4,
+              5
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Jigglypuff",
+            "pokemon_id": 39
+          }
+        ]
+      }
+    },
+    {
+      "id": 29,
+      "type": "grass",
+      "name": "Pewter City / Route 4",
+      "description": "Area de captura em Pewter City / Route 4 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              3
+            ],
+            "pokemon_name": "Machop",
+            "pokemon_id": 66
+          },
+          {
+            "roll": [
+              4
+            ],
+            "pokemon_name": "Aerodactyl",
+            "reroll": [
+              4,
+              5
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Jigglypuff",
+            "pokemon_id": 39
+          }
+        ]
+      }
+    },
+    {
+      "id": 30,
+      "type": "event",
+      "name": "Pewter City / Route 4",
+      "description": "Espaco de Pewter City / Route 4.",
+      "data": {}
+    },
+    {
+      "id": 31,
+      "type": "duel",
+      "name": "Mt. Moon / Cerulean City",
+      "description": "Espaco de Mt. Moon / Cerulean City.",
+      "data": {}
+    },
+    {
+      "id": 32,
+      "type": "grass",
+      "name": "Mt. Moon / Cerulean City",
+      "description": "Area de captura em Mt. Moon / Cerulean City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Zubat"
+          },
+          {
+            "roll": [
+              3,
+              4
+            ],
+            "pokemon_name": "Geodude",
+            "pokemon_id": 74
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Machop",
+            "pokemon_id": 66
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Vulpix",
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Dunsparce",
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 33,
+      "type": "event",
+      "name": "Mt. Moon / Cerulean City",
+      "description": "Espaco de Mt. Moon / Cerulean City.",
+      "data": {}
+    },
+    {
+      "id": 34,
+      "type": "grass",
+      "name": "Mt. Moon / Cerulean City",
+      "description": "Area de captura em Mt. Moon / Cerulean City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Zubat"
+          },
+          {
+            "roll": [
+              3,
+              4
+            ],
+            "pokemon_name": "Geodude",
+            "pokemon_id": 74
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Machop",
+            "pokemon_id": 66
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Vulpix",
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Dunsparce",
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 35,
+      "type": "special",
+      "name": "Miracle Stone",
+      "description": "Espaco da Miracle Stone.",
+      "data": {
+        "special_effect": "miracle_stone"
+      }
+    },
+    {
+      "id": 36,
+      "type": "event",
+      "name": "Mt. Moon / Cerulean City",
+      "description": "Espaco de Mt. Moon / Cerulean City.",
+      "data": {}
+    },
+    {
+      "id": 37,
+      "type": "grass",
+      "name": "Mt. Moon / Cerulean City",
+      "description": "Area de captura em Mt. Moon / Cerulean City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Zubat"
+          },
+          {
+            "roll": [
+              3,
+              4
+            ],
+            "pokemon_name": "Geodude",
+            "pokemon_id": 74
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Machop",
+            "pokemon_id": 66
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Vulpix",
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Dunsparce",
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 38,
+      "type": "special",
+      "name": "Team Rocket",
+      "description": "Encontro com a Team Rocket.",
+      "data": {
+        "special_effect": "team_rocket"
+      }
+    },
+    {
+      "id": 39,
+      "type": "grass",
+      "name": "Mt. Moon / Cerulean City",
+      "description": "Area de captura em Mt. Moon / Cerulean City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Zubat"
+          },
+          {
+            "roll": [
+              3,
+              4
+            ],
+            "pokemon_name": "Geodude",
+            "pokemon_id": 74
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Machop",
+            "pokemon_id": 66
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Vulpix",
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Dunsparce",
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 40,
+      "type": "event",
+      "name": "Mt. Moon / Cerulean City",
+      "description": "Espaco de Mt. Moon / Cerulean City.",
+      "data": {}
+    },
+    {
+      "id": 41,
+      "type": "grass",
+      "name": "Mt. Moon / Cerulean City",
+      "description": "Area de captura em Mt. Moon / Cerulean City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Zubat"
+          },
+          {
+            "roll": [
+              3,
+              4
+            ],
+            "pokemon_name": "Geodude",
+            "pokemon_id": 74
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Machop",
+            "pokemon_id": 66
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Vulpix",
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Dunsparce",
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 42,
+      "type": "city",
+      "name": "Mt. Moon / Cerulean City - Pokemon Center",
+      "description": "Pokemon Center em Mt. Moon / Cerulean City.",
+      "data": {
+        "city_kind": "pokemon_center"
+      }
+    },
+    {
+      "id": 43,
+      "type": "city",
+      "name": "Mt. Moon / Cerulean City - PokeMart",
+      "description": "PokeMart em Mt. Moon / Cerulean City.",
+      "data": {
+        "city_kind": "pokemart"
+      }
+    },
+    {
+      "id": 44,
+      "type": "grass",
+      "name": "Mt. Moon / Cerulean City",
+      "description": "Area de captura em Mt. Moon / Cerulean City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Zubat"
+          },
+          {
+            "roll": [
+              3,
+              4
+            ],
+            "pokemon_name": "Geodude",
+            "pokemon_id": 74
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Machop",
+            "pokemon_id": 66
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Vulpix",
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Dunsparce",
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 45,
+      "type": "duel",
+      "name": "Mt. Moon / Cerulean City",
+      "description": "Espaco de Mt. Moon / Cerulean City.",
+      "data": {}
+    },
+    {
+      "id": 46,
+      "type": "event",
+      "name": "Mt. Moon / Cerulean City",
+      "description": "Espaco de Mt. Moon / Cerulean City.",
+      "data": {}
+    },
+    {
+      "id": 47,
+      "type": "special",
+      "name": "Bill",
+      "description": "Casa do Bill.",
+      "data": {
+        "special_effect": "bill"
+      }
+    },
+    {
+      "id": 48,
+      "type": "city",
+      "name": "Mt. Moon / Cerulean City - Pokemon Center",
+      "description": "Pokemon Center em Mt. Moon / Cerulean City.",
+      "data": {
+        "city_kind": "pokemon_center"
+      }
+    },
+    {
+      "id": 49,
+      "type": "gym",
+      "name": "Cerulean City Gym",
+      "description": "Ginasio de Misty.",
+      "data": {
+        "leader_name": "Misty",
+        "badge": "Cascade Badge",
+        "leader_bp": 5,
+        "type": "water"
+      }
+    },
+    {
+      "id": 50,
+      "type": "grass",
+      "name": "Cerulean City / Route 10 / Vermillion City",
+      "description": "Area de captura em Cerulean City / Route 10 / Vermillion City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Tentacool"
+          },
+          {
+            "roll": [
+              4
+            ],
+            "pokemon_name": "Psyduck",
+            "pokemon_id": 54
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Staryu"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Magikarp",
+            "pokemon_id": 129
+          }
+        ],
+        "terrain": "water"
+      }
+    },
+    {
+      "id": 51,
+      "type": "grass",
+      "name": "Cerulean City / Route 10 / Vermillion City",
+      "description": "Area de captura em Cerulean City / Route 10 / Vermillion City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Tentacool"
+          },
+          {
+            "roll": [
+              4
+            ],
+            "pokemon_name": "Psyduck",
+            "pokemon_id": 54
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Staryu"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Magikarp",
+            "pokemon_id": 129
+          }
+        ],
+        "terrain": "water"
+      }
+    },
+    {
+      "id": 52,
+      "type": "event",
+      "name": "Cerulean City / Route 10 / Vermillion City",
+      "description": "Espaco de Cerulean City / Route 10 / Vermillion City.",
+      "data": {}
+    },
+    {
+      "id": 53,
+      "type": "duel",
+      "name": "Cerulean City / Route 10 / Vermillion City",
+      "description": "Espaco de Cerulean City / Route 10 / Vermillion City.",
+      "data": {}
+    },
+    {
+      "id": 54,
+      "type": "grass",
+      "name": "Cerulean City / Route 10 / Vermillion City",
+      "description": "Area de captura em Cerulean City / Route 10 / Vermillion City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Tangela"
+          },
+          {
+            "roll": [
+              3,
+              4
+            ],
+            "pokemon_name": "Venonat"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Drowzee"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Exeggcute"
+          }
+        ]
+      }
+    },
+    {
+      "id": 55,
+      "type": "event",
+      "name": "Cerulean City / Route 10 / Vermillion City",
+      "description": "Espaco de Cerulean City / Route 10 / Vermillion City.",
+      "data": {}
+    },
+    {
+      "id": 56,
+      "type": "grass",
+      "name": "Cerulean City / Route 10 / Vermillion City",
+      "description": "Area de captura em Cerulean City / Route 10 / Vermillion City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Tangela"
+          },
+          {
+            "roll": [
+              3,
+              4
+            ],
+            "pokemon_name": "Venonat"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Drowzee"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Exeggcute"
+          }
+        ]
+      }
+    },
+    {
+      "id": 57,
+      "type": "event",
+      "name": "Cerulean City / Route 10 / Vermillion City",
+      "description": "Espaco de Cerulean City / Route 10 / Vermillion City.",
+      "data": {}
+    },
+    {
+      "id": 58,
+      "type": "event",
+      "name": "Cerulean City / Route 10 / Vermillion City",
+      "description": "Espaco de Cerulean City / Route 10 / Vermillion City.",
+      "data": {}
+    },
+    {
+      "id": 59,
+      "type": "duel",
+      "name": "Cerulean City / Route 10 / Vermillion City",
+      "description": "Espaco de Cerulean City / Route 10 / Vermillion City.",
+      "data": {}
+    },
+    {
+      "id": 60,
+      "type": "grass",
+      "name": "Cerulean City / Route 10 / Vermillion City",
+      "description": "Area de captura em Cerulean City / Route 10 / Vermillion City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Tangela"
+          },
+          {
+            "roll": [
+              3,
+              4
+            ],
+            "pokemon_name": "Venonat"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Drowzee"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Exeggcute"
+          }
+        ]
+      }
+    },
+    {
+      "id": 61,
+      "type": "grass",
+      "name": "Cerulean City / Route 10 / Vermillion City",
+      "description": "Area de captura em Cerulean City / Route 10 / Vermillion City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Tangela"
+          },
+          {
+            "roll": [
+              3,
+              4
+            ],
+            "pokemon_name": "Venonat"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Drowzee"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Exeggcute"
+          }
+        ]
+      }
+    },
+    {
+      "id": 62,
+      "type": "city",
+      "name": "Cerulean City / Route 10 / Vermillion City - PokeMart",
+      "description": "PokeMart em Cerulean City / Route 10 / Vermillion City.",
+      "data": {
+        "city_kind": "pokemart"
+      }
+    },
+    {
+      "id": 63,
+      "type": "city",
+      "name": "Cerulean City / Route 10 / Vermillion City - Pokemon Center",
+      "description": "Pokemon Center em Cerulean City / Route 10 / Vermillion City.",
+      "data": {
+        "city_kind": "pokemon_center"
+      }
+    },
+    {
+      "id": 64,
+      "type": "gym",
+      "name": "Vermillion City Gym",
+      "description": "Ginasio de Lt. Surge.",
+      "data": {
+        "leader_name": "Lt. Surge",
+        "badge": "Thunder Badge",
+        "leader_bp": 5,
+        "type": "electric"
+      }
+    },
+    {
+      "id": 65,
+      "type": "grass",
+      "name": "Vermillion City",
+      "description": "Area de captura em Vermillion City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Tangela"
+          },
+          {
+            "roll": [
+              4
+            ],
+            "pokemon_name": "Electabuzz"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Zapdos",
+            "pokemon_id": 145,
+            "reroll": [
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 66,
+      "type": "grass",
+      "name": "Vermillion City",
+      "description": "Area de captura em Vermillion City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Tangela"
+          },
+          {
+            "roll": [
+              4
+            ],
+            "pokemon_name": "Electabuzz"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Zapdos",
+            "pokemon_id": 145,
+            "reroll": [
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 67,
+      "type": "event",
+      "name": "Vermillion City",
+      "description": "Espaco de Vermillion City.",
+      "data": {}
+    },
+    {
+      "id": 68,
+      "type": "city",
+      "name": "Vermillion City - Pokemon Center",
+      "description": "Pokemon Center em Vermillion City.",
+      "data": {
+        "city_kind": "pokemon_center"
+      }
+    },
+    {
+      "id": 69,
+      "type": "grass",
+      "name": "Vermillion City",
+      "description": "Espaco de Vermillion City.",
+      "data": {}
+    },
+    {
+      "id": 70,
+      "type": "duel",
+      "name": "Vermillion City",
+      "description": "Espaco de Vermillion City.",
+      "data": {}
+    },
+    {
+      "id": 71,
+      "type": "grass",
+      "name": "Celadon / Bicycle Bridge / Route 1",
+      "description": "Area de captura em Celadon / Bicycle Bridge / Route 1 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              4
+            ],
+            "pokemon_name": "Paras"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Tangela"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Pinsir",
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Houndour",
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 72,
+      "type": "special",
+      "name": "Game Corner",
+      "description": "Game Corner.",
+      "data": {
+        "special_effect": "game_corner"
+      }
+    },
+    {
+      "id": 73,
+      "type": "event",
+      "name": "Celadon / Bicycle Bridge / Route 1",
+      "description": "Espaco de Celadon / Bicycle Bridge / Route 1.",
+      "data": {}
+    },
+    {
+      "id": 74,
+      "type": "city",
+      "name": "Celadon / Bicycle Bridge / Route 1 - PokeMart",
+      "description": "PokeMart em Celadon / Bicycle Bridge / Route 1.",
+      "data": {
+        "city_kind": "pokemart"
+      }
+    },
+    {
+      "id": 75,
+      "type": "grass",
+      "name": "Celadon / Bicycle Bridge / Route 1",
+      "description": "Area de captura em Celadon / Bicycle Bridge / Route 1 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              4
+            ],
+            "pokemon_name": "Paras"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Tangela"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Pinsir",
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Houndour",
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 76,
+      "type": "city",
+      "name": "Celadon / Bicycle Bridge / Route 1 - Pokemon Center",
+      "description": "Pokemon Center em Celadon / Bicycle Bridge / Route 1.",
+      "data": {
+        "city_kind": "pokemon_center"
+      }
+    },
+    {
+      "id": 77,
+      "type": "gym",
+      "name": "Celadon City Gym",
+      "description": "Ginasio de Erika.",
+      "data": {
+        "leader_name": "Erika",
+        "badge": "Rainbow Badge",
+        "leader_bp": 5,
+        "type": "grass"
+      }
+    },
+    {
+      "id": 78,
+      "type": "event",
+      "name": "Celadon / Bicycle Bridge / Route 1",
+      "description": "Espaco de Celadon / Bicycle Bridge / Route 1.",
+      "data": {}
+    },
+    {
+      "id": 79,
+      "type": "special",
+      "name": "Celadon Dept. Store",
+      "description": "Celadon Dept. Store.",
+      "data": {
+        "special_effect": "celadon_dept_store"
+      }
+    },
+    {
+      "id": 80,
+      "type": "grass",
+      "name": "Celadon / Bicycle Bridge / Route 1",
+      "description": "Area de captura em Celadon / Bicycle Bridge / Route 1 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              4
+            ],
+            "pokemon_name": "Paras"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Tangela"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Pinsir",
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Houndour",
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 81,
+      "type": "event",
+      "name": "Celadon / Bicycle Bridge / Route 1",
+      "description": "Espaco de Celadon / Bicycle Bridge / Route 1.",
+      "data": {}
+    },
+    {
+      "id": 82,
+      "type": "duel",
+      "name": "Celadon / Bicycle Bridge / Route 1",
+      "description": "Espaco de Celadon / Bicycle Bridge / Route 1.",
+      "data": {}
+    },
+    {
+      "id": 83,
+      "type": "event",
+      "name": "Celadon / Bicycle Bridge / Route 1",
+      "description": "Espaco de Celadon / Bicycle Bridge / Route 1.",
+      "data": {}
+    },
+    {
+      "id": 84,
+      "type": "event",
+      "name": "Celadon / Bicycle Bridge / Route 1",
+      "description": "Espaco de Celadon / Bicycle Bridge / Route 1.",
+      "data": {}
+    },
+    {
+      "id": 85,
+      "type": "grass",
+      "name": "Celadon / Bicycle Bridge / Route 1",
+      "description": "Area de captura em Celadon / Bicycle Bridge / Route 1 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Rattata",
+            "pokemon_id": 19
+          },
+          {
+            "roll": [
+              3,
+              4
+            ],
+            "pokemon_name": "Pidgey",
+            "pokemon_id": 16
+          },
+          {
+            "roll": [
+              5,
+              6
+            ],
+            "pokemon_name": "Weedle",
+            "pokemon_id": 13
+          }
+        ]
+      }
+    },
+    {
+      "id": 86,
+      "type": "event",
+      "name": "Celadon / Bicycle Bridge / Route 1",
+      "description": "Espaco de Celadon / Bicycle Bridge / Route 1.",
+      "data": {}
+    },
+    {
+      "id": 87,
+      "type": "grass",
+      "name": "Celadon / Bicycle Bridge / Route 1",
+      "description": "Area de captura em Celadon / Bicycle Bridge / Route 1 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1
+            ],
+            "pokemon_name": "Tangela"
+          },
+          {
+            "roll": [
+              2,
+              3
+            ],
+            "pokemon_name": "Rattata",
+            "pokemon_id": 19
+          },
+          {
+            "roll": [
+              4,
+              5
+            ],
+            "pokemon_name": "Pidgey",
+            "pokemon_id": 16
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Mr. Mime"
+          }
+        ]
+      }
+    },
+    {
+      "id": 88,
+      "type": "grass",
+      "name": "Celadon / Bicycle Bridge / Route 1",
+      "description": "Area de captura em Celadon / Bicycle Bridge / Route 1 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1
+            ],
+            "pokemon_name": "Tangela"
+          },
+          {
+            "roll": [
+              2,
+              3
+            ],
+            "pokemon_name": "Rattata",
+            "pokemon_id": 19
+          },
+          {
+            "roll": [
+              4,
+              5
+            ],
+            "pokemon_name": "Pidgey",
+            "pokemon_id": 16
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Mr. Mime"
+          }
+        ]
+      }
+    },
+    {
+      "id": 89,
+      "type": "grass",
+      "name": "Celadon / Bicycle Bridge / Route 1",
+      "description": "Area de captura em Celadon / Bicycle Bridge / Route 1 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1
+            ],
+            "pokemon_name": "Tangela"
+          },
+          {
+            "roll": [
+              2,
+              3
+            ],
+            "pokemon_name": "Rattata",
+            "pokemon_id": 19
+          },
+          {
+            "roll": [
+              4,
+              5
+            ],
+            "pokemon_name": "Pidgey",
+            "pokemon_id": 16
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Mr. Mime"
+          }
+        ]
+      }
+    },
+    {
+      "id": 90,
+      "type": "event",
+      "name": "Celadon / Bicycle Bridge / Route 1",
+      "description": "Espaco de Celadon / Bicycle Bridge / Route 1.",
+      "data": {}
+    },
+    {
+      "id": 91,
+      "type": "duel",
+      "name": "Celadon / Bicycle Bridge / Route 1",
+      "description": "Espaco de Celadon / Bicycle Bridge / Route 1.",
+      "data": {}
+    },
+    {
+      "id": 92,
+      "type": "special",
+      "name": "Bicycle Bridge Booth",
+      "description": "Cabine da Bicycle Bridge.",
+      "data": {
+        "special_effect": "bicycle_bridge"
+      }
+    },
+    {
+      "id": 93,
+      "type": "city",
+      "name": "Celadon / Bicycle Bridge / Route 1 - PokeMart",
+      "description": "PokeMart em Celadon / Bicycle Bridge / Route 1.",
+      "data": {
+        "city_kind": "pokemart"
+      }
+    },
+    {
+      "id": 94,
+      "type": "city",
+      "name": "Celadon / Bicycle Bridge / Route 1 - Pokemon Center",
+      "description": "Pokemon Center em Celadon / Bicycle Bridge / Route 1.",
+      "data": {
+        "city_kind": "pokemon_center"
+      }
+    },
+    {
+      "id": 95,
+      "type": "grass",
+      "name": "Celadon / Bicycle Bridge / Route 1",
+      "description": "Area de captura em Celadon / Bicycle Bridge / Route 1 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Gastly",
+            "pokemon_id": 92
+          },
+          {
+            "roll": [
+              3
+            ],
+            "pokemon_name": "Grimer"
+          },
+          {
+            "roll": [
+              4
+            ],
+            "pokemon_name": "Articuno",
+            "pokemon_id": 144,
+            "reroll": [
+              4
+            ]
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Exeggcute"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Cubone"
+          }
+        ]
+      }
+    },
+    {
+      "id": 96,
+      "type": "special",
+      "name": "Safari Zone 1",
+      "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "special_effect": "safari_zone",
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "pokemon_name": "Tauros"
+          }
+        ]
+      }
+    },
+    {
+      "id": 97,
+      "type": "special",
+      "name": "Safari Zone 2",
+      "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "special_effect": "safari_zone",
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Chansey",
+            "pokemon_id": 113
+          }
+        ]
+      }
+    },
+    {
+      "id": 98,
+      "type": "special",
+      "name": "Safari Zone 3",
+      "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "special_effect": "safari_zone",
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "pokemon_name": "Tauros"
+          }
+        ]
+      }
+    },
+    {
+      "id": 99,
+      "type": "special",
+      "name": "Safari Zone 4",
+      "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "special_effect": "safari_zone",
+        "encounters": [
+          {
+            "roll": [
+              4,
+              5
+            ],
+            "pokemon_name": "Cubone"
+          }
+        ]
+      }
+    },
+    {
+      "id": 100,
+      "type": "special",
+      "name": "Safari Zone 5",
+      "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "special_effect": "safari_zone",
+        "encounters": [
+          {
+            "roll": [
+              3,
+              4
+            ],
+            "pokemon_name": "Paras"
+          }
+        ]
+      }
+    },
+    {
+      "id": 101,
+      "type": "special",
+      "name": "Safari Zone 6",
+      "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "special_effect": "safari_zone",
+        "encounters": [
+          {
+            "roll": [
+              4,
+              5,
+              6
+            ],
+            "pokemon_name": "Exeggcute"
+          }
+        ]
+      }
+    },
+    {
+      "id": 102,
+      "type": "special",
+      "name": "Safari Zone 7",
+      "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "special_effect": "safari_zone",
+        "encounters": [
+          {
+            "roll": [
+              2,
+              3
+            ],
+            "pokemon_name": "Venonat"
+          }
+        ]
+      }
+    },
+    {
+      "id": 103,
+      "type": "special",
+      "name": "Safari Zone 8",
+      "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "special_effect": "safari_zone",
+        "encounters": [
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Chansey",
+            "pokemon_id": 113
+          }
+        ]
+      }
+    },
+    {
+      "id": 104,
+      "type": "special",
+      "name": "Safari Zone 9",
+      "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "special_effect": "safari_zone",
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2,
+              3
+            ],
+            "pokemon_name": "Zubat"
+          }
+        ]
+      }
+    },
+    {
+      "id": 105,
+      "type": "special",
+      "name": "Safari Zone 10",
+      "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "special_effect": "safari_zone",
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "pokemon_name": "Tauros"
+          }
+        ]
+      }
+    },
+    {
+      "id": 106,
+      "type": "event",
+      "name": "Fuchsia City / Route 12",
+      "description": "Espaco de Fuchsia City / Route 12.",
+      "data": {}
+    },
+    {
+      "id": 107,
+      "type": "grass",
+      "name": "Fuchsia City / Route 12",
+      "description": "Area de captura em Fuchsia City / Route 12 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              3,
+              4
+            ],
+            "pokemon_name": "Pidgeotto",
+            "pokemon_id": 17
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Golduck",
+            "pokemon_id": 55
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Natu",
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Porygon",
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 108,
+      "type": "grass",
+      "name": "Fuchsia City / Route 12",
+      "description": "Area de captura em Fuchsia City / Route 12 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              3,
+              4
+            ],
+            "pokemon_name": "Pidgeotto",
+            "pokemon_id": 17
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Golduck",
+            "pokemon_id": 55
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Natu",
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Porygon",
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 109,
+      "type": "event",
+      "name": "Fuchsia City / Route 12",
+      "description": "Espaco de Fuchsia City / Route 12.",
+      "data": {}
+    },
+    {
+      "id": 110,
+      "type": "grass",
+      "name": "Fuchsia City / Route 12",
+      "description": "Area de captura em Fuchsia City / Route 12 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              3,
+              4
+            ],
+            "pokemon_name": "Pidgeotto",
+            "pokemon_id": 17
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Golduck",
+            "pokemon_id": 55
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Natu",
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Porygon",
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 111,
+      "type": "gym",
+      "name": "Fuchsia City Gym",
+      "description": "Ginasio de Koga.",
+      "data": {
+        "leader_name": "Koga",
+        "badge": "Soul Badge",
+        "leader_bp": 6,
+        "type": "poison"
+      }
+    },
+    {
+      "id": 112,
+      "type": "event",
+      "name": "Fuchsia City / Route 12",
+      "description": "Espaco de Fuchsia City / Route 12.",
+      "data": {}
+    },
+    {
+      "id": 113,
+      "type": "grass",
+      "name": "Fuchsia City / Route 12",
+      "description": "Area de captura em Fuchsia City / Route 12 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Raticate",
+            "pokemon_id": 20
+          },
+          {
+            "roll": [
+              3
+            ],
+            "pokemon_name": "Chansey",
+            "pokemon_id": 113,
+            "reroll": [
+              5,
+              6
+            ]
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Diglett"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Farfetch'd"
+          }
+        ]
+      }
+    },
+    {
+      "id": 114,
+      "type": "duel",
+      "name": "Fuchsia City / Route 12",
+      "description": "Espaco de Fuchsia City / Route 12.",
+      "data": {}
+    },
+    {
+      "id": 115,
+      "type": "grass",
+      "name": "Fuchsia City / Route 12",
+      "description": "Area de captura em Fuchsia City / Route 12 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Raticate",
+            "pokemon_id": 20
+          },
+          {
+            "roll": [
+              3
+            ],
+            "pokemon_name": "Chansey",
+            "pokemon_id": 113,
+            "reroll": [
+              5,
+              6
+            ]
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Diglett"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Farfetch'd"
+          }
+        ]
+      }
+    },
+    {
+      "id": 116,
+      "type": "event",
+      "name": "Fuchsia City / Route 12",
+      "description": "Espaco de Fuchsia City / Route 12.",
+      "data": {}
+    },
+    {
+      "id": 117,
+      "type": "grass",
+      "name": "Fuchsia City / Route 12",
+      "description": "Area de captura em Fuchsia City / Route 12 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Raticate",
+            "pokemon_id": 20
+          },
+          {
+            "roll": [
+              3
+            ],
+            "pokemon_name": "Chansey",
+            "pokemon_id": 113,
+            "reroll": [
+              5,
+              6
+            ]
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Diglett"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Farfetch'd"
+          }
+        ]
+      }
+    },
+    {
+      "id": 118,
+      "type": "grass",
+      "name": "Fuchsia City / Route 12",
+      "description": "Area de captura em Fuchsia City / Route 12 com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Raticate",
+            "pokemon_id": 20
+          },
+          {
+            "roll": [
+              3
+            ],
+            "pokemon_name": "Chansey",
+            "pokemon_id": 113,
+            "reroll": [
+              5,
+              6
+            ]
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Diglett"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Farfetch'd"
+          }
+        ]
+      }
+    },
+    {
+      "id": 119,
+      "type": "city",
+      "name": "Fuchsia City / Route 12 - PokeMart",
+      "description": "PokeMart em Fuchsia City / Route 12.",
+      "data": {
+        "city_kind": "pokemart"
+      }
+    },
+    {
+      "id": 120,
+      "type": "city",
+      "name": "Fuchsia City / Route 12 - Pokemon Center",
+      "description": "Pokemon Center em Fuchsia City / Route 12.",
+      "data": {
+        "city_kind": "pokemon_center"
+      }
+    },
+    {
+      "id": 121,
+      "type": "event",
+      "name": "Saffron City",
+      "description": "Espaco de Saffron City.",
+      "data": {}
+    },
+    {
+      "id": 122,
+      "type": "event",
+      "name": "Saffron City",
+      "description": "Espaco de Saffron City.",
+      "data": {}
+    },
+    {
+      "id": 123,
+      "type": "grass",
+      "name": "Saffron City",
+      "description": "Area de captura em Saffron City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Drowzee"
+          },
+          {
+            "roll": [
+              3
+            ],
+            "pokemon_name": "Mew",
+            "pokemon_id": 151,
+            "reroll": [
+              3
+            ]
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Wigglytuff",
+            "pokemon_id": 40
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Haunter",
+            "pokemon_id": 93
+          }
+        ]
+      }
+    },
+    {
+      "id": 124,
+      "type": "special",
+      "name": "Mr. Fuji's House",
+      "description": "Casa do Mr. Fuji.",
+      "data": {
+        "special_effect": "mr_fuji_house"
+      }
+    },
+    {
+      "id": 125,
+      "type": "grass",
+      "name": "Saffron City",
+      "description": "Area de captura em Saffron City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Drowzee"
+          },
+          {
+            "roll": [
+              3
+            ],
+            "pokemon_name": "Mew",
+            "pokemon_id": 151,
+            "reroll": [
+              3
+            ]
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Wigglytuff",
+            "pokemon_id": 40
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Haunter",
+            "pokemon_id": 93
+          }
+        ]
+      }
+    },
+    {
+      "id": 126,
+      "type": "duel",
+      "name": "Saffron City",
+      "description": "Espaco de Saffron City.",
+      "data": {}
+    },
+    {
+      "id": 127,
+      "type": "duel",
+      "name": "Saffron City",
+      "description": "Espaco de Saffron City.",
+      "data": {}
+    },
+    {
+      "id": 128,
+      "type": "event",
+      "name": "Saffron City",
+      "description": "Espaco de Saffron City.",
+      "data": {}
+    },
+    {
+      "id": 129,
+      "type": "grass",
+      "name": "Saffron City",
+      "description": "Area de captura em Saffron City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Drowzee"
+          },
+          {
+            "roll": [
+              3
+            ],
+            "pokemon_name": "Mew",
+            "pokemon_id": 151,
+            "reroll": [
+              3
+            ]
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Wigglytuff",
+            "pokemon_id": 40
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Haunter",
+            "pokemon_id": 93
+          }
+        ]
+      }
+    },
+    {
+      "id": 130,
+      "type": "event",
+      "name": "Saffron City",
+      "description": "Espaco de Saffron City.",
+      "data": {}
+    },
+    {
+      "id": 131,
+      "type": "city",
+      "name": "Saffron City - Pokemon Center",
+      "description": "Pokemon Center em Saffron City.",
+      "data": {
+        "city_kind": "pokemon_center"
+      }
+    },
+    {
+      "id": 132,
+      "type": "gym",
+      "name": "Saffron City Gym",
+      "description": "Ginasio de Sabrina.",
+      "data": {
+        "leader_name": "Sabrina",
+        "badge": "Marsh Badge",
+        "leader_bp": 7,
+        "type": "psychic"
+      }
+    },
+    {
+      "id": 133,
+      "type": "city",
+      "name": "Saffron City - PokeMart",
+      "description": "PokeMart em Saffron City.",
+      "data": {
+        "city_kind": "pokemart"
+      }
+    },
+    {
+      "id": 134,
+      "type": "event",
+      "name": "Saffron City",
+      "description": "Espaco de Saffron City.",
+      "data": {}
+    },
+    {
+      "id": 135,
+      "type": "event",
+      "name": "Saffron City",
+      "description": "Espaco de Saffron City.",
+      "data": {}
+    },
+    {
+      "id": 136,
+      "type": "special",
+      "name": "Teleporter",
+      "description": "Teleporter.",
+      "data": {
+        "special_effect": "teleporter"
+      }
+    },
+    {
+      "id": 137,
+      "type": "special",
+      "name": "Teleporter",
+      "description": "Teleporter.",
+      "data": {
+        "special_effect": "teleporter"
+      }
+    },
+    {
+      "id": 138,
+      "type": "grass",
+      "name": "Cinnabar Island",
+      "description": "Area de captura em Cinnabar Island com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              2,
+              3
+            ],
+            "pokemon_name": "Ponyta"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Ninetales",
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Houndour",
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Mewtwo",
+            "pokemon_id": 150,
+            "reroll": [
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 139,
+      "type": "grass",
+      "name": "Cinnabar Island",
+      "description": "Area de captura em Cinnabar Island com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              2,
+              3
+            ],
+            "pokemon_name": "Ponyta"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Ninetales",
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Houndour",
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Mewtwo",
+            "pokemon_id": 150,
+            "reroll": [
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 140,
+      "type": "event",
+      "name": "Cinnabar Island",
+      "description": "Espaco de Cinnabar Island.",
+      "data": {}
+    },
+    {
+      "id": 141,
+      "type": "special",
+      "name": "Miracle Stone",
+      "description": "Espaco da Miracle Stone.",
+      "data": {
+        "special_effect": "miracle_stone"
+      }
+    },
+    {
+      "id": 142,
+      "type": "duel",
+      "name": "Cinnabar Island",
+      "description": "Espaco de Cinnabar Island.",
+      "data": {}
+    },
+    {
+      "id": 143,
+      "type": "grass",
+      "name": "Cinnabar Island",
+      "description": "Area de captura em Cinnabar Island com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              2,
+              3
+            ],
+            "pokemon_name": "Ponyta"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Ninetales",
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Houndour",
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Mewtwo",
+            "pokemon_id": 150,
+            "reroll": [
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 144,
+      "type": "city",
+      "name": "Cinnabar Island - PokeMart",
+      "description": "PokeMart em Cinnabar Island.",
+      "data": {
+        "city_kind": "pokemart"
+      }
+    },
+    {
+      "id": 145,
+      "type": "event",
+      "name": "Cinnabar Island",
+      "description": "Espaco de Cinnabar Island.",
+      "data": {}
+    },
+    {
+      "id": 146,
+      "type": "city",
+      "name": "Cinnabar Island - Pokemon Center",
+      "description": "Pokemon Center em Cinnabar Island.",
+      "data": {
+        "city_kind": "pokemon_center"
+      }
+    },
+    {
+      "id": 147,
+      "type": "gym",
+      "name": "Cinnabar Island Gym",
+      "description": "Ginasio de Blaine.",
+      "data": {
+        "leader_name": "Blaine",
+        "badge": "Volcano Badge",
+        "leader_bp": 7,
+        "type": "fire"
+      }
+    },
+    {
+      "id": 148,
+      "type": "grass",
+      "name": "Ocean Route",
+      "description": "Area de captura em Ocean Route / Viridian City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "terrain": "water",
+        "encounters": [
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Starmie"
+          },
+          {
+            "roll": [
+              4
+            ],
+            "pokemon_name": "Tentacruel"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Gyarados",
+            "pokemon_id": 130,
+            "reroll": [
+              5
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Dratini",
+            "pokemon_id": 147,
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Lapras",
+            "pokemon_id": 131,
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 149,
+      "type": "event",
+      "name": "Ocean Route / Viridian City",
+      "description": "Espaco de Ocean Route / Viridian City.",
+      "data": {}
+    },
+    {
+      "id": 150,
+      "type": "duel",
+      "name": "Ocean Route / Viridian City",
+      "description": "Espaco de Ocean Route / Viridian City.",
+      "data": {}
+    },
+    {
+      "id": 151,
+      "type": "grass",
+      "name": "Ocean Route",
+      "description": "Area de captura em Ocean Route / Viridian City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "terrain": "water",
+        "encounters": [
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Starmie"
+          },
+          {
+            "roll": [
+              4
+            ],
+            "pokemon_name": "Tentacruel"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Gyarados",
+            "pokemon_id": 130,
+            "reroll": [
+              5
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Dratini",
+            "pokemon_id": 147,
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Lapras",
+            "pokemon_id": 131,
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 152,
+      "type": "event",
+      "name": "Ocean Route / Viridian City",
+      "description": "Espaco de Ocean Route / Viridian City.",
+      "data": {}
+    },
+    {
+      "id": 153,
+      "type": "grass",
+      "name": "Ocean Route",
+      "description": "Area de captura em Ocean Route / Viridian City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "terrain": "water",
+        "encounters": [
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Starmie"
+          },
+          {
+            "roll": [
+              4
+            ],
+            "pokemon_name": "Tentacruel"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Gyarados",
+            "pokemon_id": 130,
+            "reroll": [
+              5
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Dratini",
+            "pokemon_id": 147,
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Lapras",
+            "pokemon_id": 131,
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 154,
+      "type": "grass",
+      "name": "Ocean Route",
+      "description": "Area de captura em Ocean Route / Viridian City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "terrain": "water",
+        "encounters": [
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Starmie"
+          },
+          {
+            "roll": [
+              4
+            ],
+            "pokemon_name": "Tentacruel"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Gyarados",
+            "pokemon_id": 130,
+            "reroll": [
+              5
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Dratini",
+            "pokemon_id": 147,
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Lapras",
+            "pokemon_id": 131,
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 155,
+      "type": "event",
+      "name": "Ocean Route / Viridian City",
+      "description": "Espaco de Ocean Route / Viridian City.",
+      "data": {}
+    },
+    {
+      "id": 156,
+      "type": "grass",
+      "name": "Ocean Route / Viridian City",
+      "description": "Area de captura em Ocean Route / Viridian City com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Starmie"
+          },
+          {
+            "roll": [
+              4
+            ],
+            "pokemon_name": "Tentacruel"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Gyarados",
+            "pokemon_id": 130,
+            "reroll": [
+              5
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Dratini",
+            "pokemon_id": 147,
+            "reroll": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Lapras",
+            "pokemon_id": 131,
+            "reroll": [
+              4,
+              5,
+              6
+            ]
+          }
+        ],
+        "terrain": "water"
+      }
+    },
+    {
+      "id": 157,
+      "type": "city",
+      "name": "Ocean Route / Viridian City - PokeMart",
+      "description": "PokeMart em Ocean Route / Viridian City.",
+      "data": {
+        "city_kind": "pokemart"
+      }
+    },
+    {
+      "id": 158,
+      "type": "city",
+      "name": "Ocean Route / Viridian City - Pokemon Center",
+      "description": "Pokemon Center em Ocean Route / Viridian City.",
+      "data": {
+        "city_kind": "pokemon_center"
+      }
+    },
+    {
+      "id": 159,
+      "type": "gym",
+      "name": "Viridian City Gym",
+      "description": "Ginasio de Giovanni.",
+      "data": {
+        "leader_name": "Giovanni",
+        "badge": "Earth Badge",
+        "leader_bp": 8,
+        "type": "ground"
+      }
+    },
+    {
+      "id": 160,
+      "type": "grass",
+      "name": "Viridian City / Victory Road / Pokemon League",
+      "description": "Area de captura em Viridian City / Victory Road / Pokemon League com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Rattata",
+            "pokemon_id": 19
+          },
+          {
+            "roll": [
+              3,
+              4,
+              5,
+              6
+            ],
+            "pokemon_name": "Grimer"
+          }
+        ]
+      }
+    },
+    {
+      "id": 161,
+      "type": "grass",
+      "name": "Viridian City / Victory Road / Pokemon League",
+      "description": "Area de captura em Viridian City / Victory Road / Pokemon League com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Rattata",
+            "pokemon_id": 19
+          },
+          {
+            "roll": [
+              3,
+              4,
+              5,
+              6
+            ],
+            "pokemon_name": "Grimer"
+          }
+        ]
+      }
+    },
+    {
+      "id": 162,
+      "type": "event",
+      "name": "Viridian City / Victory Road / Pokemon League",
+      "description": "Espaco de Viridian City / Victory Road / Pokemon League.",
+      "data": {}
+    },
+    {
+      "id": 163,
+      "type": "event",
+      "name": "Viridian City / Victory Road / Pokemon League",
+      "description": "Espaco de Viridian City / Victory Road / Pokemon League.",
+      "data": {}
+    },
+    {
+      "id": 164,
+      "type": "grass",
+      "name": "Viridian City / Victory Road / Pokemon League",
+      "description": "Area de captura em Viridian City / Victory Road / Pokemon League com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1
+            ],
+            "pokemon_name": "Ditto",
+            "pokemon_id": 132,
+            "reroll": [
+              1,
+              2
+            ]
+          },
+          {
+            "roll": [
+              1
+            ],
+            "pokemon_name": "Dunsparce",
+            "reroll": [
+              5,
+              6
+            ]
+          },
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Graveler",
+            "pokemon_id": 75
+          },
+          {
+            "roll": [
+              3
+            ],
+            "pokemon_name": "Cubone"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Golbat"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Gengar",
+            "pokemon_id": 94
+          }
+        ]
+      }
+    },
+    {
+      "id": 165,
+      "type": "duel",
+      "name": "Viridian City / Victory Road / Pokemon League",
+      "description": "Espaco de Viridian City / Victory Road / Pokemon League.",
+      "data": {}
+    },
+    {
+      "id": 166,
+      "type": "grass",
+      "name": "Viridian City / Victory Road / Pokemon League",
+      "description": "Area de captura em Viridian City / Victory Road / Pokemon League com encontros definidos pelo tabuleiro Kanto.",
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1
+            ],
+            "pokemon_name": "Ditto",
+            "pokemon_id": 132,
+            "reroll": [
+              1,
+              2
+            ]
+          },
+          {
+            "roll": [
+              1
+            ],
+            "pokemon_name": "Dunsparce",
+            "reroll": [
+              5,
+              6
+            ]
+          },
+          {
+            "roll": [
+              2
+            ],
+            "pokemon_name": "Graveler",
+            "pokemon_id": 75
+          },
+          {
+            "roll": [
+              3
+            ],
+            "pokemon_name": "Cubone"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Golbat"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Gengar",
+            "pokemon_id": 94
+          }
+        ]
+      }
+    },
+    {
+      "id": 167,
+      "type": "event",
+      "name": "Viridian City / Victory Road / Pokemon League",
+      "description": "Espaco de Viridian City / Victory Road / Pokemon League.",
+      "data": {}
+    },
+    {
+      "id": 168,
+      "type": "event",
+      "name": "Viridian City / Victory Road / Pokemon League",
+      "description": "Espaco de Viridian City / Victory Road / Pokemon League.",
+      "data": {}
+    },
+    {
+      "id": 169,
+      "type": "league",
+      "name": "Pokemon League",
+      "description": "A Liga Pokemon! Enfrente a Elite Four e o Campeao!",
+      "data": {}
+    }
+  ]
+}

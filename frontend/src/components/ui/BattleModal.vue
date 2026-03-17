@@ -6,7 +6,7 @@
         <div class="winner-banner-content">
           <div class="trophy">🏆</div>
           <div class="winner-name">{{ winnerName }}</div>
-          <div class="winner-sub">venceu o duelo!</div>
+          <div class="winner-sub">{{ winnerSubtitle }}</div>
           <div class="battle-summary" v-if="lastResult">
             <div class="summary-row">
               <span class="summary-label">{{ challenger?.name }}</span>
@@ -22,13 +22,14 @@
     </Transition>
 
     <div class="modal" :class="{ 'modal-dimmed': showWinnerBanner }">
-      <h2>⚔️ Duelo Pokémon!</h2>
+      <h2>{{ battleTitle }}</h2>
 
       <div class="battle-info">
         <span class="fighter">{{ challenger?.name }}</span>
         <span class="vs">VS</span>
         <span class="fighter">{{ defenderLabel }}</span>
       </div>
+      <p v-if="isGymBattle" class="hint">{{ gymProgressLabel }}</p>
 
       <!-- ── sub_phase: choosing ── -->
       <template v-if="subPhase === 'choosing'">
@@ -38,13 +39,15 @@
             <button
               v-for="(p, i) in myPokemon" :key="i"
               class="pokemon-btn"
-              :class="{ selected: selectedIndex === i }"
+              :class="{ selected: selectedIndex === i, 'pokemon-btn--ko': p.knocked_out }"
+              :disabled="p.knocked_out"
               @click="selectedIndex = i"
             >
               <img v-if="p.image_path" :src="p.image_path" :alt="p.name" class="pokemon-btn-img" />
               <strong>{{ p.name }}</strong>
               <span class="bp-badge">BP {{ p.battle_points }}</span>
               <span v-if="p.types?.length" class="types">{{ p.types.join('/') }}</span>
+              <span v-if="p.knocked_out" class="ko-badge">Fora de combate</span>
             </button>
           </div>
           <label v-if="canUseBattleItems && pluspowerQuantity > 0" class="pluspower-toggle">
@@ -54,13 +57,13 @@
           <button class="btn-primary" :disabled="selectedIndex === null" @click="confirmChoice">
             Confirmar escolha
           </button>
-          <div v-if="canUseBattleItems && gustOfWindQuantity > 0 && !opponentHasChosen" class="gust-panel">
+          <div v-if="canUseGustNow" class="gust-panel">
             <p class="hint">Gust of Wind: force o Pokémon do oponente.</p>
             <button
               v-for="(p, i) in opponentPokemon"
-              :key="`gust-${p.id}-${i}`"
+              :key="`gust-${p.id}-${p.targetIndex ?? i}`"
               class="btn-secondary pokemon-btn"
-              @click="store.actions.useItem('gust_of_wind', { target_pokemon_index: i })"
+              @click="store.actions.useItem('gust_of_wind', { target_pokemon_index: p.targetIndex ?? i })"
             >
               <img v-if="p.image_path" :src="p.image_path" :alt="p.name" class="pokemon-btn-img" />
               <strong>{{ p.name }}</strong>
@@ -178,19 +181,30 @@ const usePlusPower  = ref(false)
 const rolling       = ref(false)
 const showWinnerBanner = ref(false)
 const winnerName    = ref('')
+const winnerSubtitle = ref('venceu a batalha!')
 const lastResult    = ref(null)
 
 const battle     = computed(() => store.turn?.battle ?? {})
 const subPhase   = computed(() => battle.value.sub_phase ?? 'choosing')
 const mode       = computed(() => battle.value.mode ?? 'player')
+const isGymBattle = computed(() => mode.value === 'gym')
 const debugTestPlayer = computed(() => store.debugTestPlayer ?? null)
 const debugChallengerId = computed(() => debugTestPlayer.value?.id ?? null)
 const allPlayers = computed(() => store.allPlayers ?? store.players)
 const challenger = computed(() => allPlayers.value.find(p => p.id === battle.value.challenger_id))
 const defender   = computed(() => allPlayers.value.find(p => p.id === battle.value.defender_id))
 const defenderLabel = computed(() => defender.value?.name ?? battle.value.defender_name ?? 'Trainer')
-const choiceStage = computed(() => battle.value.choice_stage ?? (mode.value === 'trainer' ? 'challenger' : 'defender'))
+const choiceStage = computed(() => battle.value.choice_stage ?? (['trainer', 'gym'].includes(mode.value) ? 'challenger' : 'defender'))
 const isTrainerBattle = computed(() => mode.value === 'trainer')
+const isSoloBattleMode = computed(() => ['trainer', 'gym'].includes(mode.value))
+const battleTitle = computed(() => isGymBattle.value ? '🏆 Desafio de Ginásio' : '⚔️ Duelo Pokémon!')
+const gymProgressLabel = computed(() => {
+  if (!isGymBattle.value) return ''
+  const defeated = battle.value.defeated_leader_indexes?.length ?? 0
+  const total = battle.value.leader_team?.length ?? 0
+  const current = battle.value.defender_choice?.name ?? battle.value.defender_name ?? 'Líder'
+  return `Líder: ${defenderLabel.value} · Em campo: ${current} · ${defeated}/${total} derrotados`
+})
 const controlsDebugChallenger = computed(() =>
   !!store.debugVisual?.enabled
   && store.isHost
@@ -243,30 +257,36 @@ const hasRolled = computed(() => {
 
 const canChooseNow = computed(() => {
   if (!isParticipant.value || hasChosen.value) return false
-  if (isTrainerBattle.value) return amChallenger.value
+  if (isSoloBattleMode.value) return amChallenger.value
   if (choiceStage.value === 'defender') return amDefender.value
   if (choiceStage.value === 'challenger') return amChallenger.value
   return false
 })
 const canRollNow = computed(() => {
   if (!isParticipant.value || hasRolled.value || subPhase.value !== 'rolling') return false
-  if (isTrainerBattle.value) return amChallenger.value
+  if (isSoloBattleMode.value) return amChallenger.value
   return amChallenger.value || amDefender.value
 })
 const choosingHint = computed(() => {
+  if (isGymBattle.value) return `Escolha o Pokémon que irá enfrentar ${defenderLabel.value}`
   if (isTrainerBattle.value) return `Escolha o Pokémon que irá enfrentar ${defenderLabel.value}`
   if (choiceStage.value === 'defender' && amDefender.value) return 'Escolha primeiro o Pokémon que irá batalhar'
   if (choiceStage.value === 'challenger' && amChallenger.value) return 'Agora escolha o Pokémon que irá batalhar'
   return 'Escolha um Pokémon para batalhar'
 })
 const waitingChoiceMessage = computed(() => {
+  if (isGymBattle.value) return 'Aguardando sua escolha para continuar o desafio do ginásio.'
   if (isTrainerBattle.value) return 'Aguardando sua escolha para enfrentar o treinador.'
   if (choiceStage.value === 'defender' && amChallenger.value) return `${defenderLabel.value} escolhe primeiro. Aguarde.`
   if (choiceStage.value === 'challenger' && amDefender.value) return `${challenger.value?.name ?? 'Desafiante'} está escolhendo agora.`
   return 'Pokémon escolhido! Aguardando oponente...'
 })
-const rollingHint = computed(() => isTrainerBattle.value ? 'Role seu dado para enfrentar o treinador!' : 'Role seu dado de batalha!')
+const rollingHint = computed(() => {
+  if (isGymBattle.value) return 'Role seu dado para este round do ginásio!'
+  return isTrainerBattle.value ? 'Role seu dado para enfrentar o treinador!' : 'Role seu dado de batalha!'
+})
 const waitingRollMessage = computed(() => {
+  if (isGymBattle.value) return 'Dado rolado! O líder está resolvendo o round...'
   if (isTrainerBattle.value) return 'Dado rolado! Resolvendo batalha do treinador...'
   return 'Dado rolado! Aguardando oponente...'
 })
@@ -274,8 +294,19 @@ const waitingRollMessage = computed(() => {
 const myPokemon = computed(() => {
   const player = localBattlePlayer.value
   if (!player) return []
-  const pool = [...(player.pokemon ?? [])]
-  if (player.starter_pokemon) pool.push(player.starter_pokemon)
+  const defeatedSlots = new Set(battle.value.defeated_player_slots ?? [])
+  const pool = (player.pokemon ?? []).map((pokemon, index) => ({
+    ...pokemon,
+    battle_slot_key: `pokemon:${index}`,
+    knocked_out: !!pokemon.knocked_out || defeatedSlots.has(`pokemon:${index}`),
+  }))
+  if (player.starter_pokemon) {
+    pool.push({
+      ...player.starter_pokemon,
+      battle_slot_key: 'starter',
+      knocked_out: !!player.starter_pokemon.knocked_out || defeatedSlots.has('starter'),
+    })
+  }
   return pool
 })
 
@@ -288,6 +319,12 @@ const opponent = computed(() =>
   localBattleActorId.value === battle.value.challenger_id ? defender.value : challenger.value
 )
 const opponentPokemon = computed(() => {
+  if (isGymBattle.value) {
+    const defeatedIndexes = new Set(battle.value.defeated_leader_indexes ?? [])
+    return (battle.value.leader_team ?? [])
+      .map((pokemon, index) => ({ ...pokemon, targetIndex: index }))
+      .filter((pokemon) => !defeatedIndexes.has(pokemon.targetIndex))
+  }
   const opp = opponent.value
   if (!opp) return []
   const pool = [...(opp.pokemon ?? [])]
@@ -295,15 +332,23 @@ const opponentPokemon = computed(() => {
   return pool
 })
 const opponentHasChosen = computed(() => {
-  if (isTrainerBattle.value) return true
+  if (isSoloBattleMode.value) return true
   const b = battle.value
   if (localBattleActorId.value === b.challenger_id) return !!b.defender_choice
   if (localBattleActorId.value === b.defender_id) return !!b.challenger_choice
   return false
 })
+const canUseGustNow = computed(() =>
+  canUseBattleItems.value
+  && gustOfWindQuantity.value > 0
+  && subPhase.value === 'choosing'
+  && canChooseNow.value
+  && (isGymBattle.value || !opponentHasChosen.value)
+)
 
 function confirmChoice() {
   if (selectedIndex.value === null) return
+  if (myPokemon.value[selectedIndex.value]?.knocked_out) return
   if (usePlusPower.value && canUseBattleItems.value && pluspowerQuantity.value > 0) {
     store.actions.useItem('pluspower', { pokemon_index: selectedIndex.value })
   }
@@ -335,7 +380,16 @@ watch(() => store.lastEvent, (event) => {
     lastResult.value = result
     const winnerId = result.winner_id
     const winnerPlayer = allPlayers.value.find(p => p.id === winnerId)
-    winnerName.value = winnerPlayer?.name ?? 'Vencedor'
+    winnerName.value = winnerPlayer?.name ?? result.winner_name ?? 'Vencedor'
+    if (result.mode === 'gym') {
+      winnerSubtitle.value = result.battle_finished
+        ? (result.gym_victory ? 'venceu o ginásio!' : 'venceu o desafio!')
+        : 'venceu o round!'
+    } else if (result.mode === 'trainer') {
+      winnerSubtitle.value = 'venceu a batalha!'
+    } else {
+      winnerSubtitle.value = 'venceu o duelo!'
+    }
     showWinnerBanner.value = true
     setTimeout(() => { showWinnerBanner.value = false }, 3500)
   }
@@ -406,6 +460,8 @@ watch(() => store.lastEvent, (event) => {
 }
 .pokemon-btn:hover { border-color: var(--color-accent); }
 .pokemon-btn.selected { border-color: var(--color-accent); background: rgba(244,208,63,0.08); }
+.pokemon-btn:disabled { cursor: not-allowed; opacity: 0.55; }
+.pokemon-btn--ko { border-color: #9b3d3d; }
 .pokemon-btn strong { flex: 1; text-align: left; color: var(--color-accent); }
 .pokemon-btn-img {
   width: 44px; height: 44px;
@@ -419,6 +475,10 @@ watch(() => store.lastEvent, (event) => {
   color: var(--color-text-muted);
 }
 .types { font-size: 0.75rem; color: var(--color-text-muted); }
+.ko-badge {
+  font-size: 0.72rem;
+  color: #ff9090;
+}
 
 .pluspower-toggle {
   display: flex; align-items: center; gap: .5rem;

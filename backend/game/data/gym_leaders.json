@@ -1,0 +1,111 @@
+{
+  "gyms": [
+    {
+      "id": "brock",
+      "tile_id": 24,
+      "leader_name": "Brock",
+      "gym_name": "Pewter City Gym",
+      "badge_name": "Boulder Badge",
+      "badge_image_path": "/assets/split_remaining_assets_v2/Items & Miscellaneous/kanto_badges_5x/item_25.png",
+      "master_points_reward": 20,
+      "leader_team": [
+        { "name": "Onix", "battle_points": 4, "types": ["Rock", "Ground"] }
+      ]
+    },
+    {
+      "id": "misty",
+      "tile_id": 49,
+      "leader_name": "Misty",
+      "gym_name": "Cerulean City Gym",
+      "badge_name": "Cascade Badge",
+      "badge_image_path": "/assets/split_remaining_assets_v2/Items & Miscellaneous/kanto_badges_5x/item_26.png",
+      "master_points_reward": 20,
+      "leader_team": [
+        { "name": "Horsea", "battle_points": 5, "types": ["Water"] },
+        { "name": "Vaporeon", "battle_points": 6, "types": ["Water"] }
+      ]
+    },
+    {
+      "id": "lt_surge",
+      "tile_id": 64,
+      "leader_name": "Lt. Surge",
+      "gym_name": "Vermillion City Gym",
+      "badge_name": "Thunder Badge",
+      "badge_image_path": "/assets/split_remaining_assets_v2/Items & Miscellaneous/kanto_badges_5x/item_27.png",
+      "master_points_reward": 20,
+      "leader_team": [
+        { "name": "Electabuzz", "battle_points": 6, "types": ["Electric"] },
+        { "name": "Pikachu", "battle_points": 6, "types": ["Electric"] }
+      ]
+    },
+    {
+      "id": "erika",
+      "tile_id": 77,
+      "leader_name": "Erika",
+      "gym_name": "Celadon City Gym",
+      "badge_name": "Rainbow Badge",
+      "badge_image_path": "/assets/split_remaining_assets_v2/Items & Miscellaneous/kanto_badges_5x/item_28.png",
+      "master_points_reward": 20,
+      "leader_team": [
+        { "name": "Gloom", "battle_points": 6, "types": ["Grass", "Poison"] },
+        { "name": "Vileplume", "battle_points": 7, "types": ["Grass", "Poison"] }
+      ]
+    },
+    {
+      "id": "koga",
+      "tile_id": 111,
+      "leader_name": "Koga",
+      "gym_name": "Fuchsia City Gym",
+      "badge_name": "Soul Badge",
+      "badge_image_path": "/assets/split_remaining_assets_v2/Items & Miscellaneous/kanto_badges_5x/item_29.png",
+      "master_points_reward": 20,
+      "leader_team": [
+        { "name": "Venomoth", "battle_points": 4, "types": ["Bug", "Poison"] },
+        { "name": "Muk", "battle_points": 8, "types": ["Poison"] },
+        { "name": "Golbat", "battle_points": 4, "types": ["Poison", "Flying"] }
+      ]
+    },
+    {
+      "id": "sabrina",
+      "tile_id": 132,
+      "leader_name": "Sabrina",
+      "gym_name": "Saffron City Gym",
+      "badge_name": "Marsh Badge",
+      "badge_image_path": "/assets/split_remaining_assets_v2/Items & Miscellaneous/kanto_badges_5x/item_30.png",
+      "master_points_reward": 20,
+      "leader_team": [
+        { "name": "Hypno", "battle_points": 8, "types": ["Psychic"] },
+        { "name": "Abra", "battle_points": 7, "types": ["Psychic"] }
+      ]
+    },
+    {
+      "id": "blaine",
+      "tile_id": 147,
+      "leader_name": "Blaine",
+      "gym_name": "Cinnabar Island Gym",
+      "badge_name": "Volcano Badge",
+      "badge_image_path": "/assets/split_remaining_assets_v2/Items & Miscellaneous/kanto_badges_5x/item_31.png",
+      "master_points_reward": 20,
+      "leader_team": [
+        { "name": "Charmeleon", "battle_points": 7, "types": ["Fire"] },
+        { "name": "Arcanine", "battle_points": 8, "types": ["Fire"] },
+        { "name": "Flareon", "battle_points": 7, "types": ["Fire"] }
+      ]
+    },
+    {
+      "id": "giovanni",
+      "tile_id": 159,
+      "leader_name": "Giovanni",
+      "gym_name": "Viridian City Gym",
+      "badge_name": "Earth Badge",
+      "badge_image_path": "/assets/split_remaining_assets_v2/Items & Miscellaneous/kanto_badges_5x/item_32.png",
+      "master_points_reward": 20,
+      "leader_team": [
+        { "name": "Dugtrio", "battle_points": 8, "types": ["Ground"] },
+        { "name": "Nidoking", "battle_points": 8, "types": ["Poison", "Ground"] },
+        { "name": "Nidoqueen", "battle_points": 8, "types": ["Poison", "Ground"] },
+        { "name": "Rhyhorn", "battle_points": 7, "types": ["Ground", "Rock"] }
+      ]
+    }
+  ]
+}
