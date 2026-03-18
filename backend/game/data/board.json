@@ -69,31 +69,27 @@
         "encounters": [
           {
             "roll": [
-              1
-            ],
-            "pokemon_name": "Tangela"
-          },
-          {
-            "roll": [
-              2,
-              3
+              1,
+              2
             ],
             "pokemon_name": "Rattata",
             "pokemon_id": 19
           },
           {
             "roll": [
-              4,
-              5
+              3,
+              4
             ],
             "pokemon_name": "Pidgey",
             "pokemon_id": 16
           },
           {
             "roll": [
+              5,
               6
             ],
-            "pokemon_name": "Mr. Mime"
+            "pokemon_name": "Weedle",
+            "pokemon_id": 13
           }
         ]
       }
@@ -107,31 +103,27 @@
         "encounters": [
           {
             "roll": [
-              1
-            ],
-            "pokemon_name": "Tangela"
-          },
-          {
-            "roll": [
-              2,
-              3
+              1,
+              2
             ],
             "pokemon_name": "Rattata",
             "pokemon_id": 19
           },
           {
             "roll": [
-              4,
-              5
+              3,
+              4
             ],
             "pokemon_name": "Pidgey",
             "pokemon_id": 16
           },
           {
             "roll": [
+              5,
               6
             ],
-            "pokemon_name": "Mr. Mime"
+            "pokemon_name": "Weedle",
+            "pokemon_id": 13
           }
         ]
       }
@@ -352,63 +344,60 @@
     {
       "id": 17,
       "type": "duel",
-      "name": "Victory Road",
-      "description": "Espaco de Victory Road.",
+      "name": "Viridian Forest",
+      "description": "Espaco de duelo em Viridian Forest.",
       "data": {}
     },
     {
       "id": 18,
       "type": "grass",
-      "name": "Victory Road / Pewter Approach",
-      "description": "Area de captura em Victory Road / Pewter Approach com encontros definidos pelo tabuleiro Kanto.",
+      "name": "Viridian Forest",
+      "description": "Area de captura em Viridian Forest com encontros definidos pelo tabuleiro Kanto.",
       "data": {
         "encounters": [
           {
             "roll": [
               1
             ],
-            "pokemon_name": "Ditto",
-            "pokemon_id": 132,
+            "pokemon_name": "Pidgey",
+            "pokemon_id": 16
+          },
+          {
+            "roll": [
+              2,
+              3
+            ],
+            "pokemon_name": "Weedle",
+            "pokemon_id": 13
+          },
+          {
+            "roll": [
+              4,
+              5
+            ],
+            "pokemon_name": "Paras"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Farfetch'd",
             "reroll": [
               1,
-              2
+              2,
+              3,
+              4
             ]
           },
           {
             "roll": [
-              1
+              6
             ],
-            "pokemon_name": "Dunsparce",
+            "pokemon_name": "Pinsir",
             "reroll": [
               5,
               6
             ]
-          },
-          {
-            "roll": [
-              2
-            ],
-            "pokemon_name": "Graveler",
-            "pokemon_id": 75
-          },
-          {
-            "roll": [
-              3
-            ],
-            "pokemon_name": "Cubone"
-          },
-          {
-            "roll": [
-              5
-            ],
-            "pokemon_name": "Golbat"
-          },
-          {
-            "roll": [
-              6
-            ],
-            "pokemon_name": "Gengar",
-            "pokemon_id": 94
           }
         ]
       }
@@ -1426,7 +1415,33 @@
       "type": "grass",
       "name": "Vermillion City",
       "description": "Espaco de Vermillion City.",
-      "data": {}
+      "data": {
+        "encounters": [
+          {
+            "roll": [
+              1,
+              2
+            ],
+            "pokemon_name": "Tangela"
+          },
+          {
+            "roll": [
+              4
+            ],
+            "pokemon_name": "Electabuzz"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Zapdos",
+            "pokemon_id": 145,
+            "reroll": [
+              5
+            ]
+          }
+        ]
+      }
     },
     {
       "id": 70,
@@ -2911,15 +2926,15 @@
     {
       "id": 149,
       "type": "event",
-      "name": "Ocean Route / Viridian City",
-      "description": "Espaco de Ocean Route / Viridian City.",
+      "name": "Ocean Route",
+      "description": "Espaco de Ocean Route.",
       "data": {}
     },
     {
       "id": 150,
       "type": "duel",
-      "name": "Ocean Route / Viridian City",
-      "description": "Espaco de Ocean Route / Viridian City.",
+      "name": "Ocean Route",
+      "description": "Espaco de Ocean Route.",
       "data": {}
     },
     {
@@ -2982,8 +2997,8 @@
     {
       "id": 152,
       "type": "event",
-      "name": "Ocean Route / Viridian City",
-      "description": "Espaco de Ocean Route / Viridian City.",
+      "name": "Ocean Route",
+      "description": "Espaco de Ocean Route.",
       "data": {}
     },
     {
@@ -3103,72 +3118,35 @@
     {
       "id": 155,
       "type": "event",
-      "name": "Ocean Route / Viridian City",
-      "description": "Espaco de Ocean Route / Viridian City.",
+      "name": "Mystery Cave",
+      "description": "Espaco de Mystery Cave.",
       "data": {}
     },
     {
       "id": 156,
       "type": "grass",
-      "name": "Ocean Route / Viridian City",
-      "description": "Area de captura em Ocean Route / Viridian City com encontros definidos pelo tabuleiro Kanto.",
+      "name": "Mystery Cave",
+      "description": "Area de captura em Mystery Cave com encontros definidos pelo tabuleiro Kanto.",
       "data": {
         "encounters": [
           {
             "roll": [
-              2
+              1
             ],
-            "pokemon_name": "Starmie"
-          },
-          {
-            "roll": [
-              4
-            ],
-            "pokemon_name": "Tentacruel"
-          },
-          {
-            "roll": [
-              5
-            ],
-            "pokemon_name": "Gyarados",
-            "pokemon_id": 130,
+            "pokemon_name": "Moltres",
+            "pokemon_id": 146,
             "reroll": [
-              5
-            ]
-          },
-          {
-            "roll": [
-              6
-            ],
-            "pokemon_name": "Dratini",
-            "pokemon_id": 147,
-            "reroll": [
-              1,
-              2,
-              3
-            ]
-          },
-          {
-            "roll": [
-              6
-            ],
-            "pokemon_name": "Lapras",
-            "pokemon_id": 131,
-            "reroll": [
-              4,
-              5,
-              6
+              1
             ]
           }
-        ],
-        "terrain": "water"
+        ]
       }
     },
     {
       "id": 157,
       "type": "city",
-      "name": "Ocean Route / Viridian City - PokeMart",
-      "description": "PokeMart em Ocean Route / Viridian City.",
+      "name": "Viridian City - PokeMart",
+      "description": "PokeMart em Viridian City.",
       "data": {
         "city_kind": "pokemart"
       }
@@ -3176,8 +3154,8 @@
     {
       "id": 158,
       "type": "city",
-      "name": "Ocean Route / Viridian City - Pokemon Center",
-      "description": "Pokemon Center em Ocean Route / Viridian City.",
+      "name": "Viridian City - Pokemon Center",
+      "description": "Pokemon Center em Viridian City.",
       "data": {
         "city_kind": "pokemon_center"
       }
@@ -3203,20 +3181,50 @@
         "encounters": [
           {
             "roll": [
+              1
+            ],
+            "pokemon_name": "Ditto",
+            "pokemon_id": 132,
+            "reroll": [
               1,
               2
-            ],
-            "pokemon_name": "Rattata",
-            "pokemon_id": 19
+            ]
           },
           {
             "roll": [
-              3,
-              4,
+              1
+            ],
+            "pokemon_name": "Dunsparce",
+            "reroll": [
               5,
               6
+            ]
+          },
+          {
+            "roll": [
+              2
             ],
-            "pokemon_name": "Grimer"
+            "pokemon_name": "Graveler",
+            "pokemon_id": 75
+          },
+          {
+            "roll": [
+              3
+            ],
+            "pokemon_name": "Cubone"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Golbat"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Gengar",
+            "pokemon_id": 94
           }
         ]
       }
@@ -3230,20 +3238,50 @@
         "encounters": [
           {
             "roll": [
+              1
+            ],
+            "pokemon_name": "Ditto",
+            "pokemon_id": 132,
+            "reroll": [
               1,
               2
-            ],
-            "pokemon_name": "Rattata",
-            "pokemon_id": 19
+            ]
           },
           {
             "roll": [
-              3,
-              4,
+              1
+            ],
+            "pokemon_name": "Dunsparce",
+            "reroll": [
               5,
               6
+            ]
+          },
+          {
+            "roll": [
+              2
             ],
-            "pokemon_name": "Grimer"
+            "pokemon_name": "Graveler",
+            "pokemon_id": 75
+          },
+          {
+            "roll": [
+              3
+            ],
+            "pokemon_name": "Cubone"
+          },
+          {
+            "roll": [
+              5
+            ],
+            "pokemon_name": "Golbat"
+          },
+          {
+            "roll": [
+              6
+            ],
+            "pokemon_name": "Gengar",
+            "pokemon_id": 94
           }
         ]
       }

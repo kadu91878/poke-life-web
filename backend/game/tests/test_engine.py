@@ -12,7 +12,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from game.engine import state as engine
-from game.engine.cards import load_playable_pokemon_by_name
+from game.engine.cards import load_playable_pokemon_by_name, load_victory_cards
 from game.engine.mechanics import (
     roll_dice, calculate_battle_score, resolve_duel,
     resolve_gym_battle, can_evolve, calculate_final_scores,
@@ -426,11 +426,12 @@ class TestMovement(TestCase):
         p1_after = next(p for p in state['players'] if p['id'] == p1_id)
         self.assertLessEqual(p1_after['position'], 169)  # max board position
 
-    def test_grass_tile_sets_action_phase_with_pokemon(self):
+    def test_grass_tile_sets_capture_attempt_without_predeciding_pokemon(self):
         state, p1_id, _ = self._ready_to_roll()
         state = _land_on_tile(state, p1_id, 85)  # route 1 table with supported Pokémon
         self.assertEqual(state['turn']['phase'], 'action')
-        self.assertIsNotNone(state['turn']['pending_pokemon'])
+        self.assertEqual((state['turn'].get('pending_action') or {}).get('type'), 'capture_attempt')
+        self.assertIsNone(state['turn']['pending_pokemon'])
 
     def test_city_tile_grants_full_restore(self):
         state, p1_id, _ = self._ready_to_roll()
@@ -1342,9 +1343,31 @@ class TestCapture(TestCase):
         starters = state['turn']['available_starters']
         state = engine.select_starter(state, p1_id, starters[0]['id'])
         state = engine.select_starter(state, p2_id, starters[1]['id'])
-        with patch('game.engine.state.random.randint', return_value=1):
-            state = _land_on_tile(state, p1_id, 85)
+        state = _land_on_tile(state, p1_id, 85)
         return state, p1_id
+
+    def _add_team_pokemon(self, state: dict, player_id: str, pokemon_name: str, *, acquisition_origin: str = 'captured') -> dict:
+        player = next(p for p in state['players'] if p['id'] == player_id)
+        pokemon = copy.deepcopy(load_playable_pokemon_by_name(pokemon_name))
+        self.assertIsNotNone(pokemon, f'{pokemon_name} precisa existir no dataset jogável')
+        if acquisition_origin == 'captured':
+            pokemon = engine._apply_pokemon_acquisition_metadata(  # noqa: SLF001 - helper autoritativo do engine
+                pokemon,
+                acquisition_origin='captured',
+                capture_sequence=engine._next_capture_sequence(player),  # noqa: SLF001 - mantém ordem real de captura
+                capture_context='test_capture',
+            )
+        else:
+            pokemon = engine._apply_pokemon_acquisition_metadata(  # noqa: SLF001 - helper autoritativo do engine
+                pokemon,
+                acquisition_origin=acquisition_origin,
+                capture_sequence=None,
+                capture_context='test_reward',
+            )
+        player['pokemon'].append(pokemon)
+        player['pokeballs'] = max(0, int(player.get('pokeballs', 0) or 0) - pokemon_slot_cost(pokemon))
+        sync_player_inventory(player)
+        return pokemon
 
     def test_capture_deducts_pokeball(self):
         state, p1_id = self._state_with_pending_pokemon()
@@ -1371,9 +1394,9 @@ class TestCapture(TestCase):
 
     def test_capture_adds_pokemon_to_collection(self):
         state, p1_id = self._state_with_pending_pokemon()
-        pokemon = state['turn']['pending_pokemon']
 
-        new_state, result = engine.capture_pokemon(state, p1_id)
+        with patch('game.engine.state.roll_capture_dice', return_value=4):
+            new_state, result = engine.capture_pokemon(state, p1_id)
         self.assertIsNotNone(new_state)
         p1 = next(p for p in new_state['players'] if p['id'] == p1_id)
         self.assertEqual(len(p1['pokemon']), 1)
@@ -1381,7 +1404,8 @@ class TestCapture(TestCase):
     def test_capture_marks_pokemon_as_captured_with_sequence(self):
         state, p1_id = self._state_with_pending_pokemon()
 
-        new_state, _ = engine.capture_pokemon(state, p1_id)
+        with patch('game.engine.state.roll_capture_dice', return_value=4):
+            new_state, _ = engine.capture_pokemon(state, p1_id)
 
         p1 = next(p for p in new_state['players'] if p['id'] == p1_id)
         self.assertEqual(p1['pokemon'][0]['acquisition_origin'], 'captured')
@@ -1389,21 +1413,30 @@ class TestCapture(TestCase):
 
     def test_capture_adds_master_points(self):
         state, p1_id = self._state_with_pending_pokemon()
-        pokemon = state['turn']['pending_pokemon']
-        mp = pokemon.get('master_points', 0)
+        mp = load_playable_pokemon_by_name('Pidgey').get('master_points', 0)
 
-        new_state, result = engine.capture_pokemon(state, p1_id)
+        with patch('game.engine.state.roll_capture_dice', return_value=4):
+            new_state, result = engine.capture_pokemon(state, p1_id)
         p1 = next(p for p in new_state['players'] if p['id'] == p1_id)
         self.assertEqual(p1['master_points'], mp)
 
-    def test_capture_fails_without_pokeballs(self):
+    def test_capture_with_full_party_enters_release_phase(self):
         state, p1_id = self._state_with_pending_pokemon()
         p1 = next(p for p in state['players'] if p['id'] == p1_id)
+        incoming_name = 'Pidgey'
         p1['pokeballs'] = 0
+        sync_player_inventory(p1)
 
-        new_state, error = engine.capture_pokemon(state, p1_id)
-        self.assertIsNone(new_state)
-        self.assertIn('Pokébola', error)
+        with patch('game.engine.state.roll_capture_dice', return_value=4):
+            new_state, result = engine.capture_pokemon(state, p1_id)
+
+        self.assertIsNotNone(new_state)
+        self.assertTrue(result['requires_release'])
+        self.assertEqual(new_state['turn']['phase'], 'release_pokemon')
+        self.assertEqual(new_state['turn']['pending_release_choice']['player_id'], p1_id)
+        self.assertEqual(new_state['turn']['pending_release_choice']['pokemon']['name'], incoming_name)
+        option_slot_keys = {option['slot_key'] for option in new_state['turn']['pending_release_choice']['options']}
+        self.assertIn('starter', option_slot_keys)
 
     def test_capture_fails_without_pending_pokemon(self):
         state, p1_id, _ = _init_two_player_game()
@@ -1417,7 +1450,8 @@ class TestCapture(TestCase):
         p1 = next(p for p in state['players'] if p['id'] == p1_id)
         pokeballs_before = p1['pokeballs']
 
-        new_state, result = engine.capture_pokemon(state, p1_id)
+        with patch('game.engine.state.roll_capture_dice', return_value=4):
+            new_state, result = engine.capture_pokemon(state, p1_id)
         self.assertIsNotNone(new_state)
         p1_after = next(p for p in new_state['players'] if p['id'] == p1_id)
         self.assertEqual(p1_after['pokeballs'], pokeballs_before)  # sem custo
@@ -1430,7 +1464,8 @@ class TestCapture(TestCase):
         p1 = next(p for p in state['players'] if p['id'] == p1_id)
         pokeballs_before = p1['pokeballs']
 
-        new_state, result = engine.capture_pokemon(state, p1_id)
+        with patch('game.engine.state.roll_capture_dice', return_value=4):
+            new_state, result = engine.capture_pokemon(state, p1_id)
         self.assertIsNotNone(new_state)
         p1_after = next(p for p in new_state['players'] if p['id'] == p1_id)
         self.assertEqual(p1_after['pokeballs'], pokeballs_before - 2)
@@ -1444,7 +1479,8 @@ class TestCapture(TestCase):
         pokeballs_before = p1['pokeballs']
         fr_before = p1['full_restores']
 
-        new_state, result = engine.capture_pokemon(state, p1_id, use_full_restore=True)
+        with patch('game.engine.state.roll_capture_dice', return_value=4):
+            new_state, result = engine.capture_pokemon(state, p1_id, use_full_restore=True)
         self.assertIsNotNone(new_state)
         p1_after = next(p for p in new_state['players'] if p['id'] == p1_id)
         self.assertEqual(p1_after['pokeballs'], pokeballs_before)  # pokeballs intactas
@@ -1479,7 +1515,7 @@ class TestCapture(TestCase):
 
     def test_capture_failure_does_not_add_pokemon(self):
         state, p1_id = self._state_with_pending_pokemon()
-        pokemon = copy.deepcopy(state['turn']['pending_pokemon'])
+        pokemon = copy.deepcopy(load_playable_pokemon_by_name('Pidgey'))
         state = engine._queue_capture_attempt(  # noqa: SLF001 - teste do fluxo autoritativo
             state,
             p1_id,
@@ -1517,7 +1553,159 @@ class TestCapture(TestCase):
         player = next(p for p in state['players'] if p['id'] == p1_id)
         self.assertEqual(len(player['pokemon']), 0)
         self.assertEqual(state['turn']['pending_action']['type'], 'capture_attempt')
-        self.assertIsNotNone(state['turn']['pending_pokemon'])
+        self.assertIsNone(state['turn']['pending_pokemon'])
+
+    def test_route1_capture_table_uses_capture_die_mapping(self):
+        expected_by_roll = {
+            1: 'Rattata',
+            2: 'Rattata',
+            3: 'Pidgey',
+            4: 'Pidgey',
+            5: 'Weedle',
+            6: 'Weedle',
+        }
+
+        for capture_roll, expected_name in expected_by_roll.items():
+            with self.subTest(capture_roll=capture_roll, expected=expected_name):
+                state, p1_id = self._state_with_pending_pokemon()
+                with patch('game.engine.state.roll_capture_dice', return_value=capture_roll):
+                    new_state, result = engine.roll_capture_attempt(state, p1_id)
+
+                player_after = next(p for p in new_state['players'] if p['id'] == p1_id)
+                self.assertEqual(player_after['pokemon'][0]['name'], expected_name)
+                self.assertEqual(result['capture_roll']['raw_result'], capture_roll)
+
+    def test_movement_roll_never_decides_route1_capture_result(self):
+        state, p1_id, p2_id = _init_two_player_game()
+        starters = state['turn']['available_starters']
+        state = engine.select_starter(state, p1_id, starters[0]['id'])
+        state = engine.select_starter(state, p2_id, starters[1]['id'])
+        player = next(p for p in state['players'] if p['id'] == p1_id)
+        player['position'] = 80
+
+        with patch('game.engine.state.roll_movement_dice', return_value=5):
+            rolled_state, movement_roll = engine.perform_movement_roll(state, p1_id)
+        moved_state = engine.process_move(rolled_state, p1_id, int(movement_roll['final_result']))
+
+        self.assertEqual(movement_roll['raw_result'], 5)
+        self.assertEqual(moved_state['turn']['current_tile']['id'], 85)
+        self.assertEqual(moved_state['turn']['last_roll']['roll_type'], 'movimento')
+        self.assertIsNone(moved_state['turn']['pending_pokemon'])
+
+        with patch('game.engine.state.roll_capture_dice', return_value=2):
+            new_state, result = engine.roll_capture_attempt(moved_state, p1_id)
+
+        player_after = next(p for p in new_state['players'] if p['id'] == p1_id)
+        self.assertEqual(player_after['pokemon'][0]['name'], 'Rattata')
+        self.assertEqual(result['capture_roll']['raw_result'], 2)
+        self.assertEqual(new_state['turn']['last_roll']['roll_type'], 'captura')
+
+    def test_board_capture_reroll_waits_for_new_capture_die(self):
+        state, p1_id, p2_id = _init_two_player_game()
+        starters = state['turn']['available_starters']
+        state = engine.select_starter(state, p1_id, starters[0]['id'])
+        state = engine.select_starter(state, p2_id, starters[1]['id'])
+        state = _land_on_tile(state, p1_id, 15)
+
+        with patch('game.engine.state.roll_capture_dice', return_value=6):
+            mid_state, result = engine.roll_capture_attempt(state, p1_id)
+
+        self.assertTrue(result['requires_additional_roll'])
+        self.assertEqual(mid_state['turn']['pending_action']['capture_rolls'], [6])
+        self.assertTrue(mid_state['turn']['pending_action']['requires_additional_roll'])
+        self.assertIsNone(mid_state['turn']['pending_pokemon'])
+
+        with patch('game.engine.state.roll_capture_dice', return_value=5):
+            new_state, final_result = engine.roll_capture_attempt(mid_state, p1_id)
+
+        player_after = next(p for p in new_state['players'] if p['id'] == p1_id)
+        self.assertEqual(player_after['pokemon'][0]['name'], 'Pinsir')
+        self.assertEqual(final_result['capture_roll']['all_rolls'], [6, 5])
+
+    def test_moltres_capture_succeeds_only_with_two_capture_ones(self):
+        state, p1_id, p2_id = _init_two_player_game()
+        starters = state['turn']['available_starters']
+        state = engine.select_starter(state, p1_id, starters[0]['id'])
+        state = engine.select_starter(state, p2_id, starters[1]['id'])
+        state = _land_on_tile(state, p1_id, 156)
+
+        with patch('game.engine.state.roll_capture_dice', return_value=1):
+            mid_state, result = engine.roll_capture_attempt(state, p1_id)
+
+        self.assertTrue(result['requires_additional_roll'])
+        self.assertEqual(mid_state['turn']['pending_action']['capture_rolls'], [1])
+
+        with patch('game.engine.state.roll_capture_dice', return_value=1):
+            new_state, final_result = engine.roll_capture_attempt(mid_state, p1_id)
+
+        player_after = next(p for p in new_state['players'] if p['id'] == p1_id)
+        self.assertEqual(player_after['pokemon'][0]['name'], 'Moltres')
+        self.assertEqual(final_result['capture_roll']['all_rolls'], [1, 1])
+
+    def test_moltres_capture_fails_when_second_capture_roll_differs(self):
+        state, p1_id, p2_id = _init_two_player_game()
+        starters = state['turn']['available_starters']
+        state = engine.select_starter(state, p1_id, starters[0]['id'])
+        state = engine.select_starter(state, p2_id, starters[1]['id'])
+        state = _land_on_tile(state, p1_id, 156)
+
+        with patch('game.engine.state.roll_capture_dice', return_value=1):
+            mid_state, result = engine.roll_capture_attempt(state, p1_id)
+
+        self.assertTrue(result['requires_additional_roll'])
+
+        with patch('game.engine.state.roll_capture_dice', return_value=2):
+            new_state, final_result = engine.roll_capture_attempt(mid_state, p1_id)
+
+        player_after = next(p for p in new_state['players'] if p['id'] == p1_id)
+        self.assertEqual(player_after['pokemon'], [])
+        self.assertFalse(final_result['success'])
+        self.assertIsNone(new_state['turn']['pending_action'])
+
+    def test_moltres_capture_fails_immediately_without_initial_one(self):
+        state, p1_id, p2_id = _init_two_player_game()
+        starters = state['turn']['available_starters']
+        state = engine.select_starter(state, p1_id, starters[0]['id'])
+        state = engine.select_starter(state, p2_id, starters[1]['id'])
+        state = _land_on_tile(state, p1_id, 156)
+
+        with patch('game.engine.state.roll_capture_dice', return_value=2):
+            new_state, result = engine.roll_capture_attempt(state, p1_id)
+
+        player_after = next(p for p in new_state['players'] if p['id'] == p1_id)
+        self.assertEqual(player_after['pokemon'], [])
+        self.assertFalse(result['success'])
+        self.assertIsNone(new_state['turn']['pending_action'])
+
+    def test_victory_choice_pack_uses_new_capture_die_for_follow_up_roll(self):
+        state, p1_id, p2_id = _init_two_player_game()
+        starters = state['turn']['available_starters']
+        state = engine.select_starter(state, p1_id, starters[0]['id'])
+        state = engine.select_starter(state, p2_id, starters[1]['id'])
+        card = next(card for card in load_victory_cards() if card.get('category') == 'wild_pokemon_choice')
+        state = engine._queue_capture_attempt(  # noqa: SLF001 - cobre a fila autoritativa da carta
+            state,
+            p1_id,
+            pokemon=None,
+            capture_context='victory_wild',
+            source='victory_card',
+            resolver_card=card,
+            source_card=card,
+        )
+
+        with patch('game.engine.state.roll_capture_dice', return_value=1):
+            mid_state, result = engine.roll_capture_attempt(state, p1_id)
+
+        self.assertTrue(result['requires_additional_roll'])
+        self.assertEqual(mid_state['turn']['pending_action']['capture_rolls'], [1])
+        self.assertIsNone(mid_state['turn']['pending_pokemon'])
+
+        with patch('game.engine.state.roll_capture_dice', return_value=2):
+            new_state, final_result = engine.roll_capture_attempt(mid_state, p1_id)
+
+        player_after = next(p for p in new_state['players'] if p['id'] == p1_id)
+        self.assertEqual(player_after['pokemon'][0]['name'], 'Growlithe')
+        self.assertEqual(final_result['capture_roll']['all_rolls'], [1, 2])
 
     def test_capture_attempt_rejects_other_player(self):
         state, p1_id, p2_id = _init_two_player_game()
@@ -1560,6 +1748,106 @@ class TestCapture(TestCase):
         self.assertFalse(result['success'])
         self.assertFalse(any(p['name'] == 'Missingno' for p in player_after['pokemon']))
         self.assertTrue(any('cards_metadata.json' in entry['message'] for entry in new_state['log']))
+
+    def test_capture_release_choice_lists_team_and_starter_options(self):
+        state, p1_id = self._state_with_pending_pokemon()
+        player = next(p for p in state['players'] if p['id'] == p1_id)
+        starter_name = player['starter_pokemon']['name']
+        incoming_name = 'Pidgey'
+        self._add_team_pokemon(state, p1_id, 'Rattata')
+        player['pokeballs'] = 0
+        sync_player_inventory(player)
+
+        with patch('game.engine.state.roll_capture_dice', return_value=4):
+            new_state, result = engine.roll_capture_attempt(state, p1_id)
+
+        pending = new_state['turn']['pending_release_choice']
+        labels = {option['label'] for option in pending['options']}
+        slot_keys = {option['slot_key'] for option in pending['options']}
+
+        self.assertTrue(result['requires_release'])
+        self.assertEqual(new_state['turn']['pending_pokemon']['name'], incoming_name)
+        self.assertEqual(new_state['turn']['phase'], 'release_pokemon')
+        self.assertIn('pokemon:0', slot_keys)
+        self.assertIn('starter', slot_keys)
+        self.assertTrue(any('Rattata' in label for label in labels))
+        self.assertTrue(any(starter_name in label for label in labels))
+
+    def test_capture_release_choice_replaces_selected_team_pokemon(self):
+        state, p1_id = self._state_with_pending_pokemon()
+        player = next(p for p in state['players'] if p['id'] == p1_id)
+        incoming_name = 'Pidgey'
+        self._add_team_pokemon(state, p1_id, 'Rattata')
+        player['pokeballs'] = 0
+        sync_player_inventory(player)
+
+        with patch('game.engine.state.roll_capture_dice', return_value=4):
+            state, _ = engine.roll_capture_attempt(state, p1_id)
+
+        new_state, result = engine.release_pokemon_for_capture(state, p1_id, pokemon_slot_key='pokemon:0')
+
+        self.assertIsNotNone(new_state)
+        self.assertEqual(result['released_pokemon']['name'], 'Rattata')
+        player_after = next(p for p in new_state['players'] if p['id'] == p1_id)
+        self.assertEqual([pokemon['name'] for pokemon in player_after['pokemon']], [incoming_name])
+        self.assertIsNotNone(player_after['starter_pokemon'])
+        self.assertEqual(player_after['starter_pokemon']['name'], player['starter_pokemon']['name'])
+        self.assertIsNone(new_state['turn']['pending_release_choice'])
+
+    def test_capture_release_choice_can_replace_starter_when_selected(self):
+        state, p1_id = self._state_with_pending_pokemon()
+        player = next(p for p in state['players'] if p['id'] == p1_id)
+        starter_name = player['starter_pokemon']['name']
+        incoming_name = 'Pidgey'
+        player['pokeballs'] = 0
+        sync_player_inventory(player)
+
+        with patch('game.engine.state.roll_capture_dice', return_value=4):
+            state, _ = engine.roll_capture_attempt(state, p1_id)
+
+        new_state, result = engine.release_pokemon_for_capture(state, p1_id, pokemon_slot_key='starter')
+
+        self.assertIsNotNone(new_state)
+        self.assertEqual(result['released_pokemon']['name'], starter_name)
+        player_after = next(p for p in new_state['players'] if p['id'] == p1_id)
+        self.assertIsNone(player_after['starter_pokemon'])
+        self.assertEqual([pokemon['name'] for pokemon in player_after['pokemon']], [incoming_name])
+
+    def test_capture_release_choice_cancel_keeps_party_intact(self):
+        state, p1_id = self._state_with_pending_pokemon()
+        player = next(p for p in state['players'] if p['id'] == p1_id)
+        starter_name = player['starter_pokemon']['name']
+        self._add_team_pokemon(state, p1_id, 'Rattata')
+        original_team = [pokemon['name'] for pokemon in player['pokemon']]
+        player['pokeballs'] = 0
+        sync_player_inventory(player)
+
+        with patch('game.engine.state.roll_capture_dice', return_value=4):
+            state, _ = engine.roll_capture_attempt(state, p1_id)
+
+        new_state = engine.skip_action(state, p1_id)
+
+        player_after = next(p for p in new_state['players'] if p['id'] == p1_id)
+        self.assertEqual([pokemon['name'] for pokemon in player_after['pokemon']], original_team)
+        self.assertEqual(player_after['starter_pokemon']['name'], starter_name)
+        self.assertIsNone(new_state['turn']['pending_release_choice'])
+        self.assertIsNone(new_state['turn']['pending_pokemon'])
+        self.assertEqual(new_state['turn']['current_player_id'], next(p['id'] for p in new_state['players'] if p['id'] != p1_id))
+
+    def test_capture_release_choice_rejects_invalid_selection_without_auto_release(self):
+        state, p1_id = self._state_with_pending_pokemon()
+        player = next(p for p in state['players'] if p['id'] == p1_id)
+        self._add_team_pokemon(state, p1_id, 'Rattata')
+        player['pokeballs'] = 0
+        sync_player_inventory(player)
+
+        with patch('game.engine.state.roll_capture_dice', return_value=4):
+            state, _ = engine.roll_capture_attempt(state, p1_id)
+
+        new_state, error = engine.release_pokemon_for_capture(state, p1_id, pokemon_slot_key='pokemon:99')
+
+        self.assertIsNone(new_state)
+        self.assertIn('inválido', error.lower())
 
 
 # ── Testes dos Special Tiles Restantes ───────────────────────────────────────
@@ -2209,6 +2497,29 @@ class TestStateSchema(TestCase):
         self.assertIn('full_restores', p)
         self.assertIn('badges', p)
         self.assertEqual(p['position'], 0)
+
+    def test_normalize_state_preserves_pending_release_choice(self):
+        state, p1_id, p2_id = _init_two_player_game()
+        starters = state['turn']['available_starters']
+        state = engine.select_starter(state, p1_id, starters[0]['id'])
+        state = engine.select_starter(state, p2_id, starters[1]['id'])
+        with patch('game.engine.state.random.randint', return_value=1):
+            state = _land_on_tile(state, p1_id, 85)
+        player = next(p for p in state['players'] if p['id'] == p1_id)
+        player['pokeballs'] = 0
+        sync_player_inventory(player)
+
+        with patch('game.engine.state.roll_capture_dice', return_value=4):
+            state, result = engine.roll_capture_attempt(state, p1_id)
+
+        normalized = normalize_state('TEST01', state)
+        pending = normalized['turn']['pending_release_choice']
+
+        self.assertTrue(result['requires_release'])
+        self.assertEqual(normalized['turn']['phase'], 'release_pokemon')
+        self.assertEqual(pending['player_id'], p1_id)
+        self.assertEqual(pending['pokemon']['name'], state['turn']['pending_pokemon']['name'])
+        self.assertTrue(any(option['slot_key'] == 'starter' for option in pending['options']))
 
 
 # ── Testes de Eventos ─────────────────────────────────────────────────────────

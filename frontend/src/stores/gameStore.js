@@ -245,7 +245,10 @@ export const useGameStore = defineStore('game', () => {
         return `Dado de ${rollType}: ${e.result}`
       },
       pokemon_captured:    (e) => `Capturou ${e.result?.pokemon?.name ?? 'Pokémon'}!`,
-      capture_roll_resolved: (e) => e.result?.success === false ? 'Captura falhou' : 'Rolagem de captura resolvida',
+      capture_roll_resolved: (e) => {
+        if (e.result?.requires_additional_roll) return 'Captura: role o dado novamente'
+        return e.result?.success === false ? 'Captura falhou' : 'Rolagem de captura resolvida'
+      },
       battle_resolved:     (e) => formatBattleResolvedMessage(e),
       battle_choice_registered: (e) => `${e.player_id === playerId.value ? 'Você escolheu' : 'Oponente escolheu'} um Pokémon!`,
       battle_roll_registered:   (e) => `${e.player_id === playerId.value ? 'Você rolou' : 'Oponente rolou'} o dado de batalha!`,
@@ -318,7 +321,12 @@ export const useGameStore = defineStore('game', () => {
     resolveEvent:     (useRunAway = false)        => send(gameActions.resolveEvent, { use_run_away: useRunAway }),
     resolvePendingAction: (optionId)              => send(gameActions.resolvePendingAction, { option_id: optionId }),
     discardItem:      (itemKey)                   => send(gameActions.discardItem, { item_key: itemKey }),
-    releasePokemon:   (pokemonIndex)              => send(gameActions.releasePokemon, { pokemon_index: pokemonIndex }),
+    releasePokemon:   (selection)                 => send(
+      gameActions.releasePokemon,
+      typeof selection === 'object' && selection !== null
+        ? selection
+        : { pokemon_index: selection },
+    ),
     useItem:          (itemKey, payload = {})     => send(gameActions.useItem, { item_key: itemKey, ...payload }),
     debugAddItem:     (itemKey, quantity = 1)     => send(gameActions.debugAddItem, { item_key: itemKey, quantity }),
     debugAddPokemonToTestPlayer: (pokemonName)    => send(gameActions.debugAddPokemonToTestPlayer, { pokemon_name: pokemonName }),

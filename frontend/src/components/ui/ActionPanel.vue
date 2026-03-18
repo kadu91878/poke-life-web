@@ -38,18 +38,21 @@
           <div class="pokemon-name">{{ pendingPokemon?.name ?? pendingAction?.pokemon_name ?? 'Captura pendente' }}</div>
           <div class="pokemon-type">{{ (pendingPokemon?.types || []).join(' / ') }}</div>
           <div class="event-description">
-            Role o dado de captura para resolver esta tentativa.
+            {{ pendingAction.prompt || 'Role o dado de captura para resolver esta tentativa.' }}
+          </div>
+          <div v-if="pendingCaptureRolls.length" class="safari-info">
+            Dados de captura: {{ pendingCaptureRolls.join(' → ') }}
           </div>
         </div>
         <template v-if="canRollPendingCapture && isFreeCapture">
-          <button class="btn-accent" @click="store.actions.rollCaptureDice()">🎲 Rolar dado de captura grátis</button>
+          <button class="btn-accent" @click="store.actions.rollCaptureDice()">🎲 {{ captureRollButtonLabel }} grátis</button>
         </template>
         <template v-else-if="canRollPendingCapture && isLegendaryCapture">
-          <button class="btn-primary" :disabled="(me?.pokeballs ?? 0) < 2" @click="store.actions.rollCaptureDice(false)">🎲 Rolar captura (2 Pokébolas)</button>
-          <button class="btn-secondary" :disabled="(me?.full_restores ?? 0) <= 0" @click="store.actions.rollCaptureDice(true)">🎲 Rolar usando Full Restore</button>
+          <button class="btn-primary" :disabled="(me?.pokeballs ?? 0) < 2" @click="store.actions.rollCaptureDice(false)">🎲 {{ captureRollButtonLabel }} (2 Pokébolas)</button>
+          <button class="btn-secondary" :disabled="(me?.full_restores ?? 0) <= 0" @click="store.actions.rollCaptureDice(true)">🎲 {{ captureRollButtonLabel }} usando Full Restore</button>
         </template>
         <template v-else-if="canRollPendingCapture">
-          <button class="btn-primary" @click="store.actions.rollCaptureDice()">🎲 Rolar dado de captura</button>
+          <button class="btn-primary" @click="store.actions.rollCaptureDice()">🎲 {{ captureRollButtonLabel }}</button>
         </template>
         <button v-if="canSkipPendingCapture" class="btn-ghost" @click="store.actions.skipAction()">{{ safariRemaining > 0 ? 'Pular este Pokémon' : 'Pular' }}</button>
       </template>
@@ -138,18 +141,31 @@
       </template>
       <template v-if="phase === 'release_pokemon' && pendingReleaseChoice">
         <div class="event-card">
-          <div class="event-title">🎾 Sem slots livres</div>
+          <div class="event-title">🎾 Party cheia</div>
           <div class="event-description">
-            Libere um Pokémon para abrir espaço e concluir a captura de {{ pendingReleaseChoice.pokemon?.name }}.
+            {{ pendingReleaseChoice.prompt || `Escolha qual Pokémon libertar para abrir espaço para ${pendingReleaseIncomingPokemon?.name ?? 'o novo Pokémon'}.` }}
+          </div>
+        </div>
+        <div class="pokemon-offer" :class="captureContextClass">
+          <div class="context-badge" v-if="captureContextLabel">{{ captureContextLabel }}</div>
+          <div class="pokemon-name">{{ pendingReleaseIncomingPokemon?.name ?? 'Novo Pokémon' }}</div>
+          <div class="pokemon-type">{{ (pendingReleaseIncomingPokemon?.types || []).join(' / ') }}</div>
+          <div class="pokemon-stats">
+            <span>⚔️ {{ pendingReleaseIncomingPokemon?.battle_points ?? '?' }}</span>
+            <span>⭐ {{ pendingReleaseIncomingPokemon?.master_points ?? '?' }}</span>
+            <span>🎾 {{ pendingReleaseIncomingPokemon?.slot_cost ?? pendingReleaseIncomingPokemon?.pokeball_slots ?? pendingReleaseChoice?.capture_cost ?? 1 }} slot(s)</span>
           </div>
         </div>
         <button
-          v-for="(pokemon, index) in releasablePokemon"
-          :key="`${pokemon.id}-${index}`"
+          v-for="option in pendingReleaseOptions"
+          :key="option.slot_key ?? option.id"
           class="btn-secondary duel-btn"
-          @click="store.actions.releasePokemon(index)"
+          @click="store.actions.releasePokemon({ pokemon_slot_key: option.slot_key ?? option.id })"
         >
-          🕊️ {{ pokemon.name }}<span class="duel-stats">{{ pokemon.slot_cost ?? pokemon.pokeball_slots ?? 1 }} slot(s)</span>
+          🕊️ {{ option.label }}<span class="duel-stats">{{ option.slot_cost ?? 1 }} slot(s)</span>
+        </button>
+        <button v-if="pendingReleaseChoice.allow_cancel" class="btn-ghost" @click="store.actions.skipAction()">
+          {{ releaseChoiceCancelLabel }}
         </button>
       </template>
       <template v-if="phase === 'battle'">
@@ -247,8 +263,10 @@ const isPendingChoiceAction = computed(() =>
 )
 const pendingItemChoice = computed(() => turn.value?.pending_item_choice ?? null)
 const pendingReleaseChoice = computed(() => turn.value?.pending_release_choice ?? null)
+const pendingReleaseIncomingPokemon = computed(() => pendingReleaseChoice.value?.pokemon ?? pendingPokemon.value ?? null)
 const pendingAllowedActions = computed(() => new Set(pendingAction.value?.allowed_actions ?? []))
 const ownsPendingAction = computed(() => !!me.value && pendingAction.value?.player_id === me.value.id)
+const ownsPendingReleaseChoice = computed(() => !!me.value && pendingReleaseChoice.value?.player_id === me.value.id)
 const hasForeignPendingAction = computed(() => !!pendingAction.value && !ownsPendingAction.value)
 const canHandlePendingChoice = computed(() => isPendingChoiceAction.value && ownsPendingAction.value)
 const canResolvePendingChoice = computed(() => pendingAllowedActions.value.has(gameActions.resolvePendingAction))
@@ -275,8 +293,28 @@ const isDuelTile         = computed(() => currentTile.value?.type === 'duel')
 const safariRemaining    = computed(() => (turn.value?.pending_safari ?? []).length)
 const otherActivePlayers = computed(() => players.value.filter(p => p.id !== store.playerId && p.is_active))
 const inventoryItems = computed(() => me.value?.items ?? [])
-const releasablePokemon = computed(() =>
-  (me.value?.pokemon_inventory ?? []).filter(pokemon => !pokemon.is_starter_slot)
+const pendingCaptureRolls = computed(() => (pendingAction.value?.type === 'capture_attempt' ? (pendingAction.value?.capture_rolls ?? []) : []))
+const captureRollButtonLabel = computed(() =>
+  pendingAction.value?.type === 'capture_attempt' && pendingAction.value?.requires_additional_roll
+    ? 'Rolar novamente o dado de captura'
+    : 'Rolar dado de captura'
+)
+const pendingReleaseOptions = computed(() => {
+  if (Array.isArray(pendingReleaseChoice.value?.options) && pendingReleaseChoice.value.options.length > 0) {
+    return pendingReleaseChoice.value.options
+  }
+  return (me.value?.pokemon_inventory ?? []).map((pokemon, index) => ({
+    id: pokemon.slot_key ?? (pokemon.is_starter_slot ? 'starter' : `pokemon:${index}`),
+    slot_key: pokemon.slot_key ?? (pokemon.is_starter_slot ? 'starter' : `pokemon:${index}`),
+    label: pokemon.is_starter_slot ? `${pokemon.name} (Starter)` : pokemon.name,
+    slot_cost: pokemon.slot_cost ?? pokemon.pokeball_slots ?? 1,
+    is_starter_slot: !!pokemon.is_starter_slot,
+  }))
+})
+const releaseChoiceCancelLabel = computed(() =>
+  pendingReleaseChoice.value?.resolution_type === 'reward'
+    ? 'Recusar este Pokémon'
+    : 'Cancelar captura'
 )
 const isDev = import.meta.env.DEV
 const debugItemOptions = [
@@ -390,12 +428,18 @@ const pendingChoiceTitle = computed(() => {
   return '🎁 Escolha pendente'
 })
 const waitingActionTitle = computed(() => {
+  if (pendingReleaseChoice.value && !ownsPendingReleaseChoice.value) return '🎾 Troca de Pokémon'
   if (!pendingAction.value || ownsPendingAction.value) return ''
   if (pendingAction.value.type === 'capture_attempt') return '🎯 Ação pendente'
   if (isPendingChoiceAction.value) return pendingChoiceTitle.value
   return '⏳ Aguardando resolução'
 })
 const waitingActionDescription = computed(() => {
+  if (pendingReleaseChoice.value && !ownsPendingReleaseChoice.value) {
+    const owner = players.value.find(player => player.id === pendingReleaseChoice.value?.player_id)?.name ?? 'outro jogador'
+    const incomingName = pendingReleaseChoice.value?.pokemon?.name ?? 'o Pokémon pendente'
+    return `Aguardando ${owner} decidir qual Pokémon libertar para abrir espaço para ${incomingName}.`
+  }
   if (!pendingAction.value || ownsPendingAction.value) return ''
   const owner = players.value.find(player => player.id === pendingAction.value?.player_id)?.name ?? 'outro jogador'
   if (pendingAction.value.type === 'pokecenter_heal') {

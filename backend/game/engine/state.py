@@ -18,7 +18,7 @@ Estrutura do game_state (JSON):
   "turn": {
     "round":            int,
     "current_player_id": str,
-    "phase": "select_starter | roll | action | battle | event | gym | league | end",
+    "phase": "select_starter | roll | action | battle | event | item_choice | release_pokemon | gym | league | end",
     "dice_result":      int | null,
     "last_roll":        dict | null,
     "roll_history":     [dict],
@@ -614,6 +614,27 @@ def _get_player_pokemon_slot(player: dict, slot_key: str | None) -> dict | None:
     return None
 
 
+def _remove_player_pokemon_slot(player: dict, slot_key: str | None) -> dict | None:
+    if not slot_key:
+        return None
+    if slot_key == 'starter':
+        starter = player.get('starter_pokemon')
+        if not isinstance(starter, dict):
+            return None
+        player['starter_pokemon'] = None
+        return starter
+    if not slot_key.startswith('pokemon:'):
+        return None
+    try:
+        index = int(slot_key.split(':', 1)[1])
+    except (TypeError, ValueError):
+        return None
+    pokemon = player.get('pokemon', [])
+    if 0 <= index < len(pokemon):
+        return pokemon.pop(index)
+    return None
+
+
 def _set_pokemon_knocked_out(player: dict, slot_key: str | None, knocked_out: bool = True) -> dict | None:
     pokemon = _get_player_pokemon_slot(player, slot_key)
     if pokemon is not None:
@@ -639,6 +660,28 @@ def _count_knocked_out_pokemon(player: dict) -> int:
 def _build_gym_slot_label(player: dict, slot_key: str) -> str:
     pokemon = _get_player_pokemon_slot(player, slot_key)
     return pokemon.get('name', slot_key) if pokemon else slot_key
+
+
+def _build_release_pokemon_options(player: dict) -> list[dict]:
+    options: list[dict] = []
+    for slot_key, pokemon in _iter_player_battle_slots(player, include_knocked_out=True):
+        if not pokemon:
+            continue
+        label = pokemon.get('name', slot_key)
+        if slot_key == 'starter':
+            label = f'{label} (Starter)'
+        if pokemon.get('knocked_out'):
+            label = f'{label} [KO]'
+        options.append({
+            'id': slot_key,
+            'slot_key': slot_key,
+            'label': label,
+            'pokemon_name': pokemon.get('name', slot_key),
+            'slot_cost': pokemon_slot_cost(pokemon),
+            'is_starter_slot': slot_key == 'starter',
+            'knocked_out': bool(pokemon.get('knocked_out')),
+        })
+    return options
 
 
 def _is_current_turn_player(state: dict, player_id: str) -> bool:
@@ -1260,6 +1303,57 @@ def _clear_pending_capture(state: dict) -> None:
     state['turn']['pending_release_choice'] = None
 
 
+def _queue_release_pokemon_choice(
+    state: dict,
+    player_id: str,
+    *,
+    resolution_type: str,
+    pokemon: dict,
+    capture_cost: int | None = None,
+    use_full_restore: bool = False,
+    capture_roll: dict | None = None,
+    reward_source: str | None = None,
+    capture_context: str | None = None,
+) -> tuple[dict | None, str | dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    options = _build_release_pokemon_options(player)
+    if not options:
+        return None, 'Você não possui Pokémon na party para libertar'
+
+    incoming_name = pokemon.get('name', 'o novo Pokémon')
+    if resolution_type == 'reward':
+        prompt = f"Sua party está sem espaço. Escolha um Pokémon para libertar e receber {incoming_name}, ou cancele."
+    else:
+        prompt = f"Sua party está sem espaço. Escolha um Pokémon para libertar e capturar {incoming_name}, ou cancele."
+
+    state['turn']['phase'] = 'release_pokemon'
+    state['turn']['pending_release_choice'] = {
+        'player_id': player_id,
+        'resolution_type': resolution_type,
+        'capture_cost': None if capture_cost is None else int(capture_cost),
+        'use_full_restore': bool(use_full_restore),
+        'pokemon': copy.deepcopy(pokemon),
+        'capture_roll': copy.deepcopy(capture_roll),
+        'reward_source': reward_source,
+        'capture_context': capture_context,
+        'prompt': prompt,
+        'allow_cancel': True,
+        'options': options,
+    }
+    _clear_pending_action(state)
+    return state, {
+        'requires_release': True,
+        'pokemon': copy.deepcopy(pokemon),
+        'capture_cost': None if capture_cost is None else int(capture_cost),
+        'capture_roll': copy.deepcopy(capture_roll),
+        'options': copy.deepcopy(options),
+        'resolution_type': resolution_type,
+    }
+
+
 def turn_has_blocking_interaction(turn: dict | None) -> bool:
     turn = turn or {}
     return bool(
@@ -1298,24 +1392,37 @@ def _coerce_inventory_pokemon(
     return None, support
 
 
-def _roll_from_encounters(encounters: list[dict]) -> dict:
-    first_roll = random.randint(1, 6)
+def _resolve_encounters_from_rolls(encounters: list[dict], rolls: list[int]) -> dict:
+    if not rolls:
+        return {'success': False, 'rolls': []}
+
+    first_roll = int(rolls[0])
+    used_rolls = [first_roll]
     matching = [enc for enc in encounters if first_roll in enc.get('roll', [])]
     if not matching:
-        return {'success': False, 'rolls': [first_roll]}
+        return {'success': False, 'rolls': used_rolls}
 
-    chosen = random.choice(matching)
-    rolls = [first_roll]
-    reroll = chosen.get('reroll')
-    if reroll:
-        second_roll = random.randint(1, 6)
-        rolls.append(second_roll)
-        if second_roll not in reroll:
-            return {'success': False, 'rolls': rolls}
+    reroll_matches = [enc for enc in matching if enc.get('reroll')]
+    if reroll_matches:
+        if len(rolls) < 2:
+            return {'success': False, 'rolls': used_rolls, 'requires_additional_roll': True}
+        second_roll = int(rolls[1])
+        used_rolls.append(second_roll)
+        for encounter in reroll_matches:
+            if second_roll in (encounter.get('reroll') or []):
+                return {
+                    'success': True,
+                    'rolls': used_rolls,
+                    'pokemon_name': encounter.get('pokemon_name'),
+                    'pokemon_id': encounter.get('pokemon_id'),
+                    'encounter': encounter,
+                }
+        return {'success': False, 'rolls': used_rolls}
 
+    chosen = matching[0]
     return {
         'success': True,
-        'rolls': rolls,
+        'rolls': used_rolls,
         'pokemon_name': chosen.get('pokemon_name'),
         'pokemon_id': chosen.get('pokemon_id'),
         'encounter': chosen,
@@ -1328,43 +1435,46 @@ def _queue_board_encounter(state: dict, player_id: str, tile: dict, capture_cont
     if not encounters:
         return state
 
-    rolled = _roll_from_encounters(encounters)
-    state['turn']['encounter_rolls'] = rolled.get('rolls', [])
-    state['turn']['encounter_source'] = tile.get('name')
-
-    if not rolled.get('success'):
-        if player:
-            _log(state, player['name'], f"Não encontrou Pokémon em {tile['name']} (rolls: {rolled.get('rolls', [])})")
-        state['turn']['phase'] = 'end'
-        return end_turn(state)
-
-    pokemon = None
-    if rolled.get('pokemon_name'):
-        pokemon = load_pokemon_by_name(rolled['pokemon_name'])
-    if not pokemon and rolled.get('pokemon_id') is not None:
-        pokemon = load_pokemon_by_id(rolled['pokemon_id'])
-
-    if not pokemon:
-        if player:
-            _log(
-                state,
-                player['name'],
-                f"Encontro {rolled.get('pokemon_name', '?')} em {tile['name']} ainda não possui carta jogável no dataset atual.",
-            )
-        state['turn']['phase'] = 'end'
-        return end_turn(state)
-
     _queue_capture_attempt(
         state,
         player_id,
-        pokemon=pokemon,
+        pokemon=None,
         capture_context=capture_context,
         source='tile_encounter',
         allowed_rolls=None,
+        encounters=encounters,
+        encounter_source=tile.get('name'),
+        prompt=f"Você caiu em {tile.get('name', 'um tile de captura')}. Role o dado de captura para descobrir o encontro.",
     )
     if player:
-        _log(state, player['name'], f"Encontrou {pokemon['name']} em {tile['name']} (rolls: {rolled.get('rolls', [])})")
+        _log(state, player['name'], f"Caiu em {tile['name']} e precisa rolar o dado de captura para descobrir o encontro.")
     return state
+
+
+def _build_capture_attempt_prompt(
+    *,
+    pokemon: dict | None,
+    encounter_source: str | None,
+    source: str,
+    capture_rolls: list[int] | None = None,
+    requires_additional_roll: bool = False,
+) -> str:
+    if requires_additional_roll:
+        latest = capture_rolls[-1] if capture_rolls else '?'
+        if encounter_source:
+            return f"Você rolou {latest} no dado de captura em {encounter_source}. Role novamente para concluir o encontro."
+        if pokemon:
+            return f"Você rolou {latest} no dado de captura para {pokemon.get('name', 'o Pokémon')}. Role novamente para concluir a captura."
+        return f"Você rolou {latest} no dado de captura. Role novamente para concluir a captura."
+    if encounter_source:
+        return f"Você caiu em {encounter_source}. Role o dado de captura para descobrir o encontro."
+    if pokemon:
+        return f"Role o dado de captura para tentar capturar {pokemon.get('name', 'o Pokémon')}."
+    if source == 'event_card':
+        return 'Role o dado de captura para resolver a captura da carta de evento.'
+    if source == 'victory_card':
+        return 'Role o dado de captura para resolver a captura da carta de vitória.'
+    return 'Role o dado de captura para resolver esta tentativa.'
 
 
 def _queue_capture_attempt(
@@ -1377,10 +1487,16 @@ def _queue_capture_attempt(
     allowed_rolls: list[int] | None = None,
     source_card: dict | None = None,
     resolver_card: dict | None = None,
+    encounters: list[dict] | None = None,
+    encounter_source: str | None = None,
+    capture_rolls: list[int] | None = None,
+    requires_additional_roll: bool = False,
+    prompt: str | None = None,
 ) -> dict:
     state['turn']['phase'] = 'action'
     state['turn']['capture_context'] = capture_context
     state['turn']['pending_pokemon'] = copy.deepcopy(pokemon) if pokemon else None
+    resolved_rolls = [int(roll) for roll in (capture_rolls or [])]
     _set_pending_action(state, {
         'type': 'capture_attempt',
         'player_id': player_id,
@@ -1390,6 +1506,17 @@ def _queue_capture_attempt(
         'allowed_rolls': list(allowed_rolls or []),
         'source_card': copy.deepcopy(source_card) if source_card else None,
         'resolver_card': copy.deepcopy(resolver_card) if resolver_card else None,
+        'encounters': copy.deepcopy(encounters) if encounters else None,
+        'encounter_source': encounter_source,
+        'capture_rolls': resolved_rolls,
+        'requires_additional_roll': bool(requires_additional_roll),
+        'prompt': prompt or _build_capture_attempt_prompt(
+            pokemon=pokemon,
+            encounter_source=encounter_source,
+            source=source,
+            capture_rolls=resolved_rolls,
+            requires_additional_roll=requires_additional_roll,
+        ),
         'allowed_actions': ['roll_capture_dice', 'skip_action'],
     })
     return state
@@ -1432,21 +1559,15 @@ def _grant_reward_pokemon(
 
     required_slots = pokemon_slot_cost(pokemon)
     if player['pokeballs'] < required_slots:
-        if not player.get('pokemon'):
-            return None, 'Sem Pokébolas livres suficientes e nenhum Pokémon extra para liberar'
-        state['turn']['phase'] = 'release_pokemon'
-        state['turn']['pending_release_choice'] = {
-            'player_id': player_id,
-            'resolution_type': 'reward',
-            'pokemon': copy.deepcopy(pokemon),
-            'reward_source': source,
-        }
-        _clear_pending_action(state)
-        return state, {
-            'requires_release': True,
-            'pokemon': pokemon,
-            'source': source,
-        }
+        return _queue_release_pokemon_choice(
+            state,
+            player_id,
+            resolution_type='reward',
+            pokemon=pokemon,
+            capture_cost=required_slots,
+            reward_source=source,
+            capture_context=source,
+        )
 
     finalized, result = _finalize_capture(
         state,
@@ -3089,8 +3210,14 @@ def _resolve_successful_capture(
 def _resolve_failed_capture(state: dict, player_id: str, capture_roll: dict, reason: str) -> tuple[dict, dict]:
     player = _get_player(state, player_id)
     pokemon = state['turn'].get('pending_pokemon')
-    if player and pokemon:
-        _log(state, player['name'], f"Falhou ao capturar {pokemon['name']}: {reason}")
+    pending_action = state['turn'].get('pending_action') or {}
+    if player:
+        if pokemon:
+            _log(state, player['name'], f"Falhou ao capturar {pokemon['name']}: {reason}")
+        elif pending_action.get('encounter_source'):
+            _log(state, player['name'], f"Falhou ao resolver o encontro em {pending_action['encounter_source']}: {reason}")
+        else:
+            _log(state, player['name'], f"Falhou ao resolver a captura: {reason}")
 
     state['turn']['pending_pokemon'] = None
     _clear_pending_action(state)
@@ -3132,27 +3259,66 @@ def roll_capture_attempt(state: dict, player_id: str, use_full_restore: bool = F
     capture_context = state['turn'].get('capture_context', pending_action.get('capture_context', 'grass'))
     pokemon = state['turn'].get('pending_pokemon')
     resolver_card = pending_action.get('resolver_card')
+    encounters = pending_action.get('encounters') or []
+    prior_rolls = [int(roll) for roll in (pending_action.get('capture_rolls') or [])]
     state, capture_roll = roll_capture_for_attempt(state, player_id, capture_context)
+    current_rolls = prior_rolls + [int(capture_roll['raw_result'])]
+    capture_roll_result = copy.deepcopy(capture_roll)
+    capture_roll_result['all_rolls'] = current_rolls
     allowed_rolls = pending_action.get('allowed_rolls') or []
+
+    resolution = None
     success = not allowed_rolls or int(capture_roll['raw_result']) in allowed_rolls
 
-    if resolver_card:
-        rolls = [int(capture_roll['raw_result'])]
-        resolution = resolve_wild_pokemon_card_from_rolls(resolver_card, rolls)
-        if resolution.get('requires_additional_roll'):
-            state, second_roll = roll_capture_for_attempt(state, player_id, capture_context)
-            rolls.append(int(second_roll['raw_result']))
-            capture_roll['follow_up_roll'] = second_roll
-            resolution = resolve_wild_pokemon_card_from_rolls(resolver_card, rolls)
+    if encounters:
+        resolution = _resolve_encounters_from_rolls(encounters, current_rolls)
+    elif resolver_card:
+        resolution = resolve_wild_pokemon_card_from_rolls(resolver_card, current_rolls)
+
+    if resolution and resolution.get('requires_additional_roll'):
+        updated_action = copy.deepcopy(state['turn'].get('pending_action') or pending_action)
+        updated_action['capture_rolls'] = current_rolls
+        updated_action['requires_additional_roll'] = True
+        updated_action['prompt'] = _build_capture_attempt_prompt(
+            pokemon=pokemon,
+            encounter_source=updated_action.get('encounter_source'),
+            source=updated_action.get('source', 'capture_attempt'),
+            capture_rolls=current_rolls,
+            requires_additional_roll=True,
+        )
+        _set_pending_action(state, updated_action)
+        state['turn']['pending_pokemon'] = copy.deepcopy(pokemon) if pokemon else None
+        _log(state, player['name'], f"A captura exige nova rolagem. Dados atuais: {current_rolls}.")
+        return state, {
+            'success': False,
+            'requires_additional_roll': True,
+            'capture_roll': capture_roll_result,
+            'capture_rolls': current_rolls,
+        }
+
+    if resolution:
         success = bool(resolution.get('success'))
-        if resolution.get('pokemon_name'):
-            pokemon = load_playable_pokemon_by_name(resolution['pokemon_name'])
-            if pokemon:
-                state['turn']['pending_pokemon'] = pokemon
-        if resolution.get('unsupported_reward') or not pokemon:
-            unsupported = resolution.get('unsupported_reward') or resolution.get('pokemon_name') or 'Pokémon desconhecido'
+        resolved_name = resolution.get('pokemon_name')
+        resolved_id = resolution.get('pokemon_id')
+        if resolved_name:
+            pokemon = load_playable_pokemon_by_name(resolved_name)
+        if not pokemon and resolved_id is not None:
+            pokemon = load_pokemon_by_id(resolved_id)
+        if resolution.get('unsupported_reward') or (success and not pokemon):
+            unsupported = resolution.get('unsupported_reward') or resolved_name or resolved_id or 'Pokémon desconhecido'
             _log(state, player['name'], f"Recompensa ignorada por falta de suporte jogável: {unsupported}")
-            return _resolve_failed_capture(state, player_id, capture_roll, 'Pokémon sem suporte jogável')
+            return _resolve_failed_capture(state, player_id, capture_roll_result, 'Pokémon sem suporte jogável')
+
+    if resolution and not success and not allowed_rolls:
+        return _resolve_failed_capture(
+            state,
+            player_id,
+            capture_roll_result,
+            f'dados de captura {current_rolls} não correspondem a um encontro válido',
+        )
+
+    if not pokemon and pending_action.get('pokemon_name'):
+        pokemon = load_playable_pokemon_by_name(pending_action['pokemon_name'])
 
     if not pokemon:
         return None, 'Nenhum Pokémon disponível para esta captura'
@@ -3164,7 +3330,7 @@ def roll_capture_attempt(state: dict, player_id: str, use_full_restore: bool = F
         state=state,
     )
     if not supported_pokemon:
-        return _resolve_failed_capture(state, player_id, capture_roll, 'Pokémon sem suporte para inventário')
+        return _resolve_failed_capture(state, player_id, capture_roll_result, 'Pokémon sem suporte para inventário')
     pokemon = supported_pokemon
     state['turn']['pending_pokemon'] = copy.deepcopy(pokemon)
 
@@ -3186,28 +3352,19 @@ def roll_capture_attempt(state: dict, player_id: str, use_full_restore: bool = F
 
     if not success:
         expected = ', '.join(str(value) for value in allowed_rolls) if allowed_rolls else 'resultado válido'
-        return _resolve_failed_capture(state, player_id, capture_roll, f'dado {capture_roll["raw_result"]} não atende a regra ({expected})')
+        return _resolve_failed_capture(state, player_id, capture_roll_result, f'dado {capture_roll["raw_result"]} não atende a regra ({expected})')
 
     if player['pokeballs'] < capture_cost:
-        if not player.get('pokemon'):
-            return None, 'Sem Pokébolas livres suficientes e nenhum Pokémon extra para liberar'
-
-        state['turn']['phase'] = 'release_pokemon'
-        state['turn']['pending_release_choice'] = {
-            'player_id': player_id,
-            'resolution_type': 'capture',
-            'capture_cost': capture_cost,
-            'use_full_restore': use_full_restore,
-            'pokemon': copy.deepcopy(pokemon),
-            'capture_roll': copy.deepcopy(capture_roll),
-        }
-        _clear_pending_action(state)
-        return state, {
-            'requires_release': True,
-            'pokemon': pokemon,
-            'capture_cost': capture_cost,
-            'capture_roll': capture_roll,
-        }
+        return _queue_release_pokemon_choice(
+            state,
+            player_id,
+            resolution_type='capture',
+            pokemon=pokemon,
+            capture_cost=capture_cost,
+            use_full_restore=use_full_restore,
+            capture_roll=capture_roll_result,
+            capture_context=capture_context,
+        )
 
     return _resolve_successful_capture(
         state,
@@ -3216,7 +3373,7 @@ def roll_capture_attempt(state: dict, player_id: str, use_full_restore: bool = F
         capture_context=capture_context,
         capture_cost=capture_cost,
         use_full_restore=use_full_restore,
-        capture_roll=capture_roll,
+        capture_roll=capture_roll_result,
     )
 
 def capture_pokemon(state: dict, player_id: str,
@@ -3260,7 +3417,12 @@ def discard_item(state: dict, player_id: str, item_key: str) -> tuple[dict | Non
     return state, 'ok'
 
 
-def release_pokemon_for_capture(state: dict, player_id: str, pokemon_index: int) -> tuple[dict | None, str | dict]:
+def release_pokemon_for_capture(
+    state: dict,
+    player_id: str,
+    pokemon_index: int | None = None,
+    pokemon_slot_key: str | None = None,
+) -> tuple[dict | None, str | dict]:
     state = copy.deepcopy(state)
     turn = state['turn']
     pending = turn.get('pending_release_choice') or {}
@@ -3273,11 +3435,29 @@ def release_pokemon_for_capture(state: dict, player_id: str, pokemon_index: int)
     player = _get_player(state, player_id)
     if not player:
         return None, 'Jogador não encontrado'
-    if not player.get('pokemon'):
-        return None, 'Você não possui Pokémon extras para liberar'
 
-    pokemon_index = max(0, min(pokemon_index, len(player['pokemon']) - 1))
-    released = player['pokemon'].pop(pokemon_index)
+    options = pending.get('options') or _build_release_pokemon_options(player)
+    if not options:
+        return None, 'Você não possui Pokémon na party para libertar'
+
+    resolved_slot_key = (pokemon_slot_key or '').strip()
+    if not resolved_slot_key:
+        if pokemon_index is None:
+            return None, 'Escolha um Pokémon para libertar'
+        try:
+            resolved_index = int(pokemon_index)
+        except (TypeError, ValueError):
+            return None, 'Pokémon inválido para liberação'
+        if not (0 <= resolved_index < len(options)):
+            return None, 'Pokémon inválido para liberação'
+        resolved_slot_key = str(options[resolved_index].get('slot_key') or options[resolved_index].get('id') or '').strip()
+
+    if not any(str(option.get('slot_key') or option.get('id') or '').strip() == resolved_slot_key for option in options):
+        return None, 'Pokémon inválido para liberação'
+
+    released = _remove_player_pokemon_slot(player, resolved_slot_key)
+    if not released:
+        return None, 'Pokémon inválido para liberação'
     player['pokeballs'] += pokemon_slot_cost(released)
     sync_player_inventory(player)
     _log(state, player['name'], f"Liberou {released['name']} para abrir espaço")
@@ -3285,6 +3465,7 @@ def release_pokemon_for_capture(state: dict, player_id: str, pokemon_index: int)
     resolution_type = pending.get('resolution_type', 'capture')
     capture_cost = int(pending.get('capture_cost', 1 if resolution_type == 'capture' else pokemon_slot_cost(pending.get('pokemon'))))
     if player['pokeballs'] < capture_cost:
+        turn['pending_release_choice']['options'] = _build_release_pokemon_options(player)
         return state, {
             'released_pokemon': released,
             'requires_release': True,
@@ -3313,7 +3494,7 @@ def release_pokemon_for_capture(state: dict, player_id: str, pokemon_index: int)
         state,
         player_id,
         pokemon,
-        capture_context=state['turn'].get('capture_context', 'grass'),
+        capture_context=pending.get('capture_context') or state['turn'].get('capture_context', 'grass'),
         capture_cost=capture_cost,
         use_full_restore=use_full_restore,
         capture_roll=pending.get('capture_roll'),
@@ -3340,6 +3521,27 @@ def skip_action(state: dict, player_id: str) -> dict:
     """
     state = copy.deepcopy(state)
     turn = state['turn']
+    player = _get_player(state, player_id)
+
+    pending_release_choice = turn.get('pending_release_choice') or {}
+    if turn.get('phase') == 'release_pokemon' and pending_release_choice.get('player_id') == player_id:
+        incoming = pending_release_choice.get('pokemon') or turn.get('pending_pokemon') or {}
+        incoming_name = incoming.get('name', 'o Pokémon pendente')
+        _clear_pending_capture(state)
+        turn.pop('compound_eyes_active', None)
+        turn.pop('seafoam_legendary', None)
+
+        if pending_release_choice.get('resolution_type') == 'reward':
+            turn['pending_pokemon'] = None
+            turn['capture_context'] = None
+            turn['phase'] = 'action'
+            if player:
+                _log(state, player['name'], f"Cancelou a troca e recusou {incoming_name}")
+            return _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True)
+
+        if player:
+            _log(state, player['name'], f"Cancelou a captura de {incoming_name}")
+        turn['phase'] = 'action'
 
     # Limpa Pokémon atual
     turn['pending_pokemon'] = None

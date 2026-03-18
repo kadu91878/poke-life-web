@@ -292,8 +292,17 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     async def handle_release_pokemon(self, data):
         state = await self.get_game_state()
-        pokemon_index = int(data.get('pokemon_index', 0))
-        new_state, result = game_state.release_pokemon_for_capture(state, self.player_id, pokemon_index)
+        if not self._is_current_player(state):
+            await self.send_error('Não é seu turno')
+            return
+        pokemon_index = data.get('pokemon_index')
+        pokemon_slot_key = (data.get('pokemon_slot_key') or '').strip() or None
+        new_state, result = game_state.release_pokemon_for_capture(
+            state,
+            self.player_id,
+            pokemon_index=pokemon_index,
+            pokemon_slot_key=pokemon_slot_key,
+        )
         if new_state is None:
             await self.send_error(result)
             return
