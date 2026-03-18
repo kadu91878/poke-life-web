@@ -265,6 +265,18 @@ export const useGameStore = defineStore('game', () => {
       },
       pokemon_released:    () => 'Pokémon liberado para abrir espaço',
       pending_action_resolved: (e) => {
+        if (e.result?.type === 'pokemart_roll') {
+          if (e.result?.requires_additional_roll) {
+            return `Poké-Mart: tirou ${e.result.roll ?? '?'}. Role novamente`
+          }
+          if (e.result?.reward_label) {
+            const rolls = Array.isArray(e.result.rolls) && e.result.rolls.length
+              ? e.result.rolls.join(' → ')
+              : (e.result.roll ?? '?')
+            return `Poké-Mart: ${rolls}. Recebeu ${e.result.reward_label}`
+          }
+          return 'Poké-Mart resolvido'
+        }
         if (e.result?.type === 'pokecenter_heal') {
           const healedCount = e.result.healed_slots?.length ?? 0
           return healedCount > 0

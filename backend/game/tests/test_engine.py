@@ -2142,6 +2142,169 @@ class TestRemainingSpecialTiles(TestCase):
         self.assertEqual(state['turn']['phase'], 'event')
         self.assertEqual(state['turn']['pending_event']['category'], 'market')
 
+    def test_pokemart_tile_queues_manual_roll_without_hidden_rng_or_reward(self):
+        state, p1_id, _ = self._ready_state()
+        player_before = self._player(state, p1_id)
+        rewards_before = {
+            'gust_of_wind': engine.get_item_quantity(player_before, 'gust_of_wind'),
+            'bill': engine.get_item_quantity(player_before, 'bill'),
+            'full_restore': engine.get_item_quantity(player_before, 'full_restore'),
+            'miracle_stone': engine.get_item_quantity(player_before, 'miracle_stone'),
+            'master_ball': engine.get_item_quantity(player_before, 'master_ball'),
+            'pokeballs': player_before['pokeballs'],
+        }
+
+        with patch('game.engine.state.roll_market_dice') as market_roll:
+            state = _land_on_tile(state, p1_id, 21)
+
+        pending = state['turn']['pending_action']
+        player_after = self._player(state, p1_id)
+
+        market_roll.assert_not_called()
+        self.assertEqual(state['turn']['phase'], 'action')
+        self.assertEqual(state['turn']['current_player_id'], p1_id)
+        self.assertEqual(pending['type'], 'pokemart_roll')
+        self.assertEqual(pending['player_id'], p1_id)
+        self.assertTrue(pending['pending_pokemart_roll'])
+        self.assertEqual(pending['pokemart_phase'], 'initial_roll')
+        self.assertEqual(pending['rolls'], [])
+        self.assertIn('Role o dado do Poké-Mart', pending['prompt'])
+        self.assertIn('Rolar dado do Poké-Mart', pending['options'][0]['label'])
+        self.assertEqual(engine.get_item_quantity(player_after, 'gust_of_wind'), rewards_before['gust_of_wind'])
+        self.assertEqual(engine.get_item_quantity(player_after, 'bill'), rewards_before['bill'])
+        self.assertEqual(engine.get_item_quantity(player_after, 'full_restore'), rewards_before['full_restore'])
+        self.assertEqual(engine.get_item_quantity(player_after, 'miracle_stone'), rewards_before['miracle_stone'])
+        self.assertEqual(engine.get_item_quantity(player_after, 'master_ball'), rewards_before['master_ball'])
+        self.assertEqual(player_after['pokeballs'], rewards_before['pokeballs'])
+        self.assertTrue(any('aguardando rolagem explícita' in entry['message'].lower() for entry in state['log']))
+
+    def test_pokemart_tile_first_manual_roll_grants_reward_and_finishes_turn_for_rolls_one_to_five(self):
+        scenarios = [
+            (1, 'gust_of_wind'),
+            (2, 'bill'),
+            (3, 'full_restore'),
+            (4, 'full_restore'),
+            (5, 'miracle_stone'),
+        ]
+
+        for first_roll, reward_key in scenarios:
+            with self.subTest(first_roll=first_roll, reward_key=reward_key):
+                state, p1_id, p2_id = self._ready_state()
+                state = _land_on_tile(state, p1_id, 21)
+                option_id = self._find_option_id(state['turn']['pending_action'], 'Rolar dado do Poké-Mart')
+                player_before = self._player(state, p1_id)
+                reward_before = engine.get_item_quantity(player_before, reward_key)
+
+                with patch('game.engine.state.roll_market_dice', return_value=first_roll) as market_roll:
+                    state, result = engine.resolve_pending_action(state, p1_id, option_id)
+
+                market_roll.assert_called_once()
+                player_after = self._player(state, p1_id)
+                self.assertTrue(result['success'])
+                self.assertEqual(result['type'], 'pokemart_roll')
+                self.assertEqual(result['pokemart_phase'], 'initial_roll')
+                self.assertEqual(result['roll'], first_roll)
+                self.assertEqual(result['rolls'], [first_roll])
+                self.assertEqual(result['reward_key'], reward_key)
+                self.assertEqual(engine.get_item_quantity(player_after, reward_key), reward_before + 1)
+                self.assertIsNone(state['turn'].get('pending_action'))
+                self.assertEqual(state['turn']['current_player_id'], p2_id)
+                self.assertTrue(any(f"rolou {first_roll}" in entry['message'].lower() for entry in state['log']))
+
+    def test_pokemart_tile_roll_of_six_requires_explicit_reroll_without_granting_item(self):
+        state, p1_id, _ = self._ready_state()
+        state = _land_on_tile(state, p1_id, 21)
+        option_id = self._find_option_id(state['turn']['pending_action'], 'Rolar dado do Poké-Mart')
+        player_before = self._player(state, p1_id)
+        rewards_before = {
+            'gust_of_wind': engine.get_item_quantity(player_before, 'gust_of_wind'),
+            'bill': engine.get_item_quantity(player_before, 'bill'),
+            'full_restore': engine.get_item_quantity(player_before, 'full_restore'),
+            'miracle_stone': engine.get_item_quantity(player_before, 'miracle_stone'),
+            'master_ball': engine.get_item_quantity(player_before, 'master_ball'),
+            'pokeballs': player_before['pokeballs'],
+        }
+
+        with patch('game.engine.state.roll_market_dice', return_value=6) as market_roll:
+            state, result = engine.resolve_pending_action(state, p1_id, option_id)
+
+        pending = state['turn']['pending_action']
+        player_after = self._player(state, p1_id)
+        market_roll.assert_called_once()
+        self.assertTrue(result['success'])
+        self.assertTrue(result['requires_additional_roll'])
+        self.assertEqual(result['roll'], 6)
+        self.assertEqual(result['rolls'], [6])
+        self.assertEqual(state['turn']['phase'], 'action')
+        self.assertEqual(state['turn']['current_player_id'], p1_id)
+        self.assertEqual(pending['type'], 'pokemart_roll')
+        self.assertEqual(pending['pokemart_phase'], 'reroll')
+        self.assertEqual(pending['rolls'], [6])
+        self.assertIn('Rerrolar dado do Poké-Mart', pending['options'][0]['label'])
+        self.assertEqual(engine.get_item_quantity(player_after, 'gust_of_wind'), rewards_before['gust_of_wind'])
+        self.assertEqual(engine.get_item_quantity(player_after, 'bill'), rewards_before['bill'])
+        self.assertEqual(engine.get_item_quantity(player_after, 'full_restore'), rewards_before['full_restore'])
+        self.assertEqual(engine.get_item_quantity(player_after, 'miracle_stone'), rewards_before['miracle_stone'])
+        self.assertEqual(engine.get_item_quantity(player_after, 'master_ball'), rewards_before['master_ball'])
+        self.assertEqual(player_after['pokeballs'], rewards_before['pokeballs'])
+        self.assertTrue(any('segunda rolagem explícita' in entry['message'].lower() for entry in state['log']))
+
+    def test_pokemart_tile_second_manual_roll_grants_pokeball_for_rolls_one_to_five(self):
+        for second_roll in range(1, 6):
+            with self.subTest(second_roll=second_roll):
+                state, p1_id, p2_id = self._ready_state()
+                state = _land_on_tile(state, p1_id, 21)
+                first_option_id = self._find_option_id(state['turn']['pending_action'], 'Rolar dado do Poké-Mart')
+                player_before = self._player(state, p1_id)
+                pokeballs_before = player_before['pokeballs']
+
+                with patch('game.engine.state.roll_market_dice', return_value=6):
+                    state, first_result = engine.resolve_pending_action(state, p1_id, first_option_id)
+
+                self.assertTrue(first_result['requires_additional_roll'])
+                reroll_option_id = self._find_option_id(state['turn']['pending_action'], 'Rerrolar dado do Poké-Mart')
+
+                with patch('game.engine.state.roll_market_dice', return_value=second_roll) as market_roll:
+                    state, result = engine.resolve_pending_action(state, p1_id, reroll_option_id)
+
+                market_roll.assert_called_once()
+                player_after = self._player(state, p1_id)
+                self.assertTrue(result['success'])
+                self.assertEqual(result['pokemart_phase'], 'reroll')
+                self.assertEqual(result['roll'], second_roll)
+                self.assertEqual(result['rolls'], [6, second_roll])
+                self.assertEqual(result['reward_key'], 'pokeball')
+                self.assertEqual(player_after['pokeballs'], pokeballs_before + 1)
+                self.assertIsNone(state['turn'].get('pending_action'))
+                self.assertEqual(state['turn']['current_player_id'], p2_id)
+
+    def test_pokemart_tile_second_manual_roll_grants_master_ball_on_six(self):
+        state, p1_id, p2_id = self._ready_state()
+        state = _land_on_tile(state, p1_id, 21)
+        first_option_id = self._find_option_id(state['turn']['pending_action'], 'Rolar dado do Poké-Mart')
+        player_before = self._player(state, p1_id)
+        master_ball_before = engine.get_item_quantity(player_before, 'master_ball')
+
+        with patch('game.engine.state.roll_market_dice', return_value=6):
+            state, first_result = engine.resolve_pending_action(state, p1_id, first_option_id)
+
+        self.assertTrue(first_result['requires_additional_roll'])
+        reroll_option_id = self._find_option_id(state['turn']['pending_action'], 'Rerrolar dado do Poké-Mart')
+
+        with patch('game.engine.state.roll_market_dice', return_value=6) as market_roll:
+            state, result = engine.resolve_pending_action(state, p1_id, reroll_option_id)
+
+        market_roll.assert_called_once()
+        player_after = self._player(state, p1_id)
+        self.assertTrue(result['success'])
+        self.assertEqual(result['pokemart_phase'], 'reroll')
+        self.assertEqual(result['roll'], 6)
+        self.assertEqual(result['rolls'], [6, 6])
+        self.assertEqual(result['reward_key'], 'master_ball')
+        self.assertEqual(engine.get_item_quantity(player_after, 'master_ball'), master_ball_before + 1)
+        self.assertIsNone(state['turn'].get('pending_action'))
+        self.assertEqual(state['turn']['current_player_id'], p2_id)
+
     def test_teleporter_moves_player_and_grants_extra_turn_on_exact_landing(self):
         state, p1_id, _ = self._ready_state()
 

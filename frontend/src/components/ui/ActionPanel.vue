@@ -5,6 +5,9 @@
       <div class="event-card">
         <div class="event-title">{{ pendingChoiceTitle }}</div>
         <div class="event-description">{{ pendingAction.prompt }}</div>
+        <div v-if="pendingAction?.type === 'pokemart_roll' && (pendingAction?.rolls?.length ?? 0)" class="safari-info">
+          Dados do Poké-Mart: {{ (pendingAction?.rolls ?? []).join(' → ') }}
+        </div>
       </div>
       <button
         v-for="option in pendingAction.options ?? []"
@@ -21,6 +24,9 @@
         <div class="event-card">
           <div class="event-title">{{ pendingChoiceTitle }}</div>
           <div class="event-description">{{ pendingAction.prompt }}</div>
+          <div v-if="pendingAction?.type === 'pokemart_roll' && (pendingAction?.rolls?.length ?? 0)" class="safari-info">
+            Dados do Poké-Mart: {{ (pendingAction?.rolls ?? []).join(' → ') }}
+          </div>
         </div>
         <button
           v-for="option in pendingAction.options ?? []"
@@ -421,6 +427,7 @@ const pendingChoiceTitle = computed(() => {
     if (['returned', 'remained'].includes(pendingAction.value?.visit_kind)) return '🏥 Cura de Retorno'
     return '🏥 Cura de PokéCenter'
   }
+  if (pendingAction.value?.type === 'pokemart_roll') return '🛒 Poké-Mart'
   if (pendingAction.value?.type === 'miracle_stone_tile') return '💎 Miracle Stone'
   if (pendingAction.value?.type === 'bill_teleport') return "🧾 It's Bill!"
   if (pendingAction.value?.type === 'game_corner') return '🎰 Game Corner'
@@ -445,6 +452,13 @@ const waitingActionDescription = computed(() => {
   if (pendingAction.value.type === 'pokecenter_heal') {
     const place = pendingAction.value.center_tile_name ?? 'o ponto seguro'
     return `Aguardando ${owner} concluir a cura em ${place} antes do turno continuar.`
+  }
+  if (pendingAction.value.type === 'pokemart_roll') {
+    const place = pendingAction.value.source_name ?? 'o Poké-Mart'
+    if (pendingAction.value.pokemart_phase === 'reroll') {
+      return `Aguardando ${owner} concluir o reroll do Poké-Mart em ${place}.`
+    }
+    return `Aguardando ${owner} rolar o dado do Poké-Mart em ${place}.`
   }
   if (pendingAction.value.type === 'capture_attempt') {
     return `Aguardando ${owner} resolver a captura pendente.`
