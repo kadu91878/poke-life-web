@@ -140,6 +140,15 @@ _GAME_CORNER_PRIZES = (
     {'key': 'pokeball', 'label': 'Poké Ball'},
     {'key': 'master_ball', 'label': 'Master Ball'},
 )
+_POKEMART_PRIMARY_REWARDS = {
+    1: {'key': 'gust_of_wind', 'label': 'Gust of Wind'},
+    2: {'key': 'bill', 'label': 'Bill'},
+    3: {'key': 'full_restore', 'label': 'Full Restore'},
+    4: {'key': 'full_restore', 'label': 'Full Restore'},
+    5: {'key': 'miracle_stone', 'label': 'Miracle Stone'},
+}
+_POKEMART_REROLL_REWARD = {'key': 'pokeball', 'label': 'Poké Ball'}
+_POKEMART_JACKPOT_REWARD = {'key': 'master_ball', 'label': 'Master Ball'}
 
 
 # ── Helpers internos ────────────────────────────────────────────────────────
@@ -883,6 +892,150 @@ def _queue_market_event(state: dict, player_id: str, *, source: str, source_tile
     source_name = source_tile.get('name') if isinstance(source_tile, dict) else source
     _log(state, player['name'], f"Chegou em {source_name}. O tile funciona como PokéMarket.")
     return state
+
+
+def _build_pokemart_roll_prompt(source_name: str, phase: str, rolls: list[int] | None = None) -> str:
+    resolved_rolls = [int(roll) for roll in (rolls or [])]
+    if phase == 'reroll':
+        first_roll = resolved_rolls[0] if resolved_rolls else 6
+        return (
+            f"Primeira rolagem em {source_name}: {first_roll}. "
+            "Role novamente o dado do Poké-Mart para definir entre Poké Ball e Master Ball."
+        )
+    return f"Você caiu em {source_name}. Role o dado do Poké-Mart para descobrir qual item vai receber."
+
+
+def _queue_pokemart_roll_action(
+    state: dict,
+    player_id: str,
+    *,
+    tile_id: int | str | None,
+    source_name: str,
+    phase: str = 'initial_roll',
+    rolls: list[int] | None = None,
+) -> dict:
+    resolved_rolls = [int(roll) for roll in (rolls or [])]
+    button_label = 'Rerrolar dado do Poké-Mart' if phase == 'reroll' else 'Rolar dado do Poké-Mart'
+    _set_pending_action(state, {
+        'type': 'pokemart_roll',
+        'player_id': player_id,
+        'tile_id': tile_id,
+        'source_name': source_name,
+        'pending_pokemart_roll': True,
+        'pokemart_phase': phase,
+        'rolls': resolved_rolls,
+        'prompt': _build_pokemart_roll_prompt(source_name, phase, resolved_rolls),
+        'options': [{'id': 'roll', 'label': button_label}],
+        'allowed_actions': ['resolve_pending_action'],
+    })
+    state['turn']['phase'] = 'action'
+    return state
+
+
+def _resolve_pokemart_tile(state: dict, player_id: str, tile: dict) -> dict:
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    source_name = tile.get('name', 'Poké-Mart')
+    _log(state, player['name'], f"Caiu em {source_name}. Aguardando rolagem explícita do dado do Poké-Mart.")
+    return _queue_pokemart_roll_action(
+        state,
+        player_id,
+        tile_id=tile.get('id'),
+        source_name=source_name,
+        phase='initial_roll',
+    )
+
+
+def _resolve_pokemart_roll_action(state: dict, player_id: str, pending_action: dict) -> tuple[dict, dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return state, {
+            'success': False,
+            'type': 'pokemart_roll',
+            'error': 'Jogador não encontrado',
+        }
+
+    source_name = pending_action.get('source_name', 'Poké-Mart')
+    phase = pending_action.get('pokemart_phase', 'initial_roll')
+    prior_rolls = [int(roll) for roll in (pending_action.get('rolls') or [])]
+    roll = roll_market_dice()
+    metadata = {
+        'tile_id': pending_action.get('tile_id'),
+        'stage': 'reroll' if phase == 'reroll' else 'initial',
+    }
+    if prior_rolls:
+        metadata['prior_rolls'] = prior_rolls
+        metadata['initial_roll'] = prior_rolls[0]
+    _record_roll(
+        state,
+        roll_type='poké-mart',
+        player_id=player_id,
+        player_name=player['name'],
+        raw_result=roll,
+        final_result=roll,
+        context='pokemart_tile',
+        metadata=metadata,
+    )
+    current_rolls = prior_rolls + [roll]
+
+    if phase != 'reroll':
+        reward = _POKEMART_PRIMARY_REWARDS.get(roll)
+        if reward is None:
+            _log(
+                state,
+                player['name'],
+                f"Rolou 6 em {source_name}. O Poké-Mart agora aguarda uma segunda rolagem explícita para definir o prêmio.",
+            )
+            state = _queue_pokemart_roll_action(
+                state,
+                player_id,
+                tile_id=pending_action.get('tile_id'),
+                source_name=source_name,
+                phase='reroll',
+                rolls=current_rolls,
+            )
+            return state, {
+                'success': True,
+                'type': 'pokemart_roll',
+                'source_name': source_name,
+                'pokemart_phase': 'reroll',
+                'roll': roll,
+                'rolls': current_rolls,
+                'requires_additional_roll': True,
+            }
+
+        _clear_pending_action(state)
+        _log(state, player['name'], f"Rolou {roll} em {source_name} e ganhou {reward['label']}.")
+        state = _grant_special_tile_reward(state, player_id, reward['key'], source=source_name)
+        state = _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True)
+        return state, {
+            'success': True,
+            'type': 'pokemart_roll',
+            'source_name': source_name,
+            'pokemart_phase': phase,
+            'roll': roll,
+            'rolls': current_rolls,
+            'reward_key': reward['key'],
+            'reward_label': reward['label'],
+        }
+
+    reward = _POKEMART_REROLL_REWARD if roll <= 5 else _POKEMART_JACKPOT_REWARD
+    _clear_pending_action(state)
+    _log(state, player['name'], f"No reroll de {source_name}, tirou {roll} e ganhou {reward['label']}.")
+    state = _grant_special_tile_reward(state, player_id, reward['key'], source=source_name)
+    state = _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True)
+    return state, {
+        'success': True,
+        'type': 'pokemart_roll',
+        'source_name': source_name,
+        'pokemart_phase': phase,
+        'roll': roll,
+        'rolls': current_rolls,
+        'reward_key': reward['key'],
+        'reward_label': reward['label'],
+    }
 
 
 def _queue_game_corner_action(state: dict, player_id: str, *, current_prize_index: int = -1, stage: str | None = None) -> dict:
@@ -2256,7 +2409,7 @@ def _resolve_tile_effect(state: dict, player_id: str, tile: dict, effect: dict) 
                 _log(state, player['name'], f"Parou em {tile['name']} e pode curar até 3 Pokémon nocauteados.")
                 return state
         elif city_kind == 'pokemart':
-            return _queue_market_event(state, player_id, source='pokemart', source_tile=tile)
+            return _resolve_pokemart_tile(state, player_id, tile)
         # Cidade: recupera 1 Full Restore gratuitamente
         add_item(player, 'full_restore', 1)
         _log(state, player['name'], f"Chegou em {tile['name']} e recuperou 1 Full Restore")
@@ -3581,6 +3734,7 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
     pending_action = state['turn'].get('pending_action') or {}
     pending_type = pending_action.get('type')
     if pending_type not in (
+        'pokemart_roll',
         'reward_choice',
         'gym_heal',
         'pokecenter_heal',
@@ -3597,6 +3751,9 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
     chosen = next((option for option in options if str(option.get('id')) == str(option_id)), None)
     if not chosen:
         return None, 'Opção inválida'
+
+    if pending_type == 'pokemart_roll':
+        return _resolve_pokemart_roll_action(state, player_id, pending_action)
 
     prompt = pending_action.get('prompt') or 'Escolha pendente'
     _log(state, player['name'], f"{prompt}: {chosen.get('label', option_id)}")
