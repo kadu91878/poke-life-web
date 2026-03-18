@@ -124,9 +124,13 @@ class GameConsumer(AsyncWebsocketConsumer):
             'starter_slot_applied': False,
             'starter_pokemon': None,
             'pokemon': [],
+            'capture_sequence_counter': 0,
             'last_pokemon_center': None,
             'deferred_pokecenter_heal': None,
             'items': starting_defaults['items'],
+            'special_tile_flags': {
+                'celadon_dept_store_bonus_claimed': False,
+            },
             'badges': [],
             'master_points': 0,
             'gyms_attempted': [],
@@ -175,7 +179,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.send_error('Aguarde sua vez de escolher o Pokémon inicial')
             return
 
-        new_state = game_state.select_starter(state, self.player_id, int(starter_id))
+        new_state = game_state.select_starter(state, self.player_id, starter_id)
         if new_state is None:
             await self.send_error('Starter inválido ou já escolhido')
             return

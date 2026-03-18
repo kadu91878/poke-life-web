@@ -26,7 +26,17 @@ const props = defineProps({
 })
 
 const ICONS = { start:'🏁', grass:'🌿', event:'📋', duel:'⚔️', gym:'🏆', city:'🏙️', special:'⭐', league:'👑' }
-const SPECIAL_ICONS = { team_rocket: '🚀' }
+const SPECIAL_ICONS = {
+  team_rocket: '🚀',
+  miracle_stone: '💎',
+  bill: '🧾',
+  game_corner: '🎰',
+  bicycle_bridge: '🚲',
+  safari_zone: '🦓',
+  mr_fuji_house: '🏠',
+  celadon_dept_store: '🛍️',
+  teleporter: '🌀',
+}
 const icon = computed(() => {
   const specialEffect = props.tile?.data?.special_effect
   if (props.tile?.type === 'special' && specialEffect && SPECIAL_ICONS[specialEffect]) {

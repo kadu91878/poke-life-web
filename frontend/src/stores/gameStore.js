@@ -268,6 +268,19 @@ export const useGameStore = defineStore('game', () => {
             ? `PokéCenter curou ${healedCount} Pokémon(s)!`
             : 'PokéCenter concluído'
         }
+        if (e.result?.type === 'miracle_stone_tile' && e.result?.evolved_to) {
+          return `${e.result.pokemon} evoluiu para ${e.result.evolved_to}!`
+        }
+        if (e.result?.type === 'bill_teleport') {
+          return e.result.teleported ? 'Bill teleportou o jogador!' : 'Bill foi resolvido'
+        }
+        if (e.result?.type === 'game_corner') {
+          if (e.result?.lost_all) return 'Game Corner: perdeu tudo'
+          if (e.result?.prize_key) return `Game Corner: prêmio ${e.result.prize_key}`
+        }
+        if (e.result?.type === 'teleporter_manual_roll') {
+          return `Teleporter: dado escolhido ${e.result.dice_result}`
+        }
         return 'Escolha resolvida'
       },
       debug_item_added:    () => 'Item de debug adicionado',

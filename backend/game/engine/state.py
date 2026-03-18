@@ -64,6 +64,7 @@ from .cards import (
     load_pokemon_by_id,
     load_pokemon_by_name,
     load_playable_pokemon_by_name,
+    load_cards_metadata_index,
     parse_gift_pokemon_choice_options,
     reveal_card,
     resolve_supported_pokemon_reward,
@@ -89,7 +90,9 @@ from .mechanics import (
     resolve_elite_four,
     roll_battle_dice,
     roll_capture_dice,
+    roll_game_corner_dice,
     roll_movement_dice,
+    roll_market_dice,
     roll_team_rocket_dice,
 )
 
@@ -103,11 +106,38 @@ _NEGATIVE_EVENT_EFFECTS = frozenset({
 })
 
 # IDs dos Pokémon fósseis (Mt. Moon)
-_FOSSIL_POKEMON_IDS = [138, 140]  # Omanyte, Kabuto
+_FOSSIL_POKEMON_NAMES = ['Omanyte', 'Kabuto']
+_MYSTERY_CAVE_POKEMON_NAMES = ['Gastly', 'Gastly', 'Haunter', 'Gengar', 'Ditto']
 _MAX_ROLL_HISTORY = 50
 _DEBUG_TEST_PLAYER_ID = '__debug_test_player__'
 _DEBUG_TEST_PLAYER_NAME = 'Player de teste'
 _DEBUG_TEST_PLAYER_COLOR = '#f59f00'
+_SPECIAL_METHOD_EVOLUTION_NAMES = frozenset({
+    'dratini',
+    'eevee',
+    'magikarp',
+    'mankey',
+    'slowpoke',
+    'tyrogue',
+})
+_SPECIAL_METHOD_EVOLUTION_PHRASES = (
+    'only evolve through battle',
+    'cannot evolve mankey any other way',
+    'if the outcome of your move dice is ever 6',
+    'if you release another pokémon',
+    'if you release another pokemon',
+    'when evolving eevee',
+    'when evolving slowpoke',
+    'when evolving tyrogue',
+)
+_GAME_CORNER_PRIZES = (
+    {'key': 'bill', 'label': 'Bill'},
+    {'key': 'full_restore', 'label': 'Full Restore'},
+    {'key': 'miracle_stone', 'label': 'Miracle Stone'},
+    {'key': 'gold_nugget', 'label': 'Gold Nugget'},
+    {'key': 'pokeball', 'label': 'Poké Ball'},
+    {'key': 'master_ball', 'label': 'Master Ball'},
+)
 
 
 # ── Helpers internos ────────────────────────────────────────────────────────
@@ -725,6 +755,223 @@ def _update_pokecenter_progress(state: dict, player_id: str, start_position: int
     return center_tiles
 
 
+def _get_special_tile_state(state: dict) -> dict:
+    special_tile_state = state.setdefault('special_tile_state', {})
+    special_tile_state.setdefault('bill_teleport_used_by', None)
+    special_tile_state.setdefault('bicycle_bridge_first_player_id', None)
+    special_tile_state.setdefault('mr_fuji_first_player_id', None)
+    return special_tile_state
+
+
+def _get_player_special_tile_flags(player: dict | None) -> dict:
+    if not player:
+        return {}
+    flags = player.setdefault('special_tile_flags', {})
+    flags.setdefault('celadon_dept_store_bonus_claimed', False)
+    return flags
+
+
+def _is_celadon_dept_store_tile(tile: dict | None) -> bool:
+    if not isinstance(tile, dict):
+        return False
+    return tile.get('type') == 'special' and (tile.get('data') or {}).get('special_effect') == 'celadon_dept_store'
+
+
+def _is_teleporter_tile(tile: dict | None) -> bool:
+    if not isinstance(tile, dict):
+        return False
+    return tile.get('type') == 'special' and (tile.get('data') or {}).get('special_effect') == 'teleporter'
+
+
+def _grant_celadon_dept_store_reach_bonus(state: dict, player_id: str, tile: dict) -> bool:
+    player = _get_player(state, player_id)
+    if not player or not _is_celadon_dept_store_tile(tile):
+        return False
+
+    flags = _get_player_special_tile_flags(player)
+    if flags.get('celadon_dept_store_bonus_claimed'):
+        return False
+
+    flags['celadon_dept_store_bonus_claimed'] = True
+    player['pokeballs'] += 1
+    sync_player_inventory(player)
+    _log(state, player['name'], f"Alcançou {tile.get('name', 'Celadon Dept. Store')} pela primeira vez e recebeu 1 Pokébola.")
+    return True
+
+
+def _apply_path_reach_effects(state: dict, player_id: str, start_position: int, end_position: int) -> None:
+    board_data = state.get('board', {})
+    for position in get_positions_between(int(start_position), int(end_position)):
+        tile = get_tile(board_data, position)
+        _grant_celadon_dept_store_reach_bonus(state, player_id, tile)
+
+
+def _find_market_card_in_piles(deck: list[dict], discard: list[dict]) -> tuple[dict | None, list[dict], list[dict]]:
+    next_deck = list(deck or [])
+    for index, card in enumerate(next_deck):
+        if card.get('category') == 'market':
+            chosen = copy.deepcopy(next_deck.pop(index))
+            return chosen, next_deck, list(discard or [])
+    return None, list(deck or []), list(discard or [])
+
+
+def _queue_market_event(state: dict, player_id: str, *, source: str, source_tile: dict | None = None) -> dict:
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    card, new_deck, new_discard = _find_market_card_in_piles(
+        state.get('decks', {}).get('event_deck', []),
+        state.get('decks', {}).get('event_discard', []),
+    )
+    state['decks']['event_deck'] = new_deck
+    state['decks']['event_discard'] = new_discard
+
+    if not card:
+        _log(state, player['name'], f"Não havia carta de PokéMarket disponível para resolver em {source_tile.get('name', source) if source_tile else source}.")
+        state['turn']['phase'] = 'end'
+        return end_turn(state)
+
+    state['turn']['pending_event'] = card
+    state['turn']['phase'] = 'event'
+    reveal_card(state, player_id, card, 'event')
+    source_name = source_tile.get('name') if isinstance(source_tile, dict) else source
+    _log(state, player['name'], f"Chegou em {source_name}. O tile funciona como PokéMarket.")
+    return state
+
+
+def _queue_game_corner_action(state: dict, player_id: str, *, current_prize_index: int = -1, stage: str | None = None) -> dict:
+    next_prize_index = max(0, min(current_prize_index + 1, len(_GAME_CORNER_PRIZES) - 1))
+    next_prize = _GAME_CORNER_PRIZES[next_prize_index]
+    stage = stage or ('roll' if current_prize_index < 0 else 'decision')
+    prompt = (
+        f"Role o dado para tentar alcançar {next_prize['label']}. Tirando 1 ou 2 você perde tudo."
+        if stage == 'roll'
+        else f"Você alcançou { _GAME_CORNER_PRIZES[current_prize_index]['label'] }. Quer parar ou tentar {next_prize['label']}?"
+    )
+    options = (
+        [{'id': 'roll', 'label': f"Rolar em busca de {next_prize['label']}"}]
+        if stage == 'roll'
+        else [
+            {'id': 'stop', 'label': f"Parar e ficar com {_GAME_CORNER_PRIZES[current_prize_index]['label']}"},
+            {'id': 'continue', 'label': f"Tentar {next_prize['label']}"},
+        ]
+    )
+    _set_pending_action(state, {
+        'type': 'game_corner',
+        'player_id': player_id,
+        'prompt': prompt,
+        'options': options,
+        'current_prize_index': current_prize_index,
+        'allowed_actions': ['resolve_pending_action'],
+    })
+    state['turn']['phase'] = 'action'
+    return state
+
+
+def _queue_bill_teleport_choice(state: dict, player_id: str, *, source_tile: dict | None = None) -> dict:
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    options = [
+        {'id': other['id'], 'label': f"Teleportar para {other['name']}", 'target_player_id': other['id']}
+        for other in state.get('players', [])
+        if other.get('is_active', True) and other['id'] != player_id
+    ]
+    options.append({'id': 'stay', 'label': 'Não teleportar'})
+    _set_pending_action(state, {
+        'type': 'bill_teleport',
+        'player_id': player_id,
+        'prompt': f"Bill pode te teleportar a partir de {source_tile.get('name', 'seu tile atual')}. Você quer usar isso agora?",
+        'options': options,
+        'source_tile_id': source_tile.get('id') if source_tile else None,
+        'allowed_actions': ['resolve_pending_action'],
+    })
+    state['turn']['phase'] = 'action'
+    return state
+
+
+def _queue_miracle_stone_tile_action(state: dict, player_id: str, tile: dict, candidate_slots: list[str]) -> dict:
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    options = [
+        {
+            'id': slot_key,
+            'label': _build_gym_slot_label(player, slot_key),
+            'slot_key': slot_key,
+        }
+        for slot_key in candidate_slots
+    ]
+    options.append({'id': 'skip', 'label': 'Não evoluir agora'})
+    _set_pending_action(state, {
+        'type': 'miracle_stone_tile',
+        'player_id': player_id,
+        'prompt': f"Escolha 1 Pokémon elegível para evoluir instantaneamente em {tile.get('name', 'Miracle Stone')}.",
+        'options': options,
+        'tile_id': tile.get('id'),
+        'allowed_actions': ['resolve_pending_action'],
+    })
+    state['turn']['phase'] = 'action'
+    return state
+
+
+def _queue_teleporter_manual_roll_action(state: dict, player_id: str, *, source_tile: dict | None = None) -> dict:
+    location_suffix = f" em {source_tile.get('name')}" if source_tile else ''
+    _set_pending_action(state, {
+        'type': 'teleporter_manual_roll',
+        'player_id': player_id,
+        'prompt': f"O teleporter te concedeu um turno extra. Escolha o resultado do dado de movimento{location_suffix}.",
+        'options': [
+            {'id': f'roll-{value}', 'label': f'Mover {value} casa(s)', 'dice_result': value}
+            for value in range(1, 7)
+        ],
+        'allowed_actions': ['resolve_pending_action'],
+    })
+    state['turn']['phase'] = 'roll'
+    return state
+
+
+def _queue_pending_effect(state: dict, effect: dict) -> None:
+    state.setdefault('turn', {}).setdefault('pending_effects', []).append(copy.deepcopy(effect))
+
+
+def _pop_pending_effect(state: dict) -> dict | None:
+    pending_effects = state.setdefault('turn', {}).setdefault('pending_effects', [])
+    if not pending_effects:
+        return None
+    return pending_effects.pop(0)
+
+
+def _apply_pending_effect(state: dict, player_id: str, effect: dict) -> dict:
+    kind = (effect or {}).get('kind')
+    if kind == 'award_victory_cards':
+        return _award_victory_cards(state, player_id, int(effect.get('count', 0) or 0), source=effect.get('source', 'special_tile'))
+    if kind == 'draw_event_cards':
+        return _draw_event_cards(state, player_id, int(effect.get('count', 0) or 0), source=effect.get('source', 'special_tile'))
+    if kind == 'bill_teleport_choice':
+        tile = get_tile(state.get('board', {}), int(effect.get('tile_id', -1))) if effect.get('tile_id') is not None else None
+        return _queue_bill_teleport_choice(state, player_id, source_tile=tile)
+    return state
+
+
+def _resume_pending_effects_or_finish_turn(state: dict, player_id: str, *, end_turn_when_done: bool) -> dict:
+    while True:
+        if turn_has_blocking_interaction(state.get('turn')):
+            return state
+        effect = _pop_pending_effect(state)
+        if not effect:
+            break
+        state = _apply_pending_effect(state, player_id, effect)
+
+    if end_turn_when_done and not turn_has_blocking_interaction(state.get('turn')):
+        state['turn']['phase'] = 'end'
+        return end_turn(state)
+    return state
+
+
 def _build_pokecenter_heal_prompt(center_name: str, heal_limit: int, visit_kind: str) -> str:
     heal_text = '1 Pokémon nocauteado' if int(heal_limit) == 1 else f"até {int(heal_limit)} Pokémon nocauteados"
     if visit_kind == 'passed':
@@ -870,6 +1117,7 @@ def _handle_pokecenter_pass_through(
     if not player:
         return False
 
+    _apply_path_reach_effects(state, player_id, start_position, end_position)
     center_tiles = _update_pokecenter_progress(state, player_id, start_position, end_position)
     if not center_tiles or _is_pokemon_center_tile(final_tile) or not _is_current_turn_player(state, player_id):
         return False
@@ -1034,6 +1282,20 @@ def _log_unsupported_pokemon(state: dict, player_name: str, support: dict, sourc
     _log(state, player_name, f"Aviso: {pokemon_name} foi ignorado ({source}) — {reason_text}")
 
 
+def _coerce_inventory_pokemon(
+    pokemon: dict | None,
+    *,
+    source: str,
+    player_name: str,
+    state: dict,
+) -> tuple[dict | None, dict]:
+    supported_pokemon, support = ensure_supported_inventory_pokemon(pokemon)
+    if supported_pokemon:
+        return supported_pokemon, support
+    _log_unsupported_pokemon(state, player_name, support, source)
+    return None, support
+
+
 def _roll_from_encounters(encounters: list[dict]) -> dict:
     first_roll = random.randint(1, 6)
     matching = [enc for enc in encounters if first_roll in enc.get('roll', [])]
@@ -1075,10 +1337,10 @@ def _queue_board_encounter(state: dict, player_id: str, tile: dict, capture_cont
         return end_turn(state)
 
     pokemon = None
-    if rolled.get('pokemon_id') is not None:
-        pokemon = load_pokemon_by_id(rolled['pokemon_id'])
-    if not pokemon and rolled.get('pokemon_name'):
+    if rolled.get('pokemon_name'):
         pokemon = load_pokemon_by_name(rolled['pokemon_name'])
+    if not pokemon and rolled.get('pokemon_id') is not None:
+        pokemon = load_pokemon_by_id(rolled['pokemon_id'])
 
     if not pokemon:
         if player:
@@ -1156,9 +1418,13 @@ def _grant_reward_pokemon(
     if not player:
         return None, 'Jogador não encontrado'
 
-    supported_pokemon, support = ensure_supported_inventory_pokemon(pokemon)
+    supported_pokemon, support = _coerce_inventory_pokemon(
+        pokemon,
+        source=source,
+        player_name=player['name'],
+        state=state,
+    )
     if not supported_pokemon:
-        _log_unsupported_pokemon(state, player['name'], support, source)
         return None, f"Pokémon sem suporte para inventário: {support.get('pokemon_name') or 'desconhecido'}"
     pokemon = supported_pokemon
 
@@ -1429,6 +1695,9 @@ def _build_debug_visual_player() -> tuple[dict | None, str | None]:
         'capture_sequence_counter': 0,
         'last_pokemon_center': None,
         'deferred_pokecenter_heal': None,
+        'special_tile_flags': {
+            'celadon_dept_store_bonus_claimed': False,
+        },
         'items': copy.deepcopy(starting_defaults['items']),
         'badges': [],
         'master_points': 0,
@@ -1471,6 +1740,11 @@ def _build_debug_visual_session() -> tuple[dict | None, str | None]:
             'pokemon': [],
             'victory': [],
         },
+        'special_tile_state': {
+            'bill_teleport_used_by': None,
+            'bicycle_bridge_first_player_id': None,
+            'mr_fuji_first_player_id': None,
+        },
         'revealed_card': None,
         'log': [],
         'turn': {
@@ -1488,6 +1762,7 @@ def _build_debug_visual_session() -> tuple[dict | None, str | None]:
             'pending_item_choice': None,
             'pending_release_choice': None,
             'pending_reward_choice': None,
+            'pending_effects': [],
             'pending_safari': None,
             'starters_chosen': [player['id']],
             'extra_turn': False,
@@ -1533,6 +1808,7 @@ def _reset_debug_visual_session_for_free_actions(session: dict) -> dict:
     turn['pending_item_choice'] = None
     turn['pending_release_choice'] = None
     turn['pending_reward_choice'] = None
+    turn['pending_effects'] = []
     turn['pending_safari'] = None
     turn['capture_context'] = None
     turn['roll_item_modifier'] = None
@@ -1542,6 +1818,9 @@ def _reset_debug_visual_session_for_free_actions(session: dict) -> dict:
     turn.pop('league_results', None)
     turn.pop('compound_eyes_active', None)
     turn.pop('seafoam_legendary', None)
+    turn.pop('movement_context', None)
+    turn.pop('extra_turn_source', None)
+    turn.pop('extra_turn_tile_id', None)
     turn['current_tile'] = get_tile(session.get('board', {}), player.get('position', 0) if player else 0)
     session['revealed_card'] = None
     return session
@@ -1634,7 +1913,7 @@ def initialize_game(state: dict) -> dict:
 
 # ── Escolha de Starter ───────────────────────────────────────────────────────
 
-def select_starter(state: dict, player_id: str, starter_id: int) -> dict | None:
+def select_starter(state: dict, player_id: str, starter_id) -> dict | None:
     """
     Seleção sequencial de starter: apenas o jogador com current_player_id pode escolher.
     Após a escolha, current_player_id avança para o próximo. Quando todos escolheram,
@@ -1651,13 +1930,14 @@ def select_starter(state: dict, player_id: str, starter_id: int) -> dict | None:
         return None  # Já escolheu
 
     available = turn.get('available_starters', [])
-    starter = next((s for s in available if s['id'] == starter_id), None)
+    starter_id_normalized = str(starter_id)
+    starter = next((s for s in available if str(s.get('id')) == starter_id_normalized), None)
     if not starter:
         return None
 
     # Rejeita se outro jogador já escolheu este starter
     for p in _get_active_players(state):
-        if p['id'] != player_id and p.get('starter_pokemon', {}) and p['starter_pokemon'].get('id') == starter_id:
+        if p['id'] != player_id and p.get('starter_pokemon', {}) and str(p['starter_pokemon'].get('id')) == starter_id_normalized:
             return None
 
     player = _get_player(state, player_id)
@@ -1673,7 +1953,7 @@ def select_starter(state: dict, player_id: str, starter_id: int) -> dict | None:
     sync_player_inventory(player)
     turn['starters_chosen'].append(player_id)
     # Remove o starter escolhido da lista de disponíveis
-    turn['available_starters'] = [s for s in available if s['id'] != starter_id]
+    turn['available_starters'] = [s for s in available if str(s.get('id')) != starter_id_normalized]
 
     _log(state, player['name'], f"Escolheu {starter['name']} como Pokémon inicial!")
 
@@ -1722,6 +2002,8 @@ def _find_forced_special_stop(
                 return position, tile, 'gym'
         if _is_team_rocket_tile(tile):
             return position, tile, 'team_rocket'
+        if _is_teleporter_tile(tile):
+            return position, tile, 'teleporter'
     return None, None, None
 
 
@@ -1734,8 +2016,9 @@ def process_move(state: dict, player_id: str, dice_result: int) -> dict:
     board_data = state['board']
 
     old_pos = player['position']
+    natural_destination = calculate_new_position(old_pos, dice_result, board_data)
     forced_stop_position, forced_tile, forced_stop_kind = _find_forced_special_stop(player, old_pos, dice_result, board_data)
-    new_pos = forced_stop_position if forced_stop_position is not None else calculate_new_position(old_pos, dice_result, board_data)
+    new_pos = forced_stop_position if forced_stop_position is not None else natural_destination
     player['position'] = new_pos
 
     tile = get_tile(board_data, new_pos)
@@ -1743,10 +2026,19 @@ def process_move(state: dict, player_id: str, dice_result: int) -> dict:
 
     state['turn']['dice_result'] = dice_result
     state['turn']['current_tile'] = tile
+    state['turn']['movement_context'] = {
+        'start_position': int(old_pos),
+        'dice_result': int(dice_result),
+        'natural_destination': int(natural_destination),
+        'resolved_destination': int(new_pos),
+        'forced_stop_kind': forced_stop_kind,
+    }
 
     if forced_tile and forced_tile.get('id') == new_pos:
         if forced_stop_kind == 'team_rocket':
             _log(state, player['name'], f"Moveu {dice_result} casa(s), mas foi obrigado a parar no tile da Equipe Rocket {tile['name']}")
+        elif forced_stop_kind == 'teleporter':
+            _log(state, player['name'], f"Moveu {dice_result} casa(s), mas o Teleporter em {tile['name']} interrompeu o movimento.")
         else:
             _log(state, player['name'], f"Moveu {dice_result} casa(s), mas foi obrigado a parar no ginásio {tile['name']}")
     else:
@@ -1840,6 +2132,8 @@ def _resolve_tile_effect(state: dict, player_id: str, tile: dict, effect: dict) 
             if queued:
                 _log(state, player['name'], f"Parou em {tile['name']} e pode curar até 3 Pokémon nocauteados.")
                 return state
+        elif city_kind == 'pokemart':
+            return _queue_market_event(state, player_id, source='pokemart', source_tile=tile)
         # Cidade: recupera 1 Full Restore gratuitamente
         add_item(player, 'full_restore', 1)
         _log(state, player['name'], f"Chegou em {tile['name']} e recuperou 1 Full Restore")
@@ -1912,6 +2206,232 @@ def _resolve_team_rocket_tile(state: dict, player_id: str, tile: dict) -> dict:
     return end_turn(state)
 
 
+def _can_use_miracle_stone_on_pokemon(pokemon: dict | None) -> bool:
+    if not pokemon or not can_evolve(pokemon):
+        return False
+
+    normalized_name = (pokemon.get('name') or '').strip().lower()
+    if normalized_name in _SPECIAL_METHOD_EVOLUTION_NAMES:
+        return False
+
+    metadata = load_cards_metadata_index().get(normalized_name) or {}
+    combined_text = ' '.join(
+        part for part in [
+            metadata.get('ability_description', ''),
+            metadata.get('notes', ''),
+        ]
+        if part
+    ).lower()
+    return not any(phrase in combined_text for phrase in _SPECIAL_METHOD_EVOLUTION_PHRASES)
+
+
+def _build_miracle_stone_candidate_slots(player: dict) -> list[str]:
+    candidate_slots: list[str] = []
+    for slot_key, pokemon in _iter_player_battle_slots(player, include_knocked_out=True):
+        if _can_use_miracle_stone_on_pokemon(pokemon):
+            candidate_slots.append(slot_key)
+    return candidate_slots
+
+
+def _grant_special_tile_reward(state: dict, player_id: str, reward_key: str, *, source: str) -> dict:
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    normalized_key = (reward_key or '').strip().lower()
+    if normalized_key == 'pokeball':
+        player['pokeballs'] += 1
+        sync_player_inventory(player)
+        _log(state, player['name'], f"Recebeu 1 Pokébola em {source}.")
+        return state
+
+    add_item(player, normalized_key, 1)
+    item_def = get_item_def(normalized_key)
+    item_name = item_def.get('name') or normalized_key
+    _log(state, player['name'], f"Recebeu {item_name} em {source}.")
+    _queue_item_choice(state, player_id, f'Recompensa em {source}')
+    return state
+
+
+def _resolve_miracle_stone_tile(state: dict, player_id: str, tile: dict) -> dict:
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    candidate_slots = _build_miracle_stone_candidate_slots(player)
+    if not candidate_slots:
+        _log(state, player['name'], f"Chegou em {tile.get('name', 'Miracle Stone')}, mas não tinha Pokémon elegível para evolução imediata.")
+        state['turn']['phase'] = 'end'
+        return end_turn(state)
+
+    _log(state, player['name'], f"Chegou em {tile.get('name', 'Miracle Stone')} e pode evoluir 1 Pokémon elegível instantaneamente.")
+    return _queue_miracle_stone_tile_action(state, player_id, tile, candidate_slots)
+
+
+def _resolve_bill_tile(state: dict, player_id: str, tile: dict) -> dict:
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    special_tile_state = _get_special_tile_state(state)
+    reward_key = (tile.get('data') or {}).get('granted_item_key', 'bill')
+    state = _grant_special_tile_reward(state, player_id, reward_key, source=tile.get('name', 'Bill'))
+
+    teleport_targets = [
+        other for other in state.get('players', [])
+        if other.get('is_active', True) and other.get('id') != player_id
+    ]
+    if special_tile_state.get('bill_teleport_used_by'):
+        _log(state, player['name'], 'Bill já teleportou outro jogador nesta partida e não pode repetir o efeito.')
+        return _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True)
+    if not teleport_targets:
+        _log(state, player['name'], 'Bill não encontrou outro jogador válido para teleportar.')
+        return _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True)
+
+    _queue_pending_effect(state, {'kind': 'bill_teleport_choice', 'tile_id': tile.get('id')})
+    return _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True)
+
+
+def _resolve_game_corner_reward(state: dict, player_id: str, prize_index: int) -> dict:
+    prize = _GAME_CORNER_PRIZES[max(0, min(prize_index, len(_GAME_CORNER_PRIZES) - 1))]
+    return _grant_special_tile_reward(state, player_id, prize['key'], source='Game Corner')
+
+
+def _resolve_bicycle_bridge_tile(state: dict, player_id: str, tile: dict) -> dict:
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    special_tile_state = _get_special_tile_state(state)
+    first_bonus_player_id = special_tile_state.get('bicycle_bridge_first_player_id')
+    first_bonus_name = (tile.get('data') or {}).get('first_player_bonus_pokemon')
+
+    if not first_bonus_player_id and first_bonus_name:
+        special_tile_state['bicycle_bridge_first_player_id'] = player_id
+        bonus_pokemon = load_pokemon_by_name(first_bonus_name)
+        if bonus_pokemon:
+            _queue_pending_effect(state, {'kind': 'award_victory_cards', 'count': int((tile.get('data') or {}).get('victory_cards', 1) or 1), 'source': 'bicycle_bridge'})
+            granted_state, result = _grant_reward_pokemon(
+                state,
+                player_id,
+                bonus_pokemon,
+                source='bicycle_bridge_bonus',
+            )
+            if granted_state is None:
+                _log(state, player['name'], f"Não foi possível receber {first_bonus_name} na Bicycle Bridge: {result}")
+                return _award_victory_cards(state, player_id, int((tile.get('data') or {}).get('victory_cards', 1) or 1), source='bicycle_bridge')
+            _log(granted_state, player['name'], f"Foi o primeiro a alcançar {tile.get('name', 'Bicycle Bridge')} e recebeu {first_bonus_name}.")
+            return _resume_pending_effects_or_finish_turn(granted_state, player_id, end_turn_when_done=True)
+
+    state = _award_victory_cards(state, player_id, int((tile.get('data') or {}).get('victory_cards', 1) or 1), source='bicycle_bridge')
+    if first_bonus_player_id and first_bonus_player_id != player_id:
+        _log(state, player['name'], f"O bônus de primeiro jogador em {tile.get('name', 'Bicycle Bridge')} já foi reivindicado.")
+    if turn_has_blocking_interaction(state.get('turn')):
+        return state
+    state['turn']['phase'] = 'end'
+    return end_turn(state)
+
+
+def _resolve_safari_zone_tile(state: dict, player_id: str, tile: dict) -> dict:
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    tile_data = tile.get('data') or {}
+    if tile_data.get('is_exit'):
+        return_to_tile_id = int(tile_data.get('return_to_tile_id', tile.get('id', 0)) or tile.get('id', 0))
+        player['position'] = return_to_tile_id
+        state['turn']['current_tile'] = get_tile(state.get('board', {}), return_to_tile_id)
+        _log(state, player['name'], f"Chegou ao fim da Safari Zone e voltou para {state['turn']['current_tile'].get('name', 'a House')}.")
+        state['turn']['phase'] = 'end'
+        return end_turn(state)
+
+    pokemon_name = tile_data.get('displayed_pokemon_name')
+    pokemon = load_pokemon_by_name(pokemon_name) if pokemon_name else None
+    if not pokemon:
+        _log(state, player['name'], f"A Safari Zone mostrou {pokemon_name or 'um Pokémon desconhecido'}, mas ele não possui suporte jogável no estado atual.")
+        state['turn']['phase'] = 'end'
+        return end_turn(state)
+
+    _log(state, player['name'], f"Entrou em {tile.get('name', 'Safari Zone')} e pode tentar capturar {pokemon['name']}.")
+    return _queue_capture_attempt(
+        state,
+        player_id,
+        pokemon=pokemon,
+        capture_context='safari',
+        source='safari_zone_tile',
+    )
+
+
+def _resolve_mr_fuji_house_tile(state: dict, player_id: str, tile: dict) -> dict:
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    house_name = tile.get('name', "Mr. Fuji's House")
+    special_tile_state = _get_special_tile_state(state)
+    first_bonus_player_id = special_tile_state.get('mr_fuji_first_player_id')
+    first_bonus_name = (tile.get('data') or {}).get('first_player_bonus_pokemon')
+    event_cards = int((tile.get('data') or {}).get('event_cards', 2) or 2)
+
+    if not first_bonus_player_id and first_bonus_name:
+        special_tile_state['mr_fuji_first_player_id'] = player_id
+        bonus_pokemon = load_pokemon_by_name(first_bonus_name)
+        if bonus_pokemon:
+            _queue_pending_effect(state, {'kind': 'draw_event_cards', 'count': event_cards, 'source': 'mr_fuji_house'})
+            granted_state, result = _grant_reward_pokemon(state, player_id, bonus_pokemon, source='mr_fuji_house_bonus')
+            if granted_state is None:
+                _log(state, player['name'], f"Não foi possível receber {first_bonus_name} em Mr. Fuji's House: {result}")
+                state = _draw_event_cards(state, player_id, event_cards, source='mr_fuji_house')
+                if turn_has_blocking_interaction(state.get('turn')):
+                    return state
+                state['turn']['phase'] = 'end'
+                return end_turn(state)
+            _log(granted_state, player['name'], f"Foi o primeiro a alcançar {house_name} e recebeu {first_bonus_name}.")
+            return _resume_pending_effects_or_finish_turn(granted_state, player_id, end_turn_when_done=True)
+
+    state = _draw_event_cards(state, player_id, event_cards, source='mr_fuji_house')
+    if first_bonus_player_id and first_bonus_player_id != player_id:
+        _log(state, player['name'], f"O bônus de primeiro jogador em {house_name} já foi reivindicado.")
+    if turn_has_blocking_interaction(state.get('turn')):
+        return state
+    state['turn']['phase'] = 'end'
+    return end_turn(state)
+
+
+def _resolve_celadon_dept_store_tile(state: dict, player_id: str, tile: dict) -> dict:
+    return _queue_market_event(state, player_id, source='celadon_dept_store', source_tile=tile)
+
+
+def _resolve_teleporter_tile(state: dict, player_id: str, tile: dict) -> dict:
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    pair_tile_id = (tile.get('data') or {}).get('paired_tile_id')
+    pair_tile = get_tile(state.get('board', {}), int(pair_tile_id)) if pair_tile_id is not None else None
+    if not pair_tile:
+        _log(state, player['name'], f"O teleporter em {tile.get('name', 'Teleporter')} não possui destino configurado.")
+        state['turn']['phase'] = 'end'
+        return end_turn(state)
+
+    movement_context = state.get('turn', {}).get('movement_context') or {}
+    landed_exactly = int(movement_context.get('natural_destination', -1) or -1) == int(tile.get('id', -2) or -2)
+
+    player['position'] = int(pair_tile.get('id', player.get('position', 0) or 0))
+    state['turn']['current_tile'] = pair_tile
+    _log(state, player['name'], f"Alcançou o teleporter em {tile.get('name', 'Teleporter')} e foi enviado instantaneamente para {pair_tile.get('name', 'o outro teleporter')}.")
+
+    if landed_exactly:
+        state['turn']['extra_turn'] = True
+        state['turn']['extra_turn_source'] = 'teleporter'
+        state['turn']['extra_turn_tile_id'] = int(pair_tile.get('id', 0) or 0)
+        _log(state, player['name'], 'Como parou exatamente no teleporter, ganhou um turno extra com escolha manual do dado de movimento.')
+
+    state['turn']['phase'] = 'end'
+    return end_turn(state)
+
+
 def _resolve_special_tile(state: dict, player_id: str, tile: dict) -> dict:
     player = _get_player(state, player_id)
     special = tile.get('data', {}).get('special_effect', 'none')
@@ -1919,36 +2439,25 @@ def _resolve_special_tile(state: dict, player_id: str, tile: dict) -> dict:
     if special == 'team_rocket':
         state = _resolve_team_rocket_tile(state, player_id, tile)
 
-    elif special == 'safari_zone':
-        # Pode capturar até 2 Pokémon sequencialmente
-        cards = []
-        for _ in range(2):
-            card, new_deck, new_discard = draw_card(
-                state['decks']['pokemon_deck'],
-                state['decks']['pokemon_discard'],
-            )
-            state['decks']['pokemon_deck'] = new_deck
-            state['decks']['pokemon_discard'] = new_discard
-            if card:
-                cards.append(card)
+    elif special == 'miracle_stone':
+        state = _resolve_miracle_stone_tile(state, player_id, tile)
 
-        if cards:
-            state['turn']['pending_safari'] = cards[1:] if len(cards) > 1 else []
-            state = _queue_capture_attempt(
-                state,
-                player_id,
-                pokemon=cards[0],
-                capture_context='safari',
-                source='safari_zone',
-            )
-            _log(state, player['name'], 'Entrou na Safari Zone! Pode capturar até 2 Pokémon.')
-        else:
-            state['turn']['phase'] = 'end'
-            state = end_turn(state)
+    elif special == 'bill':
+        state = _resolve_bill_tile(state, player_id, tile)
+
+    elif special == 'game_corner':
+        _log(state, player['name'], f"Entrou no {tile.get('name', 'Game Corner')} e pode apostar por um prêmio.")
+        state = _queue_game_corner_action(state, player_id)
+
+    elif special == 'bicycle_bridge':
+        state = _resolve_bicycle_bridge_tile(state, player_id, tile)
+
+    elif special == 'safari_zone':
+        state = _resolve_safari_zone_tile(state, player_id, tile)
 
     elif special == 'power_plant':
         # Garante carta de Zapdos (lendário elétrico)
-        zapdos = load_pokemon_by_id(145)
+        zapdos = load_pokemon_by_name('Zapdos')
         if zapdos:
             state = _queue_capture_attempt(
                 state,
@@ -1980,8 +2489,8 @@ def _resolve_special_tile(state: dict, player_id: str, tile: dict) -> dict:
 
     elif special == 'mt_moon':
         # Caverna de Mt. Moon: encontro com Pokémon fóssil (Omanyte ou Kabuto)
-        fossil_id = random.choice(_FOSSIL_POKEMON_IDS)
-        fossil = load_pokemon_by_id(fossil_id)
+        fossil_name = random.choice(_FOSSIL_POKEMON_NAMES)
+        fossil = load_pokemon_by_name(fossil_name)
         if fossil:
             state = _queue_capture_attempt(
                 state,
@@ -2038,7 +2547,7 @@ def _resolve_special_tile(state: dict, player_id: str, tile: dict) -> dict:
 
     elif special == 'seafoam':
         # Ilhas Seafoam: encontro com Articuno (lendário de gelo)
-        articuno = load_pokemon_by_id(144)
+        articuno = load_pokemon_by_name('Articuno')
         if articuno:
             state['turn']['seafoam_legendary'] = True
             state = _queue_capture_attempt(
@@ -2056,9 +2565,8 @@ def _resolve_special_tile(state: dict, player_id: str, tile: dict) -> dict:
 
     elif special == 'mystery_cave':
         # Caverna Misteriosa: encontro com Pokémon Fantasma (Gastly, Haunter, Gengar ou Ditto)
-        _MYSTERY_CAVE_IDS = [92, 92, 93, 94, 132]  # Gastly mais comum
-        pokemon_id = random.choice(_MYSTERY_CAVE_IDS)
-        ghost = load_pokemon_by_id(pokemon_id)
+        ghost_name = random.choice(_MYSTERY_CAVE_POKEMON_NAMES)
+        ghost = load_pokemon_by_name(ghost_name)
         if ghost:
             state = _queue_capture_attempt(
                 state,
@@ -2073,24 +2581,14 @@ def _resolve_special_tile(state: dict, player_id: str, tile: dict) -> dict:
             state['turn']['phase'] = 'end'
             state = end_turn(state)
 
-    elif special == 'bicycle_bridge':
-        # Pista de Ciclismo: encontro com Pokémon de alta velocidade
-        _BICYCLE_BRIDGE_IDS = [84, 84, 85, 22, 132]  # Doduo mais comum, Dodrio/Fearow/Ditto raros
-        pokemon_id = random.choice(_BICYCLE_BRIDGE_IDS)
-        poke = load_pokemon_by_id(pokemon_id)
-        if poke:
-            state = _queue_capture_attempt(
-                state,
-                player_id,
-                pokemon=poke,
-                capture_context='bicycle_bridge',
-                source='bicycle_bridge',
-            )
-            _log(state, player['name'],
-                 f'Pista de Ciclismo: {poke["name"]} corre pela pista! Captura por 1 Pokébola.')
-        else:
-            state['turn']['phase'] = 'end'
-            state = end_turn(state)
+    elif special == 'mr_fuji_house':
+        state = _resolve_mr_fuji_house_tile(state, player_id, tile)
+
+    elif special == 'celadon_dept_store':
+        state = _resolve_celadon_dept_store_tile(state, player_id, tile)
+
+    elif special == 'teleporter':
+        state = _resolve_teleporter_tile(state, player_id, tile)
 
     else:
         state['turn']['phase'] = 'end'
@@ -2657,9 +3155,13 @@ def roll_capture_attempt(state: dict, player_id: str, use_full_restore: bool = F
     if not pokemon:
         return None, 'Nenhum Pokémon disponível para esta captura'
 
-    supported_pokemon, support = ensure_supported_inventory_pokemon(pokemon)
+    supported_pokemon, support = _coerce_inventory_pokemon(
+        pokemon,
+        source=f'captura:{capture_context}',
+        player_name=player['name'],
+        state=state,
+    )
     if not supported_pokemon:
-        _log_unsupported_pokemon(state, player['name'], support, f'captura:{capture_context}')
         return _resolve_failed_capture(state, player_id, capture_roll, 'Pokémon sem suporte para inventário')
     pokemon = supported_pokemon
     state['turn']['pending_pokemon'] = copy.deepcopy(pokemon)
@@ -2752,8 +3254,8 @@ def discard_item(state: dict, player_id: str, item_key: str) -> tuple[dict | Non
         return state, 'ok'
 
     turn['pending_item_choice'] = None
-    turn['phase'] = 'end'
-    return end_turn(state), 'ok'
+    state = _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True)
+    return state, 'ok'
 
 
 def release_pokemon_for_capture(state: dict, player_id: str, pokemon_index: int) -> tuple[dict | None, str | dict]:
@@ -2802,7 +3304,7 @@ def release_pokemon_for_capture(state: dict, player_id: str, pokemon_index: int)
         if finalized is None:
             return None, result
         _log(finalized, player['name'], f"Recebeu {pokemon['name']} após liberar espaço")
-        finalized = end_turn(finalized)
+        finalized = _resume_pending_effects_or_finish_turn(finalized, player_id, end_turn_when_done=True)
         return finalized, {**result, 'released_pokemon': released}
 
     finalized, result = _resolve_successful_capture(
@@ -2874,7 +3376,15 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
 
     pending_action = state['turn'].get('pending_action') or {}
     pending_type = pending_action.get('type')
-    if pending_type not in ('reward_choice', 'gym_heal', 'pokecenter_heal'):
+    if pending_type not in (
+        'reward_choice',
+        'gym_heal',
+        'pokecenter_heal',
+        'miracle_stone_tile',
+        'bill_teleport',
+        'game_corner',
+        'teleporter_manual_roll',
+    ):
         return None, 'Nenhuma escolha pendente'
     if pending_action.get('player_id') != player_id:
         return None, 'Esta escolha não pertence a você'
@@ -2886,6 +3396,147 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
 
     prompt = pending_action.get('prompt') or 'Escolha pendente'
     _log(state, player['name'], f"{prompt}: {chosen.get('label', option_id)}")
+
+    if pending_type == 'miracle_stone_tile':
+        _clear_pending_action(state)
+        if chosen.get('id') == 'skip':
+            return _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True), {
+                'success': True,
+                'type': 'miracle_stone_tile',
+                'skipped': True,
+            }
+
+        slot_key = chosen.get('slot_key') or chosen.get('id')
+        pokemon = _get_player_pokemon_slot(player, slot_key)
+        if not _can_use_miracle_stone_on_pokemon(pokemon):
+            return None, 'Este Pokémon não pode evoluir com a Miracle Stone'
+
+        evolving = copy.deepcopy(pokemon)
+        evolving['battle_slot_key'] = slot_key
+        evolved = _try_evolve(state, player_id, evolving)
+        if not evolved:
+            return None, 'Não foi possível evoluir este Pokémon'
+        _log(state, player['name'], f"{pokemon['name']} evoluiu instantaneamente para {evolved['name']} em uma Miracle Stone.")
+        return _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True), {
+            'success': True,
+            'type': 'miracle_stone_tile',
+            'pokemon': pokemon['name'],
+            'evolved_to': evolved['name'],
+        }
+
+    if pending_type == 'bill_teleport':
+        _clear_pending_action(state)
+        if chosen.get('id') == 'stay':
+            _log(state, player['name'], 'Decidiu não usar o teleporte especial do Bill.')
+            return _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True), {
+                'success': True,
+                'type': 'bill_teleport',
+                'teleported': False,
+            }
+
+        target = _get_player(state, chosen.get('target_player_id'))
+        if not target:
+            return None, 'Alvo inválido'
+
+        player['position'] = int(target.get('position', player.get('position', 0)) or 0)
+        state['turn']['current_tile'] = get_tile(state['board'], player['position'])
+        _get_special_tile_state(state)['bill_teleport_used_by'] = player_id
+        _log(state, player['name'], f"Bill teleportou {player['name']} para a posição de {target['name']} em {state['turn']['current_tile'].get('name', 'outra casa')}.")
+        return _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True), {
+            'success': True,
+            'type': 'bill_teleport',
+            'teleported': True,
+            'target_player_id': target['id'],
+            'tile_id': player['position'],
+        }
+
+    if pending_type == 'game_corner':
+        _clear_pending_action(state)
+        raw_prize_index = pending_action.get('current_prize_index', -1)
+        current_prize_index = int(raw_prize_index if raw_prize_index is not None else -1)
+
+        if chosen.get('id') == 'continue':
+            state = _queue_game_corner_action(state, player_id, current_prize_index=current_prize_index, stage='roll')
+            return state, {
+                'success': True,
+                'type': 'game_corner',
+                'continued': True,
+                'current_prize_index': current_prize_index,
+            }
+
+        if chosen.get('id') == 'stop':
+            state = _resolve_game_corner_reward(state, player_id, current_prize_index)
+            state = _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True)
+            return state, {
+                'success': True,
+                'type': 'game_corner',
+                'stopped': True,
+                'prize_key': _GAME_CORNER_PRIZES[current_prize_index]['key'],
+            }
+
+        if chosen.get('id') != 'roll':
+            return None, 'Opção inválida do Game Corner'
+
+        roll = roll_game_corner_dice()
+        _record_roll(
+            state,
+            roll_type='Game Corner',
+            player_id=player_id,
+            player_name=player['name'],
+            raw_result=roll,
+            final_result=roll,
+            context='game_corner',
+            metadata={'current_prize_index': current_prize_index},
+        )
+        if roll <= 2:
+            _log(state, player['name'], f"Rolou {roll} no Game Corner e perdeu tudo.")
+            state = _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True)
+            return state, {
+                'success': False,
+                'type': 'game_corner',
+                'roll': roll,
+                'lost_all': True,
+            }
+
+        reached_index = min(current_prize_index + 1, len(_GAME_CORNER_PRIZES) - 1)
+        reached_prize = _GAME_CORNER_PRIZES[reached_index]
+        _log(state, player['name'], f"Rolou {roll} no Game Corner e alcançou {reached_prize['label']}.")
+        if reached_index >= len(_GAME_CORNER_PRIZES) - 1:
+            state = _resolve_game_corner_reward(state, player_id, reached_index)
+            state = _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True)
+            return state, {
+                'success': True,
+                'type': 'game_corner',
+                'roll': roll,
+                'prize_key': reached_prize['key'],
+                'final_prize': True,
+            }
+
+        state = _queue_game_corner_action(state, player_id, current_prize_index=reached_index)
+        return state, {
+            'success': True,
+            'type': 'game_corner',
+            'roll': roll,
+            'current_prize_index': reached_index,
+            'prize_key': reached_prize['key'],
+        }
+
+    if pending_type == 'teleporter_manual_roll':
+        _clear_pending_action(state)
+        chosen_roll = chosen.get('dice_result')
+        try:
+            dice_result = int(chosen_roll)
+        except (TypeError, ValueError):
+            return None, 'Valor de dado inválido'
+        if not 1 <= dice_result <= 6:
+            return None, 'O dado do teleporter deve ficar entre 1 e 6'
+        _log(state, player['name'], f"Escolheu manualmente o resultado {dice_result} para o turno extra do teleporter.")
+        state = process_move(state, player_id, dice_result)
+        return state, {
+            'success': True,
+            'type': 'teleporter_manual_roll',
+            'dice_result': dice_result,
+        }
 
     if pending_type == 'pokecenter_heal':
         _clear_pending_action(state)
@@ -4252,11 +4903,11 @@ def _resolve_duel(state: dict) -> tuple[dict, dict]:
 
 def _try_evolve(state: dict, player_id: str, pokemon: dict, *, heal_on_evolve: bool = False) -> dict | None:
     """Tenta evoluir um Pokémon, atualizando a coleção do jogador."""
-    evolves_to_id = pokemon.get('evolves_to')
-    if not evolves_to_id:
+    evolves_to_name = pokemon.get('evolves_to')
+    if not evolves_to_name:
         return None
 
-    evolved = load_pokemon_by_id(evolves_to_id)
+    evolved = load_pokemon_by_name(evolves_to_name)
     if not evolved:
         return None
 
@@ -4396,8 +5047,8 @@ def use_item(
 
         pokemon_index = max(0, min(int(pokemon_index), len(pool) - 1))
         chosen = pool[pokemon_index]
-        if not can_evolve(chosen):
-            return None, 'Este Pokémon não possui evolução disponível nos dados atuais'
+        if not _can_use_miracle_stone_on_pokemon(chosen):
+            return None, 'Este Pokémon não pode evoluir com Miracle Stone'
 
         evolved = _try_evolve(state, player_id, chosen)
         if not evolved:
@@ -4938,6 +5589,8 @@ def end_turn(state: dict) -> dict:
 
     # Turno extra (ex: carta de evento)
     if turn.get('extra_turn'):
+        extra_turn_source = turn.get('extra_turn_source')
+        extra_turn_tile_id = turn.get('extra_turn_tile_id')
         turn['extra_turn'] = False
         turn['phase'] = 'roll'
         turn['dice_result'] = None
@@ -4954,6 +5607,19 @@ def end_turn(state: dict) -> dict:
         turn.pop('encounter_rolls', None)
         turn.pop('encounter_source', None)
         turn['roll_item_modifier'] = None
+        turn['pending_effects'] = []
+        turn.pop('movement_context', None)
+        turn.pop('battle_result', None)
+        turn.pop('league_results', None)
+        turn.pop('compound_eyes_active', None)
+        turn.pop('seafoam_legendary', None)
+        turn.pop('extra_turn_source', None)
+        turn.pop('extra_turn_tile_id', None)
+        if extra_turn_source == 'teleporter':
+            tile = get_tile(state.get('board', {}), int(extra_turn_tile_id)) if extra_turn_tile_id is not None else None
+            player_id = turn.get('current_player_id')
+            if player_id:
+                state = _queue_teleporter_manual_roll_action(state, player_id, source_tile=tile)
         return state
 
     active = _get_active_players(state)
@@ -4988,6 +5654,7 @@ def end_turn(state: dict) -> dict:
     turn['pending_release_choice'] = None
     turn['pending_reward_choice'] = None
     turn['pending_safari'] = None
+    turn['pending_effects'] = []
     turn['battle'] = None
     turn['capture_context'] = None
     turn.pop('encounter_rolls', None)
@@ -4997,6 +5664,9 @@ def end_turn(state: dict) -> dict:
     turn.pop('league_results', None)
     turn.pop('compound_eyes_active', None)
     turn.pop('seafoam_legendary', None)
+    turn.pop('movement_context', None)
+    turn.pop('extra_turn_source', None)
+    turn.pop('extra_turn_tile_id', None)
 
     current_player = _get_player(state, next_id)
     if current_player:

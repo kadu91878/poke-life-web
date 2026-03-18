@@ -1,6 +1,7 @@
 import copy
 from datetime import datetime, timezone
 from typing import Any
+from .engine.cards import canonicalize_runtime_pokemon
 from .engine.inventory import get_starting_resource_defaults, sync_player_inventory, normalize_items
 
 STATE_SCHEMA_VERSION = 1
@@ -15,15 +16,48 @@ def _utc_now() -> str:
 def _normalize_player_pokemon_metadata(player: dict[str, Any]) -> None:
     starter = player.get('starter_pokemon')
     if isinstance(starter, dict):
+        canonical_starter = canonicalize_runtime_pokemon(starter)
+        if canonical_starter:
+            runtime_fields = {
+                key: copy.deepcopy(value)
+                for key, value in starter.items()
+                if key in {
+                    'ability_charges',
+                    'ability_used',
+                    'knocked_out',
+                    'acquisition_origin',
+                    'capture_sequence',
+                    'capture_context',
+                }
+            }
+            starter = {**canonical_starter, **runtime_fields}
+            player['starter_pokemon'] = starter
         starter.setdefault('knocked_out', False)
         starter['acquisition_origin'] = 'starter'
         starter['capture_sequence'] = None
         starter.setdefault('capture_context', None)
 
     highest_sequence = 0
+    normalized_team = []
     for pokemon in player.get('pokemon', []):
         if not isinstance(pokemon, dict):
             continue
+        canonical = canonicalize_runtime_pokemon(pokemon)
+        if canonical:
+            runtime_fields = {
+                key: copy.deepcopy(value)
+                for key, value in pokemon.items()
+                if key in {
+                    'ability_charges',
+                    'ability_used',
+                    'knocked_out',
+                    'acquisition_origin',
+                    'capture_sequence',
+                    'capture_context',
+                }
+            }
+            pokemon = {**canonical, **runtime_fields}
+        normalized_team.append(pokemon)
         pokemon.setdefault('knocked_out', False)
         if pokemon.get('acquisition_origin') == 'captured':
             try:
@@ -36,6 +70,7 @@ def _normalize_player_pokemon_metadata(player: dict[str, Any]) -> None:
         elif pokemon.get('capture_sequence') is None:
             pokemon['capture_sequence'] = None
         pokemon.setdefault('capture_context', None)
+    player['pokemon'] = normalized_team
 
     for pokemon in player.get('pokemon', []):
         if not isinstance(pokemon, dict):
@@ -110,6 +145,11 @@ def build_initial_state(room_code: str) -> dict[str, Any]:
             'victory': [],
         },
         'custom_rules': {},
+        'special_tile_state': {
+            'bill_teleport_used_by': None,
+            'bicycle_bridge_first_player_id': None,
+            'mr_fuji_first_player_id': None,
+        },
         'debug_visual': {
             'enabled': False,
             'session_state': None,
@@ -140,6 +180,8 @@ def _normalize_player(player: dict[str, Any], index: int) -> dict[str, Any]:
     _normalize_player_pokemon_metadata(normalized)
     normalized.setdefault('last_pokemon_center', None)
     normalized.setdefault('deferred_pokecenter_heal', None)
+    normalized.setdefault('special_tile_flags', {})
+    normalized['special_tile_flags'].setdefault('celadon_dept_store_bonus_claimed', False)
     normalized['items'] = normalize_items(normalized.get('items'), normalized.get('full_restores', starting_defaults['full_restores']))
     normalized.setdefault('badges', [])
     normalized.setdefault('master_points', 0)
@@ -187,6 +229,7 @@ def _normalize_debug_visual(debug_visual: dict[str, Any] | None) -> dict[str, An
     turn.setdefault('pending_item_choice', None)
     turn.setdefault('pending_release_choice', None)
     turn.setdefault('pending_reward_choice', None)
+    turn.setdefault('pending_effects', [])
     turn.setdefault('pending_safari', None)
     turn.setdefault('capture_context', None)
     turn.setdefault('roll_item_modifier', None)
@@ -206,6 +249,11 @@ def _normalize_debug_visual(debug_visual: dict[str, Any] | None) -> dict[str, An
     consumed.setdefault('pokemon', [])
     consumed.setdefault('victory', [])
     session['consumed'] = consumed
+    special_tile_state = session.get('special_tile_state') or {}
+    special_tile_state.setdefault('bill_teleport_used_by', None)
+    special_tile_state.setdefault('bicycle_bridge_first_player_id', None)
+    special_tile_state.setdefault('mr_fuji_first_player_id', None)
+    session['special_tile_state'] = special_tile_state
 
     logs = session.get('logs') or session.get('log') or []
     session['logs'] = logs[-MAX_LOGS:]
@@ -298,6 +346,11 @@ def normalize_state(room_code: str, raw_state: dict[str, Any] | None) -> dict[st
     state['consumed'] = consumed
 
     state.setdefault('custom_rules', {})
+    special_tile_state = state.get('special_tile_state') or {}
+    special_tile_state.setdefault('bill_teleport_used_by', None)
+    special_tile_state.setdefault('bicycle_bridge_first_player_id', None)
+    special_tile_state.setdefault('mr_fuji_first_player_id', None)
+    state['special_tile_state'] = special_tile_state
     state['debug_visual'] = _normalize_debug_visual(state.get('debug_visual'))
     state.setdefault('board', {})
     state.setdefault('revealed_card', None)

@@ -635,6 +635,14 @@ const ICONS = {
 }
 const SPECIAL_ICONS = {
   team_rocket: '🚀',
+  miracle_stone: '💎',
+  bill: '🧾',
+  game_corner: '🎰',
+  bicycle_bridge: '🚲',
+  safari_zone: '🦓',
+  mr_fuji_house: '🏠',
+  celadon_dept_store: '🛍️',
+  teleporter: '🌀',
 }
 
 const TYPE_LABELS = {
@@ -657,8 +665,20 @@ function tileIcon(type, tile = null) {
 }
 
 function typeLabel(type, tile = null) {
-  if (type === 'special' && tile?.data?.special_effect === 'team_rocket') {
-    return 'Equipe Rocket'
+  const specialEffect = tile?.data?.special_effect
+  if (type === 'special' && specialEffect) {
+    const labels = {
+      team_rocket: 'Equipe Rocket',
+      miracle_stone: 'Miracle Stone',
+      bill: "It's Bill!",
+      game_corner: 'Game Corner',
+      bicycle_bridge: 'Bicycle Bridge',
+      safari_zone: 'Safari Zone',
+      mr_fuji_house: "Mr. Fuji's House",
+      celadon_dept_store: 'Celadon Dept. Store',
+      teleporter: 'Teleporter',
+    }
+    return labels[specialEffect] ?? TYPE_LABELS[type] ?? type ?? ''
   }
   return TYPE_LABELS[type] ?? type ?? ''
 }

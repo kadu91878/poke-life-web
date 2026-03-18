@@ -2,7 +2,7 @@
  * Tipos e constantes para cartas de Pokémon no frontend.
  *
  * Espelha o contrato definido em backend/game/engine/models.py (PokemonCard)
- * e o schema de backend/game/data/pokemon.json.
+ * e o runtime gerado a partir de backend/cards_metadata.json.
  */
 
 /** @enum {string} */

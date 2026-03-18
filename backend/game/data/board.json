@@ -748,7 +748,8 @@
       "name": "Miracle Stone",
       "description": "Espaco da Miracle Stone.",
       "data": {
-        "special_effect": "miracle_stone"
+        "special_effect": "miracle_stone",
+        "evolution_limit": 1
       }
     },
     {
@@ -1024,7 +1025,9 @@
       "name": "Bill",
       "description": "Casa do Bill.",
       "data": {
-        "special_effect": "bill"
+        "special_effect": "bill",
+        "granted_item_key": "bill",
+        "global_teleport_limit": 1
       }
     },
     {
@@ -1483,7 +1486,15 @@
       "name": "Game Corner",
       "description": "Game Corner.",
       "data": {
-        "special_effect": "game_corner"
+        "special_effect": "game_corner",
+        "prizes": [
+          "bill",
+          "full_restore",
+          "miracle_stone",
+          "gold_nugget",
+          "pokeball",
+          "master_ball"
+        ]
       }
     },
     {
@@ -1581,7 +1592,10 @@
       "name": "Celadon Dept. Store",
       "description": "Celadon Dept. Store.",
       "data": {
-        "special_effect": "celadon_dept_store"
+        "special_effect": "celadon_dept_store",
+        "reach_bonus_item_key": "pokeball",
+        "reach_bonus_once_per_player": true,
+        "land_behavior": "market"
       }
     },
     {
@@ -1832,7 +1846,9 @@
       "name": "Bicycle Bridge Booth",
       "description": "Cabine da Bicycle Bridge.",
       "data": {
-        "special_effect": "bicycle_bridge"
+        "special_effect": "bicycle_bridge",
+        "victory_cards": 1,
+        "first_player_bonus_pokemon": "Snubbull"
       }
     },
     {
@@ -1905,19 +1921,9 @@
       "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
       "data": {
         "special_effect": "safari_zone",
-        "encounters": [
-          {
-            "roll": [
-              1,
-              2,
-              3,
-              4,
-              5,
-              6
-            ],
-            "pokemon_name": "Tauros"
-          }
-        ]
+        "safari_index": 0,
+        "displayed_pokemon_name": "Tauros",
+        "return_to_tile_id": 96
       }
     },
     {
@@ -1927,16 +1933,9 @@
       "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
       "data": {
         "special_effect": "safari_zone",
-        "encounters": [
-          {
-            "roll": [
-              1,
-              2
-            ],
-            "pokemon_name": "Chansey",
-            "pokemon_id": 113
-          }
-        ]
+        "safari_index": 1,
+        "displayed_pokemon_name": "Exeggcute",
+        "return_to_tile_id": 96
       }
     },
     {
@@ -1946,19 +1945,9 @@
       "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
       "data": {
         "special_effect": "safari_zone",
-        "encounters": [
-          {
-            "roll": [
-              1,
-              2,
-              3,
-              4,
-              5,
-              6
-            ],
-            "pokemon_name": "Tauros"
-          }
-        ]
+        "safari_index": 2,
+        "displayed_pokemon_name": "Tauros",
+        "return_to_tile_id": 96
       }
     },
     {
@@ -1968,15 +1957,9 @@
       "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
       "data": {
         "special_effect": "safari_zone",
-        "encounters": [
-          {
-            "roll": [
-              4,
-              5
-            ],
-            "pokemon_name": "Cubone"
-          }
-        ]
+        "safari_index": 3,
+        "displayed_pokemon_name": "Cubone",
+        "return_to_tile_id": 96
       }
     },
     {
@@ -1986,15 +1969,9 @@
       "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
       "data": {
         "special_effect": "safari_zone",
-        "encounters": [
-          {
-            "roll": [
-              3,
-              4
-            ],
-            "pokemon_name": "Paras"
-          }
-        ]
+        "safari_index": 4,
+        "displayed_pokemon_name": "Paras",
+        "return_to_tile_id": 96
       }
     },
     {
@@ -2004,16 +1981,9 @@
       "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
       "data": {
         "special_effect": "safari_zone",
-        "encounters": [
-          {
-            "roll": [
-              4,
-              5,
-              6
-            ],
-            "pokemon_name": "Exeggcute"
-          }
-        ]
+        "safari_index": 5,
+        "displayed_pokemon_name": "Beedrill",
+        "return_to_tile_id": 96
       }
     },
     {
@@ -2023,15 +1993,9 @@
       "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
       "data": {
         "special_effect": "safari_zone",
-        "encounters": [
-          {
-            "roll": [
-              2,
-              3
-            ],
-            "pokemon_name": "Venonat"
-          }
-        ]
+        "safari_index": 6,
+        "displayed_pokemon_name": "Zubat",
+        "return_to_tile_id": 96
       }
     },
     {
@@ -2041,15 +2005,9 @@
       "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
       "data": {
         "special_effect": "safari_zone",
-        "encounters": [
-          {
-            "roll": [
-              6
-            ],
-            "pokemon_name": "Chansey",
-            "pokemon_id": 113
-          }
-        ]
+        "safari_index": 7,
+        "displayed_pokemon_name": "Chansey",
+        "return_to_tile_id": 96
       }
     },
     {
@@ -2059,16 +2017,9 @@
       "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
       "data": {
         "special_effect": "safari_zone",
-        "encounters": [
-          {
-            "roll": [
-              1,
-              2,
-              3
-            ],
-            "pokemon_name": "Zubat"
-          }
-        ]
+        "safari_index": 8,
+        "displayed_pokemon_name": "Venomoth",
+        "return_to_tile_id": 96
       }
     },
     {
@@ -2078,19 +2029,9 @@
       "description": "Area de captura em Safari Zone com encontros definidos pelo tabuleiro Kanto.",
       "data": {
         "special_effect": "safari_zone",
-        "encounters": [
-          {
-            "roll": [
-              1,
-              2,
-              3,
-              4,
-              5,
-              6
-            ],
-            "pokemon_name": "Tauros"
-          }
-        ]
+        "safari_index": 9,
+        "is_exit": true,
+        "return_to_tile_id": 96
       }
     },
     {
@@ -2524,7 +2465,9 @@
       "name": "Mr. Fuji's House",
       "description": "Casa do Mr. Fuji.",
       "data": {
-        "special_effect": "mr_fuji_house"
+        "special_effect": "mr_fuji_house",
+        "event_cards": 2,
+        "first_player_bonus_pokemon": "Snorlax"
       }
     },
     {
@@ -2687,7 +2630,8 @@
       "name": "Teleporter",
       "description": "Teleporter.",
       "data": {
-        "special_effect": "teleporter"
+        "special_effect": "teleporter",
+        "paired_tile_id": 137
       }
     },
     {
@@ -2696,7 +2640,8 @@
       "name": "Teleporter",
       "description": "Teleporter.",
       "data": {
-        "special_effect": "teleporter"
+        "special_effect": "teleporter",
+        "paired_tile_id": 136
       }
     },
     {

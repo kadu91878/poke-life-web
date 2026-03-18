@@ -20,6 +20,17 @@ _CARD_PUBLIC_PATHS = {
     'event': '/assets/cards/events',
     'victory': '/assets/cards/victory',
 }
+_POKEMON_PUBLIC_PATH = '/assets/pokemon'
+
+_NAME_ALIASES = {
+    'farfetchd': 'farfetch d',
+    'm fossil': 'mysterious fossil',
+    'm fossil.': 'mysterious fossil',
+    'nidoranf': 'nidoran female',
+    'nidoranm': 'nidoran male',
+    'diglet': 'diglett',
+    'sellder': 'shellder',
+}
 
 _NEGATIVE_EVENT_EFFECTS = frozenset({
     'lose_pokeball', 'lose_full_restore', 'lose_master_points',
@@ -39,21 +50,6 @@ def _public_card_image(pile: str, reference_image: str | None) -> str | None:
     return f'{base}/{reference_image}'
 
 
-def load_pokemon_cards() -> list:
-    with open(_DATA_DIR / 'pokemon.json', encoding='utf-8') as f:
-        cards = json.load(f)
-    if isinstance(cards, dict):
-        cards = cards.get('pokemon', [])
-    for card in cards:
-        card.setdefault('pokeball_slots', 1)
-    return cards
-
-
-@lru_cache(maxsize=1)
-def load_pokemon_card_index() -> dict[str, dict]:
-    return {card['name'].lower(): copy.deepcopy(card) for card in load_pokemon_cards()}
-
-
 @lru_cache(maxsize=1)
 def load_cards_metadata() -> list[dict]:
     try:
@@ -68,47 +64,116 @@ def load_cards_metadata() -> list[dict]:
 def load_cards_metadata_index() -> dict[str, dict]:
     index: dict[str, dict] = {}
     for card in load_cards_metadata():
-        name = (card.get('real_name') or '').strip()
-        if name:
-            index[name.lower()] = copy.deepcopy(card)
+        for key in _metadata_lookup_keys(card):
+            index[key] = copy.deepcopy(card)
     return index
 
 
 def _normalize_pokemon_name(name: str) -> str:
-    normalized = (name or '').strip().lower()
+    normalized = str(name or '').strip().lower()
     normalized = normalized.replace('♀', ' female').replace('♂', ' male')
-    normalized = normalized.replace('.', '').replace("`", "'")
+    normalized = normalized.replace('_', ' ').replace('-', ' ')
+    normalized = normalized.replace("'", ' ').replace('.', ' ').replace("`", ' ')
     normalized = re.sub(r'\s+', ' ', normalized)
-    return normalized
+    normalized = normalized.strip()
+    return _NAME_ALIASES.get(normalized, normalized)
+
+
+def _metadata_lookup_keys(card: dict) -> set[str]:
+    keys: set[str] = set()
+    for raw in (
+        card.get('real_name'),
+        card.get('current_name'),
+        card.get('id'),
+    ):
+        normalized = _normalize_pokemon_name(str(raw or ''))
+        if normalized:
+            keys.add(normalized)
+    for raw in card.get('aliases') or []:
+        normalized = _normalize_pokemon_name(str(raw or ''))
+        if normalized:
+            keys.add(normalized)
+    return keys
+
+
+def _coerce_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _runtime_image_path(card: dict) -> str | None:
+    if 'image_path' in card:
+        explicit = card.get('image_path')
+        if isinstance(explicit, str) and explicit.startswith('/assets/'):
+            return explicit
+        return None
+    reference_image = card.get('reference_image')
+    if not reference_image:
+        return None
+    return f'{_POKEMON_PUBLIC_PATH}/{reference_image}'
 
 
 def _metadata_to_pokemon(card: dict) -> dict:
     raw_name = card.get('real_name') or card.get('current_name') or card.get('id') or 'Unknown'
+    printed_power = card.get('power')
+    runtime_battle_points = printed_power if printed_power is not None else card.get('engine_battle_points')
     return {
         'id': card.get('id') or raw_name.lower().replace(' ', '_'),
+        'pokedex_id': card.get('engine_pokedex_id'),
         'name': raw_name,
-        'types': [],
-        'battle_points': max(1, int(card.get('power', 1) or 1)),
-        'master_points': max(0, int(card.get('points', 0) or 0)),
-        # Nome da habilidade não está mapeado com segurança em cards_metadata.json.
-        'ability': '',
+        'types': [str(poke_type).title() for poke_type in (card.get('engine_types') or card.get('types') or [])],
+        'battle_points': max(1, _coerce_int(runtime_battle_points, 1)),
+        'master_points': max(0, _coerce_int(card.get('points'), 0)),
+        'ability': card.get('engine_ability_name') or card.get('ability') or 'none',
         'ability_description': card.get('ability_description', ''),
         'ability_type': card.get('ability_type', 'passive') or 'passive',
-        'evolves_to': None,
-        'is_starter': False,
-        'is_legendary': False,
-        'is_baby': False,
-        'rarity': 'unknown',
-        'battle_effect': None,
+        'evolves_to': card.get('evolves_to') or None,
+        'evolution_method': card.get('evolution_method'),
+        'is_starter': bool(card.get('is_initial')),
+        'is_legendary': bool(card.get('engine_is_legendary') or card.get('is_legendary')),
+        'is_baby': bool(card.get('engine_is_baby') or card.get('is_baby')),
+        'rarity': card.get('engine_rarity') or card.get('rarity') or ('legendary' if card.get('engine_is_legendary') else 'unknown'),
+        'battle_effect': card.get('engine_battle_effect') or card.get('battle_effect'),
         'ability_charges': card.get('charges'),
-        'image_path': None,
-        'pokeball_slots': 1,
+        'can_battle': printed_power is not None or card.get('engine_battle_points') is not None,
+        'printed_power': printed_power,
+        'reference_image': card.get('reference_image'),
+        'image_path': _runtime_image_path(card),
+        'source_image_path': card.get('source_image_path'),
+        'pokeball_slots': max(1, _coerce_int(card.get('engine_pokeball_slots', card.get('pokeball_slots', 1)), 1)),
     }
 
 
-def load_pokemon_by_id(pokemon_id: int) -> dict | None:
-    cards = load_pokemon_cards()
-    card = next((p for p in cards if p['id'] == pokemon_id), None)
+@lru_cache(maxsize=1)
+def load_pokemon_cards() -> list[dict]:
+    cards = [_metadata_to_pokemon(card) for card in load_cards_metadata()]
+    for card in cards:
+        card.setdefault('pokeball_slots', 1)
+    return cards
+
+
+@lru_cache(maxsize=1)
+def load_pokemon_card_index() -> dict[str, dict]:
+    index: dict[str, dict] = {}
+    for card in load_pokemon_cards():
+        lookup_keys = {
+            _normalize_pokemon_name(card.get('name', '')),
+            _normalize_pokemon_name(str(card.get('id', ''))),
+        }
+        pokedex_id = card.get('pokedex_id')
+        if pokedex_id is not None:
+            lookup_keys.add(str(pokedex_id))
+        for key in lookup_keys:
+            if key:
+                index[key] = copy.deepcopy(card)
+    return index
+
+
+def load_pokemon_by_id(pokemon_id) -> dict | None:
+    normalized = _normalize_pokemon_name(str(pokemon_id or ''))
+    card = load_pokemon_card_index().get(normalized)
     return copy.deepcopy(card) if card else None
 
 
@@ -119,70 +184,79 @@ def has_pokemon_metadata(name: str) -> bool:
 
 def load_playable_pokemon_by_name(name: str) -> dict | None:
     normalized = _normalize_pokemon_name(name)
-
-    aliases = {
-        'nidoran female': 'nidoranf',
-        'nidoran male': 'nidoranm',
-        "farfetch'd": "farfetch'd",
-        'mr mime': 'mr. mime',
-    }
     base = load_pokemon_card_index().get(normalized)
     if base:
         return copy.deepcopy(base)
-
-    normalized = aliases.get(normalized, normalized)
-    base = load_pokemon_card_index().get(normalized)
-    if base:
-        return copy.deepcopy(base)
-
     return None
 
 
 def load_pokemon_by_name(name: str, *, allow_metadata_fallback: bool = True) -> dict | None:
-    playable = load_playable_pokemon_by_name(name)
-    if playable or not allow_metadata_fallback:
-        return playable
-
-    normalized = _normalize_pokemon_name(name)
-    original_normalized = normalized
-    aliases = {
-        'nidoran female': 'nidoranf',
-        'nidoran male': 'nidoranm',
-        "farfetch'd": "farfetch'd",
-        'mr mime': 'mr. mime',
-    }
-    meta = load_cards_metadata_index().get(original_normalized)
-    if meta:
-        return _metadata_to_pokemon(meta)
-
-    normalized = aliases.get(normalized, normalized)
-    meta = load_cards_metadata_index().get(normalized)
-    if meta:
-        return _metadata_to_pokemon(meta)
-    return None
+    del allow_metadata_fallback
+    return load_playable_pokemon_by_name(name)
 
 
 def get_supported_pokemon_details(pokemon_or_name: str | dict | None) -> dict:
     if isinstance(pokemon_or_name, dict):
-        pokemon_name = pokemon_or_name.get('name')
+        pokemon_name = pokemon_or_name.get('name') or pokemon_or_name.get('id')
     else:
         pokemon_name = pokemon_or_name
 
-    metadata_exists = has_pokemon_metadata(pokemon_name or '')
-    playable = load_playable_pokemon_by_name(pokemon_name or '') if pokemon_name else None
+    playable = None
+    if isinstance(pokemon_or_name, dict):
+        playable = canonicalize_runtime_pokemon(pokemon_or_name)
+    elif pokemon_name:
+        playable = load_playable_pokemon_by_name(pokemon_name)
+    metadata_exists = has_pokemon_metadata(str(pokemon_name or ''))
     return {
         'pokemon_name': pokemon_name,
         'metadata_exists': metadata_exists,
         'playable_exists': playable is not None,
-        'supported': bool(metadata_exists and playable is not None),
+        'supported': playable is not None,
     }
+
+
+_RUNTIME_MUTABLE_FIELDS = {
+    'ability_charges',
+    'ability_used',
+    'battle_slot_key',
+    'capture_context',
+    'capture_sequence',
+    'acquisition_origin',
+    'gym_team_index',
+    'is_starter_slot',
+    'knocked_out',
+    'pluspower_applied',
+    'slot_cost',
+}
+
+
+def canonicalize_runtime_pokemon(pokemon: dict | None) -> dict | None:
+    if not isinstance(pokemon, dict):
+        return None
+
+    base = None
+    if pokemon.get('name'):
+        base = load_playable_pokemon_by_name(pokemon['name'])
+    if base is None and pokemon.get('id') is not None:
+        base = load_pokemon_by_id(pokemon['id'])
+    if base is None:
+        return None
+
+    canonical = copy.deepcopy(base)
+    for key, value in pokemon.items():
+        if key not in canonical or key in _RUNTIME_MUTABLE_FIELDS:
+            canonical[key] = copy.deepcopy(value)
+    return canonical
 
 
 def ensure_supported_inventory_pokemon(pokemon: dict | None) -> tuple[dict | None, dict]:
     support = get_supported_pokemon_details(pokemon)
     if not support['supported'] or not isinstance(pokemon, dict):
         return None, support
-    return copy.deepcopy(pokemon), support
+    canonical = canonicalize_runtime_pokemon(pokemon)
+    if canonical is None:
+        return None, support
+    return canonical, support
 
 
 def resolve_supported_pokemon_reward(name: str) -> tuple[dict | None, dict]:

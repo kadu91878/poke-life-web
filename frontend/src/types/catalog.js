@@ -28,7 +28,7 @@ export const AbilityType = {
  *
  * Campos de imagem:
  * @property {string}       reference_image     - Filename da imagem (ex: 'bulbasaur.png')
- * @property {string}       image_url           - URL para o frontend (/assets/pokemon/...)
+ * @property {string|null}  image_url           - URL pública resolvida no frontend (/assets/pokemon/...) ou null
  *
  * Campos de estatísticas:
  * @property {number|null}  power               - Pontos de Batalha (null = não batalha)

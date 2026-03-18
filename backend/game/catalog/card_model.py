@@ -7,6 +7,7 @@ Campos espelham exatamente o schema do JSON, sem inferência visual das imagens.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 
@@ -20,6 +21,8 @@ VALID_ABILITY_TYPES = {ABILITY_ACTIVE, ABILITY_PASSIVE, ABILITY_BATTLE, ABILITY_
 
 # Prefixo público das imagens servidas pelo frontend
 CARD_IMAGE_BASE_URL = "/assets/pokemon/"
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PUBLIC_POKEMON_IMAGE_DIR = PROJECT_ROOT / "frontend" / "public" / "assets" / "pokemon"
 
 
 @dataclass
@@ -61,7 +64,7 @@ class PhysicalCard:
 
     # Imagem
     reference_image: str
-    image_url: str  # resolvido em from_dict()
+    image_url: Optional[str]  # resolvido em from_dict()
 
     # Estatísticas
     power: Optional[int]           # None = não batalha (ex: Celebi)
@@ -86,11 +89,18 @@ class PhysicalCard:
     def from_dict(cls, data: dict) -> "PhysicalCard":
         """Constrói um PhysicalCard a partir de um dict do cards_metadata.json."""
         ref_img = data.get("reference_image") or f"{data['id']}.png"
+        explicit_image_url = data.get("image_path")
+        if explicit_image_url:
+            image_url = explicit_image_url
+        elif ref_img and (PUBLIC_POKEMON_IMAGE_DIR / ref_img).exists():
+            image_url = CARD_IMAGE_BASE_URL + ref_img
+        else:
+            image_url = None
         return cls(
             id=data["id"],
             real_name=data.get("real_name") or data["id"].capitalize(),
             reference_image=ref_img,
-            image_url=CARD_IMAGE_BASE_URL + ref_img,
+            image_url=image_url,
             power=data.get("power"),
             points=data.get("points", 0),
             ability_type=data.get("ability_type"),

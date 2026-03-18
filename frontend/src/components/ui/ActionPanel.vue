@@ -240,7 +240,11 @@ const pendingEvent   = computed(() => store.turn?.pending_event ?? null)
 const players        = computed(() => store.players)
 const turn           = computed(() => store.turn)
 const pendingAction = computed(() => turn.value?.pending_action ?? null)
-const isPendingChoiceAction = computed(() => ['reward_choice', 'gym_heal', 'pokecenter_heal'].includes(pendingAction.value?.type))
+const isPendingChoiceAction = computed(() =>
+  !!pendingAction.value
+  && pendingAction.value?.type !== 'capture_attempt'
+  && Array.isArray(pendingAction.value?.options)
+)
 const pendingItemChoice = computed(() => turn.value?.pending_item_choice ?? null)
 const pendingReleaseChoice = computed(() => turn.value?.pending_release_choice ?? null)
 const pendingAllowedActions = computed(() => new Set(pendingAction.value?.allowed_actions ?? []))
@@ -282,6 +286,8 @@ const debugItemOptions = [
   { key: 'pluspower', label: 'PlusPower' },
   { key: 'prof_oak', label: 'Prof. Oak' },
   { key: 'miracle_stone', label: 'Miracle Stone' },
+  { key: 'gold_nugget', label: 'Gold Nugget' },
+  { key: 'master_ball', label: 'Master Ball' },
   { key: 'master_points_nugget', label: 'Master Points Nugget' },
 ]
 const debugItemKey = ref('bill')
@@ -377,12 +383,16 @@ const pendingChoiceTitle = computed(() => {
     if (['returned', 'remained'].includes(pendingAction.value?.visit_kind)) return '🏥 Cura de Retorno'
     return '🏥 Cura de PokéCenter'
   }
+  if (pendingAction.value?.type === 'miracle_stone_tile') return '💎 Miracle Stone'
+  if (pendingAction.value?.type === 'bill_teleport') return "🧾 It's Bill!"
+  if (pendingAction.value?.type === 'game_corner') return '🎰 Game Corner'
+  if (pendingAction.value?.type === 'teleporter_manual_roll') return '🌀 Turno extra do Teleporter'
   return '🎁 Escolha pendente'
 })
 const waitingActionTitle = computed(() => {
   if (!pendingAction.value || ownsPendingAction.value) return ''
-  if (pendingAction.value.type === 'pokecenter_heal') return pendingChoiceTitle.value
   if (pendingAction.value.type === 'capture_attempt') return '🎯 Ação pendente'
+  if (isPendingChoiceAction.value) return pendingChoiceTitle.value
   return '⏳ Aguardando resolução'
 })
 const waitingActionDescription = computed(() => {
@@ -394,6 +404,9 @@ const waitingActionDescription = computed(() => {
   }
   if (pendingAction.value.type === 'capture_attempt') {
     return `Aguardando ${owner} resolver a captura pendente.`
+  }
+  if (isPendingChoiceAction.value) {
+    return `Aguardando ${owner} concluir a escolha pendente.`
   }
   return `Aguardando ${owner} concluir a ação pendente.`
 })

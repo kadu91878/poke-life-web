@@ -94,6 +94,16 @@ def roll_team_rocket_dice() -> int:
     return roll_dice()
 
 
+def roll_game_corner_dice() -> int:
+    """Rola o dado usado apenas no fluxo do Game Corner."""
+    return roll_dice()
+
+
+def roll_market_dice() -> int:
+    """Rola o dado usado apenas em fluxos de PokéMarket."""
+    return roll_dice()
+
+
 # ── Score de batalha ──────────────────────────────────────────────────────────
 
 def _score_with_effect(bp: int, roll: int, battle_effect: str | None) -> int:

@@ -61,6 +61,9 @@ def _new_player(name: str, index: int) -> dict:
         'pokemon': [],
         'capture_sequence_counter': 0,
         'items': starting_defaults['items'],
+        'special_tile_flags': {
+            'celadon_dept_store_bonus_claimed': False,
+        },
         'badges': [],
         'master_points': 0,
         'gyms_attempted': [],
@@ -201,7 +204,7 @@ class SelectStarterView(RoomActionBase):
         player_id = request.data.get('player_id')
         starter_id = request.data.get('starter_id')
         state = self.get_state(room)
-        updated = game_state.select_starter(state, player_id, int(starter_id))
+        updated = game_state.select_starter(state, player_id, starter_id)
         if updated is None:
             return Response({'error': 'Starter inválido ou fora de turno'}, status=status.HTTP_400_BAD_REQUEST)
 

@@ -61,6 +61,24 @@ ITEM_DEFS = {
         'implemented': True,
         'notes': 'Implementação conservadora: usa apenas a cadeia evolves_to já presente nos dados atuais.',
     },
+    'gold_nugget': {
+        'key': 'gold_nugget',
+        'name': 'Gold Nugget',
+        'image_path': '/assets/items/master_points_nugget.png',
+        'category': 'reward',
+        'effect': 'special_tile_reward',
+        'implemented': True,
+        'notes': 'Usado como prêmio do Game Corner; compartilha o ícone disponível do nugget no projeto.',
+    },
+    'master_ball': {
+        'key': 'master_ball',
+        'name': 'Master Ball',
+        'image_path': '/assets/items/master_ball.png',
+        'category': 'reward',
+        'effect': 'special_tile_reward',
+        'implemented': True,
+        'notes': 'Usado como prêmio máximo do Game Corner.',
+    },
     'defender': {
         'key': 'defender',
         'name': 'Defender',
@@ -88,6 +106,8 @@ DEBUG_ITEM_KEYS = [
     'pluspower',
     'prof_oak',
     'miracle_stone',
+    'gold_nugget',
+    'master_ball',
     'master_points_nugget',
 ]
 

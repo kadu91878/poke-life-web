@@ -5,7 +5,9 @@ Testa: inicialização, seleção de starters, movimento, captura,
        battle_effects, modelos formais de carta.
 """
 import copy
+import json
 import uuid
+from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -36,6 +38,9 @@ def _make_player(name: str, host: bool = False, **kwargs) -> dict:
         'starter_pokemon': None,
         'pokemon': [],
         'capture_sequence_counter': 0,
+        'special_tile_flags': {
+            'celadon_dept_store_bonus_claimed': False,
+        },
         'items': {'pokeballs': 6, 'full_restores': 2},
         'badges': [],
         'master_points': 0,
@@ -1526,13 +1531,19 @@ class TestCapture(TestCase):
         self.assertIsNone(new_state)
         self.assertIn('não pertence', error.lower())
 
-    def test_unsupported_metadata_pokemon_is_never_added_to_inventory(self):
+    def test_unsupported_runtime_pokemon_is_never_added_to_inventory(self):
         state, p1_id, p2_id = _init_two_player_game()
         starters = state['turn']['available_starters']
         state = engine.select_starter(state, p1_id, starters[0]['id'])
         state = engine.select_starter(state, p2_id, starters[1]['id'])
-        unsupported = load_playable_pokemon_by_name('Pidgey')
-        self.assertIsNotNone(unsupported)
+        unsupported = {
+            'id': 'missingno',
+            'name': 'Missingno',
+            'battle_points': 9,
+            'master_points': 999,
+            'types': ['Bird'],
+            'ability': 'none',
+        }
 
         state = engine._queue_capture_attempt(  # noqa: SLF001 - cobre a fila autoritativa de captura
             state,
@@ -1547,17 +1558,13 @@ class TestCapture(TestCase):
 
         player_after = next(p for p in new_state['players'] if p['id'] == p1_id)
         self.assertFalse(result['success'])
-        self.assertFalse(any(p['name'] == 'Pidgey' for p in player_after['pokemon']))
+        self.assertFalse(any(p['name'] == 'Missingno' for p in player_after['pokemon']))
         self.assertTrue(any('cards_metadata.json' in entry['message'] for entry in new_state['log']))
 
 
-# ── Testes de Safari Zone ─────────────────────────────────────────────────────
+# ── Testes dos Special Tiles Restantes ───────────────────────────────────────
 
-class TestSafariZone(TestCase):
-
-    def _land_on_safari(self, state, p1_id):
-        """Força o jogador a cair na Safari Zone (tile 96)."""
-        return _land_on_tile(state, p1_id, 96)
+class TestRemainingSpecialTiles(TestCase):
 
     def _ready_state(self) -> tuple[dict, str, str]:
         state, p1_id, p2_id = _init_two_player_game()
@@ -1566,56 +1573,316 @@ class TestSafariZone(TestCase):
         state = engine.select_starter(state, p2_id, starters[1]['id'])
         return state, p1_id, p2_id
 
-    def test_safari_zone_offers_pokemon(self):
+    def _player(self, state: dict, player_id: str) -> dict:
+        return next(player for player in state['players'] if player['id'] == player_id)
+
+    def _force_turn(self, state: dict, player_id: str) -> dict:
+        state['turn']['current_player_id'] = player_id
+        state['turn']['phase'] = 'roll'
+        state['turn']['pending_action'] = None
+        state['turn']['pending_event'] = None
+        state['turn']['pending_pokemon'] = None
+        state['turn']['pending_item_choice'] = None
+        state['turn']['pending_release_choice'] = None
+        state['turn']['pending_effects'] = []
+        return state
+
+    def _give_pokemon(
+        self,
+        state: dict,
+        player_id: str,
+        pokemon_name: str,
+        *,
+        acquisition_origin: str = 'reward',
+        knocked_out: bool = False,
+        capture_sequence: int | None = None,
+    ) -> dict:
+        player = self._player(state, player_id)
+        pokemon = copy.deepcopy(load_playable_pokemon_by_name(pokemon_name))
+        self.assertIsNotNone(pokemon, f'{pokemon_name} precisa existir no dataset jogável')
+        if acquisition_origin == 'captured':
+            sequence = capture_sequence or engine._next_capture_sequence(player)  # noqa: SLF001 - helper autoritativo de teste
+            pokemon = engine._apply_pokemon_acquisition_metadata(  # noqa: SLF001 - valida metadata real usada pelo engine
+                pokemon,
+                acquisition_origin='captured',
+                capture_sequence=sequence,
+                capture_context='test_capture',
+            )
+            player['capture_sequence_counter'] = max(int(player.get('capture_sequence_counter', 0) or 0), int(sequence))
+        else:
+            pokemon = engine._apply_pokemon_acquisition_metadata(  # noqa: SLF001 - valida metadata real usada pelo engine
+                pokemon,
+                acquisition_origin=acquisition_origin,
+                capture_sequence=None,
+                capture_context='test_reward',
+            )
+        pokemon['knocked_out'] = knocked_out
+        player['pokemon'].append(pokemon)
+        player['pokeballs'] = max(0, int(player.get('pokeballs', 0) or 0) - pokemon_slot_cost(pokemon))
+        sync_player_inventory(player)
+        return pokemon
+
+    def _find_option_id(self, pending_action: dict, label_fragment: str) -> str:
+        fragment = label_fragment.lower()
+        for option in pending_action.get('options', []):
+            if fragment in option.get('label', '').lower():
+                return option['id']
+        self.fail(f'Opção contendo "{label_fragment}" não encontrada em {pending_action.get("options", [])}')
+
+    def test_miracle_stone_tile_evolves_eligible_pokemon(self):
         state, p1_id, _ = self._ready_state()
-        state = self._land_on_safari(state, p1_id)
-        self.assertEqual(state['turn']['phase'], 'action')
+        self._give_pokemon(state, p1_id, 'Bulbasaur')
+
+        state = _land_on_tile(state, p1_id, 35)
+        pending = state['turn']['pending_action']
+
+        self.assertEqual(pending['type'], 'miracle_stone_tile')
+        option_id = self._find_option_id(pending, 'Bulbasaur')
+        state, result = engine.resolve_pending_action(state, p1_id, option_id)
+
+        team_names = [pokemon['name'] for pokemon in self._player(state, p1_id)['pokemon']]
+        self.assertTrue(result['success'])
+        self.assertEqual(result['evolved_to'], 'Ivysaur')
+        self.assertIn('Ivysaur', team_names)
+
+    def test_miracle_stone_tile_rejects_special_method_evolution(self):
+        state, p1_id, _ = self._ready_state()
+        player = self._player(state, p1_id)
+        player['pokeballs'] += pokemon_slot_cost(player.get('starter_pokemon'))
+        player['starter_pokemon'] = None
+        sync_player_inventory(player)
+        self._give_pokemon(state, p1_id, 'Magikarp')
+
+        state = _land_on_tile(state, p1_id, 35)
+
+        self.assertIsNone(state['turn']['pending_action'])
+        self.assertTrue(any('não tinha pokémon elegível' in entry['message'].lower() for entry in state['log']))
+
+    def test_bill_tile_gives_bill_item(self):
+        state, p1_id, _ = self._ready_state()
+
+        state = _land_on_tile(state, p1_id, 47)
+        player = self._player(state, p1_id)
+
+        self.assertEqual(engine.get_item_quantity(player, 'bill'), 1)
+        self.assertEqual(state['turn']['pending_action']['type'], 'bill_teleport')
+
+    def test_bill_tile_teleport_can_only_be_used_once_per_game(self):
+        state, p1_id, p2_id = self._ready_state()
+        p2 = self._player(state, p2_id)
+        p2['position'] = 80
+
+        state = _land_on_tile(state, p1_id, 47)
+        state, result = engine.resolve_pending_action(state, p1_id, p2_id)
+
+        self.assertTrue(result['teleported'])
+        self.assertEqual(self._player(state, p1_id)['position'], 80)
+        self.assertEqual(state['special_tile_state']['bill_teleport_used_by'], p1_id)
+
+        state = self._force_turn(state, p2_id)
+        before_bill = engine.get_item_quantity(self._player(state, p2_id), 'bill')
+        state = _land_on_tile(state, p2_id, 47)
+        p2_after = self._player(state, p2_id)
+
+        self.assertEqual(engine.get_item_quantity(p2_after, 'bill'), before_bill + 1)
+        self.assertNotEqual((state['turn'].get('pending_action') or {}).get('type'), 'bill_teleport')
+
+    def test_game_corner_grants_prize_on_successful_roll(self):
+        state, p1_id, _ = self._ready_state()
+        player = self._player(state, p1_id)
+        before_bill = engine.get_item_quantity(player, 'bill')
+
+        state = _land_on_tile(state, p1_id, 72)
+        with patch('game.engine.state.roll_game_corner_dice', return_value=4):
+            state, result = engine.resolve_pending_action(state, p1_id, 'roll')
+        self.assertEqual(result['prize_key'], 'bill')
+        self.assertEqual(state['turn']['pending_action']['type'], 'game_corner')
+
+        stop_id = self._find_option_id(state['turn']['pending_action'], 'parar')
+        state, result = engine.resolve_pending_action(state, p1_id, stop_id)
+
+        self.assertTrue(result['success'])
+        self.assertEqual(engine.get_item_quantity(self._player(state, p1_id), 'bill'), before_bill + 1)
+
+    def test_game_corner_gives_nothing_on_roll_one_or_two(self):
+        state, p1_id, _ = self._ready_state()
+        player = self._player(state, p1_id)
+        before_bill = engine.get_item_quantity(player, 'bill')
+
+        state = _land_on_tile(state, p1_id, 72)
+        with patch('game.engine.state.roll_game_corner_dice', return_value=1):
+            state, result = engine.resolve_pending_action(state, p1_id, 'roll')
+
+        self.assertFalse(result['success'])
+        self.assertEqual(engine.get_item_quantity(self._player(state, p1_id), 'bill'), before_bill)
+
+    def test_game_corner_can_continue_to_next_prize_without_accumulating_previous(self):
+        state, p1_id, _ = self._ready_state()
+        player = self._player(state, p1_id)
+        before_bill = engine.get_item_quantity(player, 'bill')
+        before_full_restore = engine.get_item_quantity(player, 'full_restore')
+
+        state = _land_on_tile(state, p1_id, 72)
+        with patch('game.engine.state.roll_game_corner_dice', return_value=5):
+            state, _ = engine.resolve_pending_action(state, p1_id, 'roll')
+
+        continue_id = self._find_option_id(state['turn']['pending_action'], 'tentar')
+        state, _ = engine.resolve_pending_action(state, p1_id, continue_id)
+
+        with patch('game.engine.state.roll_game_corner_dice', return_value=6):
+            state, result = engine.resolve_pending_action(state, p1_id, 'roll')
+
+        self.assertEqual(result['prize_key'], 'full_restore')
+        stop_id = self._find_option_id(state['turn']['pending_action'], 'parar')
+        state, _ = engine.resolve_pending_action(state, p1_id, stop_id)
+
+        player_after = self._player(state, p1_id)
+        self.assertEqual(engine.get_item_quantity(player_after, 'bill'), before_bill)
+        self.assertEqual(engine.get_item_quantity(player_after, 'full_restore'), before_full_restore + 1)
+
+    def test_bicycle_bridge_draws_victory_card_and_first_player_gets_snubbull(self):
+        state, p1_id, _ = self._ready_state()
+        state['decks']['victory_deck'] = [{
+            'id': 801,
+            'title': 'Simple MP',
+            'description': 'Gain 20 Master Points.',
+            'category': 'master_points',
+            'pile': 'victory',
+        }]
+        state['decks']['victory_discard'] = []
+
+        state = _land_on_tile(state, p1_id, 92)
+        player = self._player(state, p1_id)
+
+        self.assertTrue(any(pokemon['name'] == 'Snubbull' for pokemon in player['pokemon']))
+        self.assertEqual(state['special_tile_state']['bicycle_bridge_first_player_id'], p1_id)
+        self.assertIn(801, state['consumed']['victory'])
+
+    def test_bicycle_bridge_first_bonus_is_only_given_once(self):
+        state, p1_id, p2_id = self._ready_state()
+        state['decks']['victory_deck'] = [{
+            'id': 811,
+            'title': 'Simple MP',
+            'description': 'Gain 20 Master Points.',
+            'category': 'master_points',
+            'pile': 'victory',
+        }, {
+            'id': 812,
+            'title': 'Simple MP 2',
+            'description': 'Gain 20 Master Points.',
+            'category': 'master_points',
+            'pile': 'victory',
+        }]
+
+        state = _land_on_tile(state, p1_id, 92)
+        state = self._force_turn(state, p2_id)
+        state = _land_on_tile(state, p2_id, 92)
+
+        p2 = self._player(state, p2_id)
+        self.assertFalse(any(pokemon['name'] == 'Snubbull' for pokemon in p2['pokemon']))
+
+    def test_safari_zone_offers_capture_for_displayed_pokemon(self):
+        state, p1_id, _ = self._ready_state()
+
+        state = _land_on_tile(state, p1_id, 96)
+
+        self.assertEqual(state['turn']['pending_action']['type'], 'capture_attempt')
         self.assertEqual(state['turn']['capture_context'], 'safari')
-        self.assertIsNotNone(state['turn']['pending_pokemon'])
+        self.assertEqual(state['turn']['pending_pokemon']['name'], 'Tauros')
 
-    def test_safari_zone_has_reserve(self):
+    def test_safari_zone_exit_returns_player_to_house(self):
         state, p1_id, _ = self._ready_state()
-        state = self._land_on_safari(state, p1_id)
-        # Should have a reserve for the second pokemon
-        reserve = state['turn'].get('pending_safari', [])
-        self.assertIsInstance(reserve, list)
 
-    def test_safari_capture_first_advances_to_second(self):
+        state = _land_on_tile(state, p1_id, 105)
+
+        self.assertEqual(self._player(state, p1_id)['position'], 96)
+
+    def test_mr_fuji_house_draws_two_event_cards_and_first_player_gets_snorlax(self):
         state, p1_id, _ = self._ready_state()
-        state = self._land_on_safari(state, p1_id)
+        state['decks']['event_deck'] = [
+            {'id': 901, 'title': 'Evento A', 'description': 'Nada acontece.', 'category': 'special_event', 'pile': 'event'},
+            {'id': 902, 'title': 'Evento B', 'description': 'Nada acontece.', 'category': 'special_event', 'pile': 'event'},
+        ]
+        state['decks']['event_discard'] = []
 
-        # Ensure there's a reserve by checking the list
-        reserve = state['turn'].get('pending_safari', [])
-        if not reserve:
-            # If no reserve (deck only had 1 card), skip this test
-            return
+        state = _land_on_tile(state, p1_id, 124)
+        player = self._player(state, p1_id)
 
-        new_state, result = engine.capture_pokemon(state, p1_id)
-        self.assertIsNotNone(new_state)
-        self.assertTrue(result.get('safari_next'))
-        self.assertIsNotNone(new_state['turn']['pending_pokemon'])
-        self.assertEqual(new_state['turn']['phase'], 'action')
+        self.assertTrue(any(pokemon['name'] == 'Snorlax' for pokemon in player['pokemon']))
+        self.assertEqual(state['special_tile_state']['mr_fuji_first_player_id'], p1_id)
+        self.assertEqual(state['consumed']['events'], [901, 902])
 
-    def test_safari_skip_advances_to_second(self):
+    def test_celadon_dept_store_grants_one_pokeball_only_once_per_player(self):
         state, p1_id, _ = self._ready_state()
-        state = self._land_on_safari(state, p1_id)
+        state['decks']['event_deck'] = [{
+            'id': 44,
+            'title': 'PokéMarket',
+            'description': 'Throw the dice in order to receive any of these items! 2 = Pokéball, 3 = Bill.',
+            'category': 'market',
+            'pile': 'event',
+        }, {
+            'id': 52,
+            'title': 'PokéMarket',
+            'description': 'Throw the dice in order to receive any of these items! 2 = Pokéball, 3 = Bill.',
+            'category': 'market',
+            'pile': 'event',
+        }]
+        player = self._player(state, p1_id)
+        before_pokeballs = player['pokeballs']
 
-        reserve = state['turn'].get('pending_safari', [])
-        if not reserve:
-            return
+        state = _land_on_tile(state, p1_id, 79)
+        after_first_reach = self._player(state, p1_id)['pokeballs']
+        state = self._force_turn(state, p1_id)
+        state = _land_on_tile(state, p1_id, 79)
+        after_second_reach = self._player(state, p1_id)['pokeballs']
 
-        new_state = engine.skip_action(state, p1_id)
-        self.assertIsNotNone(new_state['turn']['pending_pokemon'])
-        self.assertEqual(new_state['turn']['phase'], 'action')
+        self.assertEqual(after_first_reach, before_pokeballs + 1)
+        self.assertEqual(after_second_reach, after_first_reach)
 
-    def test_safari_skip_both_ends_turn(self):
+    def test_celadon_dept_store_landing_behaves_like_market(self):
         state, p1_id, _ = self._ready_state()
-        state = self._land_on_safari(state, p1_id)
+        state['decks']['event_deck'] = [{
+            'id': 44,
+            'title': 'PokéMarket',
+            'description': 'Throw the dice in order to receive any of these items! 2 = Pokéball, 3 = Bill.',
+            'category': 'market',
+            'pile': 'event',
+        }]
 
-        # Force single card scenario (clear reserve)
-        state['turn']['pending_safari'] = []
-        new_state = engine.skip_action(state, p1_id)
-        self.assertEqual(new_state['turn']['phase'], 'roll')
+        state = _land_on_tile(state, p1_id, 79)
+
+        self.assertEqual(state['turn']['phase'], 'event')
+        self.assertEqual(state['turn']['pending_event']['category'], 'market')
+
+    def test_teleporter_moves_player_and_grants_extra_turn_on_exact_landing(self):
+        state, p1_id, _ = self._ready_state()
+
+        state = _land_on_tile(state, p1_id, 136)
+
+        self.assertEqual(self._player(state, p1_id)['position'], 137)
+        self.assertEqual(state['turn']['current_player_id'], p1_id)
+        self.assertEqual(state['turn']['pending_action']['type'], 'teleporter_manual_roll')
+
+    def test_teleporter_manual_roll_uses_chosen_value(self):
+        state, p1_id, _ = self._ready_state()
+        state = _land_on_tile(state, p1_id, 136)
+
+        option_id = self._find_option_id(state['turn']['pending_action'], 'Mover 4')
+        state, result = engine.resolve_pending_action(state, p1_id, option_id)
+
+        self.assertTrue(result['success'])
+        self.assertEqual(self._player(state, p1_id)['position'], 141)
+
+    def test_teleporter_extra_turn_is_consumed_after_manual_move(self):
+        state, p1_id, p2_id = self._ready_state()
+        state = _land_on_tile(state, p1_id, 136)
+
+        option_id = self._find_option_id(state['turn']['pending_action'], 'Mover 5')
+        state, _ = engine.resolve_pending_action(state, p1_id, option_id)
+        state = engine.skip_action(state, p1_id)
+
+        self.assertEqual(state['turn']['current_player_id'], p2_id)
+        self.assertIsNone(state['turn'].get('pending_action'))
 
 
 # ── Testes de Duelo ──────────────────────────────────────────────────────────
@@ -2103,7 +2370,7 @@ class TestEventCards(TestCase):
         pending = state['turn']['pending_action']
         self.assertEqual(pending['type'], 'reward_choice')
         self.assertTrue(any(option['label'] == 'Eevee' for option in pending['options']))
-        self.assertFalse(any(option['label'] == 'M. Fossil' for option in pending['options']))
+        self.assertTrue(any(option['label'] == 'Mysterious Fossil' for option in pending['options']))
 
         state, resolve_result = engine.resolve_pending_action(state, p1_id, 'Eevee')
         player = next(p for p in state['players'] if p['id'] == p1_id)
@@ -2111,11 +2378,11 @@ class TestEventCards(TestCase):
         self.assertTrue(any(p['name'] == 'Eevee' for p in player['pokemon']))
         self.assertEqual(state['turn']['phase'], 'roll')
 
-    def test_unsupported_reward_pokemon_is_not_inserted(self):
+    def test_unknown_reward_pokemon_is_not_inserted(self):
         card = {
             'id': 18,
             'title': 'Gift Pokémon',
-            'description': 'You may choose one of the above Pokémon to receive as a gift! M. Fossil.',
+            'description': 'You may choose one of the above Pokémon to receive as a gift! Missingno.',
             'category': 'gift_pokemon_choice',
             'pile': 'victory',
         }
@@ -2730,8 +2997,8 @@ class TestPokemonCard(TestCase):
         self.assertEqual(d['is_legendary'], original['is_legendary'])
         self.assertEqual(d['is_baby'], original['is_baby'])
 
-    def test_all_50_pokemon_have_valid_battle_effects(self):
-        """Todos os 50 Pokémon no JSON têm battle_effect válido (ou None)."""
+    def test_all_runtime_pokemon_have_valid_battle_effects(self):
+        """Todas as cartas runtime derivadas do metadata canônico têm battle_effect válido (ou None)."""
         from game.engine.cards import load_pokemon_cards
         cards = load_pokemon_cards()
         for data in cards:
@@ -2742,20 +3009,49 @@ class TestPokemonCard(TestCase):
                 msg=f"Pokémon {card.name} (id={card.id}) tem erros: {errors}",
             )
 
-    def test_all_50_pokemon_have_is_legendary_field(self):
-        """Campo is_legendary presente em todos os Pokémon do JSON."""
+    def test_all_runtime_pokemon_have_is_legendary_field(self):
+        """Campo is_legendary presente em todas as cartas runtime derivadas do metadata canônico."""
         from game.engine.cards import load_pokemon_cards
         cards = load_pokemon_cards()
         for data in cards:
             self.assertIn('is_legendary', data, msg=f"{data['name']} sem is_legendary")
 
+    def test_runtime_dataset_comes_from_cards_metadata(self):
+        """O loader runtime usa o cards_metadata.json como conjunto canônico de cartas."""
+        from game.engine.cards import load_pokemon_cards
+
+        root = Path(__file__).resolve().parents[2]
+        metadata = json.loads((root / 'cards_metadata.json').read_text(encoding='utf-8'))['cards']
+        runtime_cards = load_pokemon_cards()
+
+        metadata_names = {card['real_name'] for card in metadata}
+        runtime_names = {card['name'] for card in runtime_cards}
+        self.assertEqual(runtime_names, metadata_names)
+        bulbasaur_runtime = next(card for card in runtime_cards if card['name'] == 'Bulbasaur')
+        bulbasaur_metadata = next(card for card in metadata if card['real_name'] == 'Bulbasaur')
+        self.assertEqual(bulbasaur_runtime['battle_points'], bulbasaur_metadata['power'])
+
+    def test_compatibility_pokemon_json_is_derived_from_runtime_dataset(self):
+        """pokemon.json permanece apenas como snapshot derivado do runtime canônico."""
+        from game.engine.cards import load_pokemon_cards
+
+        root = Path(__file__).resolve().parents[2]
+        compatibility_snapshot = json.loads((root / 'game' / 'data' / 'pokemon.json').read_text(encoding='utf-8'))
+        runtime_cards = load_pokemon_cards()
+
+        self.assertEqual(len(compatibility_snapshot), len(runtime_cards))
+        self.assertEqual(
+            {card['name'] for card in compatibility_snapshot},
+            {card['name'] for card in runtime_cards},
+        )
+
     def test_legendary_pokemon_count(self):
-        """Exatamente 5 Pokémon são lendários (Articuno, Zapdos, Moltres, Mewtwo, Mew)."""
+        """O conjunto de lendários runtime espelha o metadata canônico consolidado."""
         from game.engine.cards import load_pokemon_cards
         cards = load_pokemon_cards()
         legendary = [p for p in cards if p.get('is_legendary')]
         legendary_names = {p['name'] for p in legendary}
-        expected = {'Articuno', 'Zapdos', 'Moltres', 'Mewtwo', 'Mew'}
+        expected = {'Articuno', 'Celebi', 'Entei', 'Mew', 'Mewtwo', 'Moltres', 'Raikou', 'Suicune', 'Zapdos'}
         self.assertEqual(legendary_names, expected)
 
 
