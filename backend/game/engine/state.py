@@ -126,6 +126,8 @@ _SPECIAL_METHOD_EVOLUTION_PHRASES = (
     'if the outcome of your move dice is ever 6',
     'if you release another pokémon',
     'if you release another pokemon',
+    'will evolve when you add another pokémon to your team',
+    'will evolve when you add another pokemon to your team',
     'when evolving eevee',
     'when evolving slowpoke',
     'when evolving tyrogue',

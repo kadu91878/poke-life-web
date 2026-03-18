@@ -3054,6 +3054,40 @@ class TestPokemonCard(TestCase):
         expected = {'Articuno', 'Celebi', 'Entei', 'Mew', 'Mewtwo', 'Moltres', 'Raikou', 'Suicune', 'Zapdos'}
         self.assertEqual(legendary_names, expected)
 
+    def test_kanto_basic1_cards_resolve_public_images(self):
+        """As cartas extraídas do sheet Basic 1 (x8) resolvem image_path público no runtime."""
+        from game.engine.cards import load_pokemon_by_name
+
+        expected_public_paths = {
+            'Pidgey': '/assets/pokemon/pidgey.png',
+            'Pidgeotto': '/assets/pokemon/pidgeotto.png',
+            'Pidgeot': '/assets/pokemon/pidgeot.png',
+            'Paras': '/assets/pokemon/paras.png',
+            'Parasect': '/assets/pokemon/parasect.png',
+            'Weedle': '/assets/pokemon/weedle.png',
+            'Kakuna': '/assets/pokemon/kakuna.png',
+            'Beedrill': '/assets/pokemon/beedrill.png',
+        }
+
+        for pokemon_name, expected_path in expected_public_paths.items():
+            with self.subTest(pokemon=pokemon_name):
+                runtime_card = load_pokemon_by_name(pokemon_name)
+                self.assertIsNotNone(runtime_card)
+                self.assertEqual(runtime_card['image_path'], expected_path)
+
+    def test_paras_runtime_chain_now_includes_parasect(self):
+        """Paras -> Parasect fica resolvido no runtime canônico depois da extração do sheet Kanto."""
+        from game.engine.cards import load_pokemon_by_name
+
+        paras = load_pokemon_by_name('Paras')
+        parasect = load_pokemon_by_name('Parasect')
+
+        self.assertIsNotNone(paras)
+        self.assertIsNotNone(parasect)
+        self.assertEqual(paras['evolves_to'], 'Parasect')
+        self.assertEqual(parasect['battle_points'], 6)
+        self.assertEqual(parasect['master_points'], 70)
+
 
 # ── Testes de EventCard (modelo formal) ───────────────────────────────────────
 
