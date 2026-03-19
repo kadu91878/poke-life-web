@@ -13,6 +13,7 @@ export const useGameStore = defineStore('game', () => {
   const lastEvent   = ref(null)
   const errorMsg    = ref(null)
   const notification = ref(null)
+  const chatMessages = ref([])
 
   let socket = null
   let reconnectTimer = null
@@ -209,6 +210,14 @@ export const useGameStore = defineStore('game', () => {
 
       case 'player_reconnected':
         _showNotification({ type: 'player_reconnected', player_id: msg.player_id })
+        break
+
+      case 'chat_message':
+        chatMessages.value.push({
+          player_id: msg.player_id,
+          player_name: msg.player_name,
+          text: msg.text,
+        })
         break
     }
   }
@@ -430,6 +439,7 @@ export const useGameStore = defineStore('game', () => {
     },
     saveState:        ()                          => send(gameActions.saveState),
     restoreState:     (state)                     => send(gameActions.restoreState, { state }),
+    sendChat:         (text)                      => send(gameActions.chatMessage, { text }),
   }
 
   function $reset() {
@@ -442,13 +452,14 @@ export const useGameStore = defineStore('game', () => {
     lastEvent.value = null
     errorMsg.value = null
     notification.value = null
+    chatMessages.value = []
     socket = null
   }
 
   return {
     // state
     roomCode, playerId, playerName, gameState,
-    wsStatus, lastEvent, errorMsg, notification,
+    wsStatus, lastEvent, errorMsg, notification, chatMessages,
     // computed
     me, players, allPlayers, status, turn, isMyTurn, isHost, currentPlayer, phase,
     finalScores, board, debugVisual, debugSession, debugTestPlayer, debugTurn, debugLog, debugRevealedCard, hostTools, hostToolsEnabled,

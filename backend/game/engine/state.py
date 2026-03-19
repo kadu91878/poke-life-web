@@ -2456,6 +2456,7 @@ def _finalize_capture(
     *,
     acquisition_origin: str = 'captured',
     capture_context: str | None = None,
+    use_master_ball: bool = False,
 ) -> tuple[dict | None, str | dict]:
     player = _get_player(state, player_id)
     if not player:
@@ -2466,7 +2467,7 @@ def _finalize_capture(
             return None, 'Sem Full Restores! Use Pokébolas ou pule.'
         remove_item(player, 'full_restore', 1)
 
-    if capture_cost > 0:
+    if capture_cost > 0 and not use_master_ball:
         if player['pokeballs'] < capture_cost:
             return None, 'Sem Pokébolas livres suficientes para armazenar este Pokémon'
         player['pokeballs'] -= capture_cost
@@ -2487,7 +2488,6 @@ def _finalize_capture(
             capture_context=capture_context,
         )
     player['pokemon'].append(pokemon_copy)
-    player['master_points'] += pokemon.get('master_points', 0)
     _award_team_bonus_mp(state, player, pokemon_copy)
     sync_player_inventory(player)
 
@@ -2621,7 +2621,7 @@ def _award_team_bonus_mp(state: dict, player: dict, pokemon: dict) -> None:
             if other_count > 0:
                 bonus_mp = other_count * bonus_per_ally
                 player['bonus_points'] = player.get('bonus_points', 0) + bonus_mp
-                player['master_points'] += bonus_mp
+                player['bonus_master_points'] = player.get('bonus_master_points', 0) + bonus_mp
                 _log(
                     state,
                     player['name'],
@@ -4233,7 +4233,7 @@ def _finalize_league_member_victory(state: dict, battle: dict, result: dict) -> 
     mp_reward = _league_mp_reward(arrival_order, member_index)
     if player:
         player['league_bonus'] = player.get('league_bonus', 0) + mp_reward
-        player['master_points'] += mp_reward
+        player['bonus_master_points'] = player.get('bonus_master_points', 0) + mp_reward
         sync_player_inventory(player)
         _log(state, player['name'], f"Derrotou {member_name} da Liga! +{mp_reward} MP")
 
@@ -4383,6 +4383,7 @@ def _resolve_successful_capture(
         use_full_restore=use_full_restore,
         acquisition_origin='captured',
         capture_context=capture_context,
+        use_master_ball=use_master_ball,
     )
     if state is None:
         return None, result
@@ -4693,7 +4694,11 @@ def roll_capture_attempt(
         expected = ', '.join(str(value) for value in allowed_rolls) if allowed_rolls else 'resultado válido'
         return _resolve_failed_capture(state, player_id, capture_roll_result, f'dado {capture_roll["raw_result"]} não atende a regra ({expected})')
 
-    if player['pokeballs'] < capture_cost:
+    using_mb = master_ball_in_use or using_master_ball_now
+    effective_pokeballs = player['pokeballs']
+    if using_mb:
+        effective_pokeballs += max(0, int(player.get('master_balls', 0)))
+    if effective_pokeballs < capture_cost:
         return _queue_release_pokemon_choice(
             state,
             player_id,
@@ -4701,7 +4706,7 @@ def roll_capture_attempt(
             pokemon=pokemon,
             capture_cost=capture_cost,
             use_full_restore=use_full_restore,
-            use_master_ball=master_ball_in_use or using_master_ball_now,
+            use_master_ball=using_mb,
             capture_roll=capture_roll_result,
             capture_context=capture_context,
         )
@@ -4713,7 +4718,7 @@ def roll_capture_attempt(
         capture_context=capture_context,
         capture_cost=capture_cost,
         use_full_restore=use_full_restore,
-        use_master_ball=master_ball_in_use or using_master_ball_now,
+        use_master_ball=using_mb,
         capture_roll=capture_roll_result,
     )
 
@@ -4806,7 +4811,10 @@ def release_pokemon_for_capture(
     resolution_type = pending.get('resolution_type', 'capture')
     capture_cost = int(pending.get('capture_cost', 1 if resolution_type == 'capture' else pokemon_slot_cost(pending.get('pokemon'))))
     use_master_ball = bool(pending.get('use_master_ball'))
-    if player['pokeballs'] < capture_cost:
+    effective_pokeballs_after_release = player['pokeballs']
+    if use_master_ball:
+        effective_pokeballs_after_release += max(0, int(player.get('master_balls', 0)))
+    if effective_pokeballs_after_release < capture_cost:
         turn['pending_release_choice']['options'] = _build_release_pokemon_options(player)
         return state, {
             'released_pokemon': released,
@@ -5261,7 +5269,7 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
                 player['pokemon'].pop(normalized_index)
         player['pokeballs'] += pokemon_slot_cost(selected)
         player['bonus_points'] = player.get('bonus_points', 0) + rounded
-        player['master_points'] += rounded
+        player['bonus_master_points'] = player.get('bonus_master_points', 0) + rounded
         sync_player_inventory(player)
         _log(state, player['name'], f"Entregou {selected['name']} ao Mr. Fuji e recebeu {rounded} Master Points")
         state = end_turn(state)
@@ -5515,7 +5523,8 @@ def _finalize_gym_victory(state: dict, battle: dict, result: dict) -> tuple[dict
 
         master_points_reward = int(battle.get('master_points_reward', 20) or 20)
         if master_points_reward > 0:
-            player['master_points'] += master_points_reward
+            player['bonus_master_points'] = player.get('bonus_master_points', 0) + master_points_reward
+            sync_player_inventory(player)
             rewards.append({'type': 'master_points', 'amount': master_points_reward})
 
     rewards.append({'type': 'victory_card', 'count': 1})
@@ -5917,7 +5926,7 @@ def _apply_trainer_battle_rewards(state: dict, player_id: str, battle: dict) -> 
     master_points = int(reward_plan.get('master_points', 0) or 0)
     if master_points > 0:
         player['bonus_points'] = player.get('bonus_points', 0) + master_points
-        player['master_points'] += master_points
+        player['bonus_master_points'] = player.get('bonus_master_points', 0) + master_points
         sync_player_inventory(player)
         rewards.append({'type': 'master_points', 'amount': master_points})
 
@@ -6258,6 +6267,19 @@ def register_battle_choice(
     if pending_pluspower.get('player_id') == player_id:
         battle['pluspower_pending'] = None
 
+    # Apply defender debuff: player used Defender → opponent's chosen pokemon loses 2 BP
+    defender_pending = battle.get('defender_pending') or {}
+    if defender_pending.get('player_id') == player_id:
+        if is_challenger and battle.get('defender_choice'):
+            battle['defender_choice']['battle_points'] = max(1, (battle['defender_choice'].get('battle_points') or 1) - 2)
+            battle['defender_choice']['defender_debuffed'] = True
+        elif not is_challenger and battle.get('challenger_choice'):
+            battle['challenger_choice']['battle_points'] = max(1, (battle['challenger_choice'].get('battle_points') or 1) - 2)
+            battle['challenger_choice']['defender_debuffed'] = True
+        else:
+            battle['defender_active'] = True
+        battle['defender_pending'] = None
+
     _log(state, player['name'], f"Escolheu {chosen['name']} (BP {chosen.get('battle_points', 1)})")
 
     if mode == 'trainer':
@@ -6271,6 +6293,11 @@ def register_battle_choice(
             defender_choice = _prepare_gym_leader_choice(battle)
             if not defender_choice:
                 return state, {'error': 'O líder do ginásio não possui mais Pokémon disponíveis'}
+            # Apply pending defender debuff to leader's newly chosen pokemon
+            if battle.get('defender_active'):
+                battle['defender_choice']['battle_points'] = max(1, (battle['defender_choice'].get('battle_points') or 1) - 2)
+                battle['defender_choice']['defender_debuffed'] = True
+                battle.pop('defender_active', None)
         battle['sub_phase'] = 'rolling'
         battle['choice_stage'] = 'complete'
         label = 'Liga' if mode == 'league' else 'Ginásio'
@@ -6430,7 +6457,7 @@ def _apply_post_battle_effects(
     # ── Curse: perdedor perde 5 MP extras ───────────────────────────────────
     elif winner_effect == 'curse':
         loser['bonus_points'] = loser.get('bonus_points', 0) - 5
-        loser['master_points'] = max(0, loser.get('master_points', 0) - 5)
+        loser['bonus_master_points'] = loser.get('bonus_master_points', 0) - 5
         sync_player_inventory(loser)
         _log(state, winner['name'],
              f"Curse: {loser['name']} perdeu 5 Master Points extras!")
@@ -6553,7 +6580,7 @@ def _resolve_duel(state: dict) -> tuple[dict, dict]:
             _log(state, loser['name'], f"{loser_pokemon['name']} ficou nocauteado e não pode ser usado até ser curado.")
 
     winner['bonus_points'] = winner.get('bonus_points', 0) + 5
-    winner['master_points'] += 5
+    winner['bonus_master_points'] = winner.get('bonus_master_points', 0) + 5
     sync_player_inventory(winner)
     _log(state, winner['name'], f"Venceu o duelo! +5 Master Points")
 
@@ -6562,6 +6589,8 @@ def _resolve_duel(state: dict) -> tuple[dict, dict]:
     state = _award_victory_cards(state, winner['id'], 1, source='duel')
 
     _apply_post_battle_effects(state, winner, loser, winner_pokemon, loser_pokemon)
+    # Enforce item capacity after battle effects (e.g. shed_skin adds FR)
+    _queue_item_choice(state, winner['id'], 'Efeito de batalha')
 
     evolved = None
     if can_evolve(winner_pokemon):
@@ -6784,9 +6813,9 @@ def use_item(
         if target_pokemon_index is None:
             return None, 'Escolha qual Pokémon do oponente deverá lutar'
 
-        if battle.get('mode') == 'gym':
+        if battle.get('mode') in ('gym', 'league'):
             if player_id != battle.get('challenger_id'):
-                return None, 'Somente o desafiante pode usar Gust of Wind no ginásio'
+                return None, 'Somente o desafiante pode usar Gust of Wind no ginásio/liga'
             team = battle.get('leader_team') or []
             defeated_indexes = set(battle.get('defeated_leader_indexes') or [])
             if not team:
@@ -6875,6 +6904,28 @@ def use_item(
             'pokemon_slot_key': chosen.get('battle_slot_key'),
             'battle_bonus': 2,
         }
+
+    if item_key == 'defender':
+        battle = turn.get('battle') or {}
+        if turn.get('phase') != 'battle':
+            return None, 'Defender só pode ser usado durante batalha'
+        if player_id not in (battle.get('challenger_id'), battle.get('defender_id')):
+            return None, 'Você não está nesta batalha'
+        if battle.get('sub_phase') != 'choosing':
+            return None, 'Defender só pode ser usado antes de confirmar seu Pokémon na batalha'
+
+        choice_key = 'challenger_choice' if battle.get('challenger_id') == player_id else 'defender_choice'
+        if battle.get(choice_key):
+            return None, 'Defender só pode ser usado antes de confirmar seu Pokémon na batalha'
+
+        if battle.get('defender_pending'):
+            return None, 'Defender já está ativo nesta batalha'
+
+        remove_item(player, item_key, 1)
+        battle['defender_pending'] = {'player_id': player_id}
+        sync_player_inventory(player)
+        _log(state, player['name'], 'Usou Defender: -2 BP no Pokémon adversário nesta batalha')
+        return state, {'item_key': item_key, 'battle_bonus': -2}
 
     if item_key == 'full_restore':
         if turn.get('phase') == 'battle':
