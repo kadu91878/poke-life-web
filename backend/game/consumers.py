@@ -465,12 +465,14 @@ class GameConsumer(AsyncWebsocketConsumer):
         item_key = (data.get('item_key') or '').strip()
         pokemon_index = data.get('pokemon_index')
         target_pokemon_index = data.get('target_pokemon_index')
+        pokemon_slot_key = (data.get('pokemon_slot_key') or '').strip() or None
 
         new_state, result = game_state.use_item(
             state,
             self.player_id,
             item_key,
             pokemon_index=pokemon_index,
+            pokemon_slot_key=pokemon_slot_key,
             target_pokemon_index=target_pokemon_index,
         )
         if new_state is None:
@@ -896,6 +898,34 @@ class GameConsumer(AsyncWebsocketConsumer):
         state = normalize_state(self.room_code, provided)
         saved_state = await self.save_game_state(state)
         await self.broadcast_state(saved_state, {'type': 'state_restored'})
+
+    async def handle_chat_message(self, data):
+        text = (data.get('text') or '').strip()[:300]
+        if not text:
+            return
+        state = await self.get_game_state()
+        player = next((p for p in state.get('players', []) if p['id'] == self.player_id), None)
+        player_name = player['name'] if player else 'Anônimo'
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                'type': 'broadcast_chat',
+                'player_id': self.player_id,
+                'player_name': player_name,
+                'text': text,
+            },
+        )
+
+    async def broadcast_chat(self, message):
+        try:
+            await self.send_json({
+                'type': 'chat_message',
+                'player_id': message['player_id'],
+                'player_name': message['player_name'],
+                'text': message['text'],
+            })
+        except Exception:
+            pass
 
     async def broadcast_state(self, state, event=None):
         await self.channel_layer.group_send(

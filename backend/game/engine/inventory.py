@@ -84,11 +84,11 @@ ITEM_DEFS = {
     'defender': {
         'key': 'defender',
         'name': 'Defender',
-        'image_path': None,
+        'image_path': '/assets/items/defender.png',
         'category': 'battle',
-        'effect': 'unimplemented',
-        'implemented': False,
-        'notes': 'Carta visualmente identificada, mas sem resolução segura implementada ainda.',
+        'effect': 'reduce_opponent_bp_by_2_for_one_battle',
+        'implemented': True,
+        'notes': 'Reduz 2 BP do Pokémon adversário nesta batalha. Espelho do PlusPower.',
     },
     'master_points_nugget': {
         'key': 'master_points_nugget',
@@ -318,6 +318,10 @@ def remove_item(player: dict, item_key: str, quantity: int = 1) -> bool:
             next_items.append({**item, 'quantity': new_quantity})
 
     player['items'] = next_items
+    # Pre-sync legacy counter so normalize_items fallback doesn't restore a removed item
+    if item_key == 'full_restore' and removed:
+        new_fr_qty = next((i.get('quantity', 0) for i in next_items if i.get('key') == 'full_restore'), 0)
+        player['full_restores'] = max(0, new_fr_qty)
     sync_player_inventory(player)
     return removed
 
@@ -326,6 +330,17 @@ def sync_player_inventory(player: dict) -> dict:
     player.setdefault('bonus_points', 0)
     player.setdefault('league_bonus', 0)
     player.setdefault('master_balls', 0)
+
+    # Recalculate pokemon MP from current team (source of truth).
+    # bonus_master_points tracks non-pokemon bonuses (events, gym, league, pvp).
+    # Initialized once from legacy master_points to preserve existing game state.
+    pokemon_mp = sum(p.get('master_points', 0) for p in player.get('pokemon', []))
+    if player.get('starter_pokemon'):
+        pokemon_mp += player['starter_pokemon'].get('master_points', 0)
+    player['pokemon_master_points'] = pokemon_mp
+    if 'bonus_master_points' not in player:
+        player['bonus_master_points'] = max(0, int(player.get('master_points', 0)) - pokemon_mp)
+    player['master_points'] = max(0, pokemon_mp + int(player.get('bonus_master_points', 0)))
     player['items'] = normalize_items(player.get('items'), player.get('full_restores', 0))
     player['item_capacity'] = ITEM_CAPACITY
     player['item_count'] = total_item_count(player)
