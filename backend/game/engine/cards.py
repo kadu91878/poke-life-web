@@ -649,7 +649,9 @@ def apply_simple_reward(state: dict, player: dict, reward: dict) -> None:
         sync_player_inventory(player)
         return
     if reward_type == 'gain_master_points':
-        player['master_points'] += int(reward.get('amount', 0) or 0)
+        amount = int(reward.get('amount', 0) or 0)
+        player['bonus_points'] = player.get('bonus_points', 0) + amount
+        player['master_points'] += amount
         sync_player_inventory(player)
 
 
@@ -853,6 +855,7 @@ def apply_victory_effect(state: dict, player_id: str, card: dict) -> tuple[dict,
 
     if category == 'master_points':
         amount = parse_master_points(description) or 0
+        player['bonus_points'] = player.get('bonus_points', 0) + amount
         player['master_points'] += amount
         sync_player_inventory(player)
         result['amount'] = amount

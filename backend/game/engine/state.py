@@ -1177,7 +1177,7 @@ def _resolve_battle_reroll_decision(
 
     if mode == 'trainer':
         return _resolve_trainer_battle(state)
-    if mode == 'gym':
+    if mode in ('gym', 'league'):
         return _resolve_gym_battle(state)
     # PvP: resolve only when both have rolled
     if battle.get('challenger_roll') is not None and battle.get('defender_roll') is not None:
@@ -2620,6 +2620,7 @@ def _award_team_bonus_mp(state: dict, player: dict, pokemon: dict) -> None:
             other_count = total_count - 1  # exclui o recém-adicionado
             if other_count > 0:
                 bonus_mp = other_count * bonus_per_ally
+                player['bonus_points'] = player.get('bonus_points', 0) + bonus_mp
                 player['master_points'] += bonus_mp
                 _log(
                     state,
@@ -2675,6 +2676,8 @@ def _build_debug_visual_player() -> tuple[dict | None, str | None]:
         'items': copy.deepcopy(starting_defaults['items']),
         'badges': [],
         'master_points': 0,
+        'bonus_points': 0,
+        'league_bonus': 0,
         'has_reached_league': False,
         'skip_turns': 0,
     }
@@ -2846,6 +2849,7 @@ def initialize_game(state: dict) -> dict:
 
     state['status'] = 'playing'
     state['board'] = board_data
+    state['league_arrival_count'] = 0
     state['decks'] = {
         'pokemon_deck': build_pokemon_deck(exclude_starters=True),
         'pokemon_discard': [],
@@ -3221,6 +3225,12 @@ def _grant_special_tile_reward(state: dict, player_id: str, reward_key: str, *, 
         player['pokeballs'] += 1
         sync_player_inventory(player)
         _log(state, player['name'], f"Recebeu 1 Pokébola em {source}.")
+        return state
+
+    if normalized_key == 'master_ball':
+        player['master_balls'] = max(0, int(player.get('master_balls', 0))) + 1
+        sync_player_inventory(player)
+        _log(state, player['name'], f"Recebeu Master Ball em {source}.")
         return state
 
     add_item(player, normalized_key, 1)
@@ -4071,56 +4081,268 @@ def use_pokemon_ability(
     return None, 'Esta ação de habilidade ainda não foi implementada com segurança'
 
 
-def _resolve_league(state: dict, player_id: str) -> dict:
-    """Resolve a fase da Liga Pokémon (Elite Four + Campeão)."""
-    player = _get_player(state, player_id)
-    elite_four = [
-        {'name': 'Lorelei',   'battle_points': 7, 'bonus_mp': 15},
-        {'name': 'Bruno',     'battle_points': 7, 'bonus_mp': 15},
-        {'name': 'Agatha',    'battle_points': 8, 'bonus_mp': 20},
-        {'name': 'Lance',     'battle_points': 8, 'bonus_mp': 20},
-        {'name': 'Blue',      'battle_points': 9, 'bonus_mp': 30},  # Campeão
-    ]
+_LEAGUE_MEMBERS = [
+    {
+        'name': 'Lorelei',
+        'team': [
+            {'name': 'Dewgong',   'battle_points': 7, 'types': ['Water', 'Ice']},
+            {'name': 'Slowbro',   'battle_points': 6, 'types': ['Water', 'Psychic']},
+            {'name': 'Lapras',    'battle_points': 5, 'types': ['Water', 'Ice']},
+            {'name': 'Cloyster',  'battle_points': 6, 'types': ['Water', 'Ice']},
+            {'name': 'Jynx',      'battle_points': 7, 'types': ['Ice', 'Psychic']},
+        ],
+    },
+    {
+        'name': 'Bruno',
+        'team': [
+            {'name': 'Onix',      'battle_points': 6, 'types': ['Rock', 'Ground']},
+            {'name': 'Steelix',   'battle_points': 8, 'types': ['Steel', 'Ground']},
+            {'name': 'Hitmonchan','battle_points': 7, 'types': ['Fighting']},
+            {'name': 'Hitmonlee', 'battle_points': 7, 'types': ['Fighting']},
+            {'name': 'Machamp',   'battle_points': 8, 'types': ['Fighting']},
+        ],
+    },
+    {
+        'name': 'Agatha',
+        'team': [
+            {'name': 'Gengar',    'battle_points': 8, 'types': ['Ghost', 'Poison']},
+            {'name': 'Gengar',    'battle_points': 8, 'types': ['Ghost', 'Poison']},
+            {'name': 'Haunter',   'battle_points': 6, 'types': ['Ghost', 'Poison']},
+            {'name': 'Crobat',    'battle_points': 9, 'types': ['Poison', 'Flying']},
+            {'name': 'Arbok',     'battle_points': 7, 'types': ['Poison']},
+        ],
+    },
+    {
+        'name': 'Lance',
+        'team': [
+            {'name': 'Dragonite', 'battle_points': 10, 'types': ['Dragon', 'Flying']},
+            {'name': 'Dragonite', 'battle_points': 10, 'types': ['Dragon', 'Flying']},
+            {'name': 'Dragonair', 'battle_points': 7,  'types': ['Dragon']},
+            {'name': 'Aerodactyl','battle_points': 9,  'types': ['Rock', 'Flying']},
+            {'name': 'Gyarados',  'battle_points': 9,  'types': ['Water', 'Flying']},
+        ],
+    },
+    {
+        'name': 'Gary',
+        'team': [
+            {'name': 'Pidgeot',   'battle_points': 10, 'types': ['Normal', 'Flying']},
+            {'name': 'Alakazam',  'battle_points': 9,  'types': ['Psychic']},
+            {'name': 'Rhydon',    'battle_points': 10, 'types': ['Ground', 'Rock']},
+            {'name': 'Exeggutor', 'battle_points': 11, 'types': ['Grass', 'Psychic']},
+            {'name': 'Arcanine',  'battle_points': 12, 'types': ['Fire']},
+        ],
+    },
+]
 
-    total_bonus = 0
-    victory_draws = 0
-    results = []
-    for elite in elite_four:
-        player_pool = list(player.get('pokemon', []))
-        if player.get('starter_pokemon'):
-            player_pool.append(player['starter_pokemon'])
-        if player_pool:
-            player_raw_roll = roll_battle_dice()
-            elite_raw_roll = roll_battle_dice()
-            result = resolve_elite_four(player, elite, player_roll=player_raw_roll, elite_roll=elite_raw_roll)
-            _record_battle_roll(state, player['name'], player_raw_roll, result['roll_player'], f"league:{elite['name']}")
-            _record_battle_roll(state, elite['name'], elite_raw_roll, result['roll_elite'], f"league:{elite['name']}")
-        else:
-            result = resolve_elite_four(player, elite)
-        results.append({'elite': elite['name'], **result})
-        if result['player_wins']:
-            total_bonus += result['bonus']
-            victory_draws += 1
-            _log(state, player['name'], f"Derrotou {elite['name']} da Elite! +{result['bonus']} MP")
-        else:
-            _log(state, player['name'], f"Perdeu para {elite['name']}. Encerra batalha na liga.")
-            break  # Perdeu: para na derrota
 
-    player['master_points'] += total_bonus
-    player['league_bonus'] = total_bonus
-    state = _award_victory_cards(state, player_id, victory_draws, source='league')
-    state['turn']['league_results'] = results
-    state['turn']['phase'] = 'end'
-
-    # Verifica se todos os jogadores ativos chegaram na liga
-    active = _get_active_players(state)
-    all_reached = all(p.get('has_reached_league') for p in active)
-    if all_reached:
-        state = _finish_game(state)
+def _league_mp_reward(arrival_order: int, member_index: int) -> int:
+    """Retorna recompensa de MP por derrotar um membro da Liga Pokémon."""
+    is_champion = (member_index == 4)
+    if is_champion:
+        if arrival_order == 0:
+            return 60
+        if arrival_order == 1:
+            return 40
+        return 30
     else:
-        state = end_turn(state)
+        if arrival_order == 0:
+            return 50
+        return 30
 
+
+def _build_league_member_team(member: dict) -> list[dict]:
+    from .gyms import _build_leader_pokemon
+    return [_build_leader_pokemon(entry, idx) for idx, entry in enumerate(member['team'])]
+
+
+def _resolve_league(state: dict, player_id: str) -> dict:
+    """Inicia a batalha interativa da Liga Pokémon (Elite Four + Campeão)."""
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    if player.get('league_failed'):
+        _log(state, player['name'], 'Você já foi eliminado da Liga Pokémon e não pode reentrar.')
+        state['turn']['phase'] = 'end'
+        state = end_turn(state)
+        return state
+
+    # Rastreia ordem de chegada (0 = primeiro)
+    arrival_order = int(state.get('league_arrival_count', 0) or 0)
+    state['league_arrival_count'] = arrival_order + 1
+    player['league_arrival_order'] = arrival_order
+
+    return _start_league_member_battle(state, player_id, member_index=0, arrival_order=arrival_order)
+
+
+def _start_league_member_battle(state: dict, player_id: str, member_index: int, arrival_order: int) -> dict:
+    """Configura um battle dict para enfrentar o membro member_index da Liga."""
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    reset_player_ability_runtime(player, 'battle')
+    member = _LEAGUE_MEMBERS[member_index]
+    is_champion = (member_index == len(_LEAGUE_MEMBERS) - 1)
+    leader_team = _build_league_member_team(member)
+
+    battle = {
+        'mode': 'league',
+        'source': 'league_tile',
+        'challenger_id': player_id,
+        'defender_id': None,
+        'gym_id': f'league_{member["name"].lower()}',
+        'gym_name': f'Pokémon League — {member["name"]}',
+        'gym_tile_id': None,
+        'badge_name': None,
+        'badge_image_path': None,
+        'master_points_reward': 0,
+        'defender_name': member['name'],
+        'leader_team': leader_team,
+        'leader_current_index': 0,
+        'defeated_leader_indexes': [],
+        'defeated_player_slots': [],
+        'pending_evolution_slots': [],
+        'challenger_choice': None,
+        'defender_choice': None,
+        'challenger_roll': None,
+        'defender_roll': None,
+        'sub_phase': 'choosing',
+        'choice_stage': 'challenger',
+        'round_number': 1,
+        'league_member_index': member_index,
+        'league_arrival_order': arrival_order,
+        'league_is_champion': is_champion,
+    }
+
+    state['turn']['battle'] = battle
+    state['turn']['phase'] = 'battle'
+    label = 'Campeão' if is_champion else 'Elite Four'
+    _log(state, player['name'], f"Enfrenta {member['name']} ({label}) na Pokémon League!")
     return state
+
+
+def _finalize_league_member_victory(state: dict, battle: dict, result: dict) -> tuple[dict, dict]:
+    """Chamado quando o player derrota todos os Pokémon de um membro da Liga."""
+    player = _get_player(state, battle['challenger_id'])
+    member_index = int(battle.get('league_member_index', 0) or 0)
+    arrival_order = int(battle.get('league_arrival_order', 0) or 0)
+    member_name = battle.get('defender_name', '')
+    is_champion = bool(battle.get('league_is_champion', False))
+
+    mp_reward = _league_mp_reward(arrival_order, member_index)
+    if player:
+        player['league_bonus'] = player.get('league_bonus', 0) + mp_reward
+        player['master_points'] += mp_reward
+        sync_player_inventory(player)
+        _log(state, player['name'], f"Derrotou {member_name} da Liga! +{mp_reward} MP")
+
+    state = _award_victory_cards(state, battle['challenger_id'], 1, source='league')
+
+    next_index = member_index + 1
+    if not is_champion and next_index < len(_LEAGUE_MEMBERS):
+        state['turn']['battle'] = None
+        state = _queue_league_intermission(state, battle['challenger_id'], next_index, arrival_order)
+        return state, {
+            **result,
+            'mode': 'league',
+            'gym_victory': False,
+            'battle_finished': True,
+            'continues': True,
+            'league_member_defeated': member_name,
+            'next_league_member': _LEAGUE_MEMBERS[next_index]['name'],
+            'league_intermission': True,
+        }
+
+    # Derrotou o Campeão — fim da Liga
+    if player:
+        _log(state, player['name'], f"Derrotou o Campeão {member_name}! Pokémon League concluída!")
+
+    state['turn']['battle'] = None
+    _check_league_end(state, battle['challenger_id'])
+    return state, {
+        **result,
+        'mode': 'league',
+        'gym_victory': True,
+        'battle_finished': True,
+        'continues': False,
+        'league_completed': True,
+    }
+
+
+def _finalize_league_member_loss(state: dict, battle: dict, result: dict) -> tuple[dict, dict]:
+    """Chamado quando o player perde para um membro da Liga."""
+    player = _get_player(state, battle['challenger_id'])
+    member_name = battle.get('defender_name', '')
+    if player:
+        player['league_failed'] = True
+        _log(state, player['name'], f"Perdeu para {member_name}. Eliminado da Liga Pokémon — não pode reentrar.")
+
+    state['turn']['battle'] = None
+    _check_league_end(state, battle['challenger_id'])
+    return state, {
+        **result,
+        'mode': 'league',
+        'gym_victory': False,
+        'battle_finished': True,
+        'continues': False,
+        'league_failed': True,
+    }
+
+
+def _queue_league_intermission(state: dict, player_id: str, next_member_index: int, arrival_order: int) -> dict:
+    """Pausa entre membros da Liga para que o player use itens antes da próxima batalha."""
+    player = _get_player(state, player_id)
+    next_member = _LEAGUE_MEMBERS[next_member_index]
+    state['turn']['phase'] = 'league_intermission'
+    _set_pending_action(state, {
+        'type': 'league_intermission',
+        'player_id': player_id,
+        'next_member_index': next_member_index,
+        'arrival_order': arrival_order,
+        'next_member_name': next_member['name'],
+        'allowed_actions': ['confirm_league_intermission', 'use_item'],
+    })
+    if player:
+        _log(state, player['name'], f"Preparação antes de enfrentar {next_member['name']}. Use itens se necessário e confirme quando estiver pronto.")
+    return state
+
+
+def confirm_league_intermission(state: dict, player_id: str) -> tuple[dict | None, str | dict]:
+    """Confirma fim da preparação e inicia a próxima batalha da Liga."""
+    state = copy.deepcopy(state)
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    pending_action = state['turn'].get('pending_action') or {}
+    if pending_action.get('type') != 'league_intermission':
+        return None, 'Não há preparação de Liga pendente'
+    if pending_action.get('player_id') != player_id:
+        return None, 'Esta preparação não pertence a você'
+
+    next_member_index = int(pending_action.get('next_member_index', 0))
+    arrival_order = int(pending_action.get('arrival_order', 0))
+
+    _clear_pending_action(state)
+    state = _start_league_member_battle(state, player_id, member_index=next_member_index, arrival_order=arrival_order)
+    return state, {
+        'success': True,
+        'type': 'league_intermission_confirmed',
+        'next_member_index': next_member_index,
+    }
+
+
+def _check_league_end(state: dict, player_id: str) -> None:
+    """Verifica se o jogo deve encerrar (todos chegaram na liga) e avança o turno."""
+    active = _get_active_players(state)
+    all_done = all(p.get('has_reached_league') for p in active)
+    if all_done:
+        state.update(_finish_game(state))
+    else:
+        state['turn']['phase'] = 'end'
+        state_ref = end_turn(state)
+        state.update(state_ref)
 
 
 def _finish_game(state: dict) -> dict:
@@ -5038,6 +5260,7 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
             if player.get('pokemon') and non_starter:
                 player['pokemon'].pop(normalized_index)
         player['pokeballs'] += pokemon_slot_cost(selected)
+        player['bonus_points'] = player.get('bonus_points', 0) + rounded
         player['master_points'] += rounded
         sync_player_inventory(player)
         _log(state, player['name'], f"Entregou {selected['name']} ao Mr. Fuji e recebeu {rounded} Master Points")
@@ -5285,8 +5508,9 @@ def _finalize_gym_victory(state: dict, battle: dict, result: dict) -> tuple[dict
 
     if player:
         _mark_gym_progress(player, 'gyms_defeated', gym_id)
-        if badge_name and badge_name not in player.get('badges', []):
-            player['badges'].append(badge_name)
+        existing_badge_names = [b['name'] if isinstance(b, dict) else b for b in player.get('badges', [])]
+        if badge_name and badge_name not in existing_badge_names:
+            player['badges'].append({'name': badge_name, 'image_path': battle.get('badge_image_path')})
             rewards.append({'type': 'badge', 'badge': badge_name, 'image_path': battle.get('badge_image_path')})
 
         master_points_reward = int(battle.get('master_points_reward', 20) or 20)
@@ -5588,6 +5812,8 @@ def _resolve_gym_battle(state: dict) -> tuple[dict, dict]:
             }
 
         state['turn']['battle'] = battle
+        if battle.get('mode') == 'league':
+            return _finalize_league_member_victory(state, battle, result_payload)
         return _finalize_gym_victory(state, battle, result_payload)
 
     if current_slot and current_slot not in battle['defeated_player_slots']:
@@ -5622,6 +5848,8 @@ def _resolve_gym_battle(state: dict) -> tuple[dict, dict]:
         }
 
     state['turn']['battle'] = battle
+    if battle.get('mode') == 'league':
+        return _finalize_league_member_loss(state, battle, result_payload)
     return _finalize_gym_loss(state, battle, result_payload)
 
 
@@ -5688,6 +5916,7 @@ def _apply_trainer_battle_rewards(state: dict, player_id: str, battle: dict) -> 
 
     master_points = int(reward_plan.get('master_points', 0) or 0)
     if master_points > 0:
+        player['bonus_points'] = player.get('bonus_points', 0) + master_points
         player['master_points'] += master_points
         sync_player_inventory(player)
         rewards.append({'type': 'master_points', 'amount': master_points})
@@ -6037,14 +6266,15 @@ def register_battle_choice(
         _log(state, 'Duelo', f"{player['name']} vai enfrentar {battle['defender_name']}. Role o dado de batalha!")
         return state, None
 
-    if mode == 'gym':
+    if mode in ('gym', 'league'):
         if not battle.get('defender_choice'):
             defender_choice = _prepare_gym_leader_choice(battle)
             if not defender_choice:
                 return state, {'error': 'O líder do ginásio não possui mais Pokémon disponíveis'}
         battle['sub_phase'] = 'rolling'
         battle['choice_stage'] = 'complete'
-        _log(state, 'Ginásio', f"{battle['defender_name']} está com {battle['defender_choice']['name']} em campo. Role o dado de batalha!")
+        label = 'Liga' if mode == 'league' else 'Ginásio'
+        _log(state, label, f"{battle['defender_name']} está com {battle['defender_choice']['name']} em campo. Role o dado de batalha!")
         return state, None
 
     if battle.get('defender_choice') and not battle.get('challenger_choice'):
@@ -6084,7 +6314,7 @@ def register_battle_roll(state: dict, player_id: str) -> tuple[dict, dict | None
     if mode == 'trainer':
         if not is_challenger:
             return state, {'error': 'Somente o jogador ativo rola nesta batalha de treinador'}
-    elif mode == 'gym':
+    elif mode in ('gym', 'league'):
         if not is_challenger:
             return state, {'error': 'Somente o desafiante rola nesta batalha de ginásio'}
     elif not is_challenger and not is_defender:
@@ -6111,7 +6341,7 @@ def register_battle_roll(state: dict, player_id: str) -> tuple[dict, dict | None
         if mode == 'trainer':
             trainer_roll = roll_battle_dice()
             battle['defender_roll'] = trainer_roll
-        elif mode == 'gym':
+        elif mode in ('gym', 'league'):
             leader_roll = roll_battle_dice()
             battle['defender_roll'] = leader_roll
         return _queue_battle_reroll_decision(
@@ -6127,7 +6357,7 @@ def register_battle_roll(state: dict, player_id: str) -> tuple[dict, dict | None
         trainer_roll = roll_battle_dice()
         battle['defender_roll'] = trainer_roll
         return _resolve_trainer_battle(state)
-    if mode == 'gym':
+    if mode in ('gym', 'league'):
         leader_roll = roll_battle_dice()
         battle['defender_roll'] = leader_roll
         return _resolve_gym_battle(state)
@@ -6199,7 +6429,9 @@ def _apply_post_battle_effects(
 
     # ── Curse: perdedor perde 5 MP extras ───────────────────────────────────
     elif winner_effect == 'curse':
-        loser['master_points'] = max(0, loser['master_points'] - 5)
+        loser['bonus_points'] = loser.get('bonus_points', 0) - 5
+        loser['master_points'] = max(0, loser.get('master_points', 0) - 5)
+        sync_player_inventory(loser)
         _log(state, winner['name'],
              f"Curse: {loser['name']} perdeu 5 Master Points extras!")
 
@@ -6320,7 +6552,9 @@ def _resolve_duel(state: dict) -> tuple[dict, dict]:
             sync_player_inventory(loser)
             _log(state, loser['name'], f"{loser_pokemon['name']} ficou nocauteado e não pode ser usado até ser curado.")
 
+    winner['bonus_points'] = winner.get('bonus_points', 0) + 5
     winner['master_points'] += 5
+    sync_player_inventory(winner)
     _log(state, winner['name'], f"Venceu o duelo! +5 Master Points")
 
     state['turn']['battle'] = None

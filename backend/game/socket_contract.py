@@ -66,4 +66,5 @@ SOCKET_HANDLER_NAMES = {
     GAME_ACTIONS['debugDuelRollBattle']: 'handle_debug_duel_roll_battle',
     GAME_ACTIONS['debugResolvePendingActionForTestPlayer']: 'handle_debug_resolve_pending_action_for_test_player',
     GAME_ACTIONS['dismissRevealedCard']: 'handle_dismiss_revealed_card',
+    GAME_ACTIONS['confirmLeagueIntermission']: 'handle_confirm_league_intermission',
 }

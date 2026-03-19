@@ -415,6 +415,7 @@ export const useGameStore = defineStore('game', () => {
     debugDuelChoosePokemon: (selection = 0)                => send(gameActions.debugDuelChoosePokemon, typeof selection === 'object' && selection !== null ? selection : { pokemon_index: selection }),
     debugDuelRollBattle: ()                                 => send(gameActions.debugDuelRollBattle),
     debugResolvePendingActionForTestPlayer: (optionId)      => send(gameActions.debugResolvePendingActionForTestPlayer, { option_id: optionId }),
+    confirmLeagueIntermission: ()                  => send(gameActions.confirmLeagueIntermission),
     dismissRevealedCard: ()                        => send(gameActions.dismissRevealedCard),
     useAbility:       (abilityAction, targetId, targetPosition) => {
       if (typeof abilityAction === 'object' && abilityAction !== null) {

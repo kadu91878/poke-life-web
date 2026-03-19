@@ -602,7 +602,7 @@
       "ability_description": "Whenever the outcome of the move dice is 6, you may change the outcome to 1.",
       "ability_type": "active",
       "notes": null,
-      "is_initial": false,
+      "is_initial": true,
       "charges": null,
       "source_image_path": "/home/kadu/Projetos/split-assets/pokemon_cards_split/cleffa.png",
       "engine_types": [],
@@ -3183,7 +3183,7 @@
       "ability_description": "You may always move 3 tiles instead of throwing the move dice.",
       "ability_type": "active",
       "notes": null,
-      "is_initial": false,
+      "is_initial": true,
       "charges": null,
       "source_image_path": "/home/kadu/Projetos/split-assets/pokemon_cards_split/pichu.png",
       "engine_types": [
