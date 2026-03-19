@@ -303,6 +303,21 @@
           ❤️ {{ target.name }}<span class="duel-stats">x{{ fullRestoreQuantity }}</span>
         </button>
       </template>
+      <template v-if="phase === 'league_intermission' && isMyTurn">
+        <div class="event-card">
+          <div class="event-title">⏸️ Preparação</div>
+          <div class="event-description">
+            Próximo oponente: <strong>{{ pendingAction?.next_member_name ?? '?' }}</strong>.
+            Use itens de cura agora se necessário, depois confirme para continuar.
+          </div>
+        </div>
+        <button class="btn-primary" @click="store.actions.confirmLeagueIntermission()">
+          ▶️ Enfrentar {{ pendingAction?.next_member_name ?? 'próximo oponente' }}
+        </button>
+      </template>
+      <template v-else-if="phase === 'league_intermission' && !isMyTurn">
+        <p class="hint">⏸️ {{ currentPlayer?.name }} está se preparando para a próxima batalha da Liga...</p>
+      </template>
       <template v-if="phase === 'end'">
         <p class="hint">⏳ Processando...</p>
       </template>
@@ -520,7 +535,8 @@ const lastLogs = computed(() => (store.gameState?.log ?? []).slice(-5).reverse()
 const PHASE_LABELS = {
   select_starter:'🌟 Escolha seu Pokémon inicial', roll:'🎲 Role o dado', action:'🎯 Escolha uma ação',
   battle:'⚔️ Batalha em andamento', event:'📋 Carta de Evento', item_choice:'🎒 Inventário cheio',
-  release_pokemon:'🎾 Liberar Pokémon', gym:'🏆 Ginásio', league:'👑 Liga Pokémon', end:'⏳ Encerrando...',
+  release_pokemon:'🎾 Liberar Pokémon', gym:'🏆 Ginásio', league:'👑 Liga Pokémon',
+  league_intermission:'⏸️ Preparação da Liga', end:'⏳ Encerrando...',
 }
 const phaseLabel = computed(() => PHASE_LABELS[phase.value] ?? phase.value)
 const pendingChoiceTitle = computed(() => {
@@ -592,10 +608,10 @@ const fullRestoreQuantity = computed(() =>
   inventoryItems.value.find(item => item.key === 'full_restore')?.quantity ?? 0
 )
 const canUseMiracleStone = computed(() =>
-  ['roll', 'action'].includes(phase.value) && isMyTurn.value && miracleStoneQuantity.value > 0
+  ['roll', 'action', 'league_intermission'].includes(phase.value) && isMyTurn.value && miracleStoneQuantity.value > 0
 )
 const canUseFullRestore = computed(() =>
-  ['roll', 'action', 'event'].includes(phase.value) && isMyTurn.value && fullRestoreQuantity.value > 0
+  ['roll', 'action', 'event', 'league_intermission'].includes(phase.value) && isMyTurn.value && fullRestoreQuantity.value > 0
 )
 const miracleStoneTargets = computed(() => {
   if (!canUseMiracleStone.value || !me.value) return []

@@ -136,6 +136,7 @@ def load_initial_item_rules() -> dict:
 def get_starting_resource_defaults() -> dict:
     defaults = {
         'pokeballs': 6,
+        'master_balls': 0,
         'full_restores': 2,
         'items': [
             {
@@ -176,6 +177,7 @@ def get_starting_resource_defaults() -> dict:
 def normalize_items(items, full_restores: int = 0) -> list[dict]:
     """
     Normaliza inventário legado para uma lista de stacks.
+    Master Ball não é item comum — é gerenciada em player['master_balls'].
     """
     normalized: dict[str, dict] = {}
 
@@ -184,7 +186,7 @@ def normalize_items(items, full_restores: int = 0) -> list[dict]:
             if not isinstance(item, dict):
                 continue
             key = item.get('key')
-            if not key:
+            if not key or key == 'master_ball':
                 continue
             normalized[key] = {
                 'key': key,
@@ -198,7 +200,7 @@ def normalize_items(items, full_restores: int = 0) -> list[dict]:
             }
     elif isinstance(items, dict):
         for key, quantity in items.items():
-            if key == 'pokeballs':
+            if key in ('pokeballs', 'master_ball', 'master_balls'):
                 continue
             legacy_key = 'full_restore' if key == 'full_restores' else key
             normalized[legacy_key] = {
@@ -249,6 +251,8 @@ def total_item_count(player: dict) -> int:
 
 
 def get_item_quantity(player: dict, item_key: str) -> int:
+    if item_key == 'master_ball':
+        return max(0, int(player.get('master_balls', 0)))
     for item in _ensure_normalized_item_list(player):
         if item.get('key') == item_key:
             return max(0, int(item.get('quantity', 0)))
@@ -257,6 +261,11 @@ def get_item_quantity(player: dict, item_key: str) -> int:
 
 def add_item(player: dict, item_key: str, quantity: int = 1, name: str | None = None) -> None:
     if quantity <= 0:
+        return
+
+    if item_key == 'master_ball':
+        player['master_balls'] = max(0, int(player.get('master_balls', 0))) + quantity
+        sync_player_inventory(player)
         return
 
     for item in _ensure_normalized_item_list(player):
@@ -285,6 +294,14 @@ def remove_item(player: dict, item_key: str, quantity: int = 1) -> bool:
     if quantity <= 0:
         return False
 
+    if item_key == 'master_ball':
+        current = max(0, int(player.get('master_balls', 0)))
+        if current <= 0:
+            return False
+        player['master_balls'] = max(0, current - quantity)
+        sync_player_inventory(player)
+        return True
+
     removed = False
     next_items = []
     for item in _ensure_normalized_item_list(player):
@@ -308,10 +325,12 @@ def remove_item(player: dict, item_key: str, quantity: int = 1) -> bool:
 def sync_player_inventory(player: dict) -> dict:
     player.setdefault('bonus_points', 0)
     player.setdefault('league_bonus', 0)
+    player.setdefault('master_balls', 0)
     player['items'] = normalize_items(player.get('items'), player.get('full_restores', 0))
     player['item_capacity'] = ITEM_CAPACITY
     player['item_count'] = total_item_count(player)
     player['full_restores'] = get_item_quantity(player, 'full_restore')
+    player['master_balls'] = max(0, int(player.get('master_balls', 0)))
     player['pokeball_slots_used'] = team_slot_usage(player)
     player['pokeball_slots_free'] = max(0, int(player.get('pokeballs', 0)))
     player['pokeball_capacity'] = player['pokeball_slots_used'] + player['pokeball_slots_free']

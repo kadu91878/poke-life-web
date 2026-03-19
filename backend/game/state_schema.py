@@ -195,6 +195,10 @@ def _normalize_player(player: dict[str, Any], index: int) -> dict[str, Any]:
     normalized['special_tile_flags'].setdefault('celadon_dept_store_bonus_claimed', False)
     normalized['items'] = normalize_items(normalized.get('items'), normalized.get('full_restores', starting_defaults['full_restores']))
     normalized.setdefault('badges', [])
+    normalized['badges'] = [
+        b if isinstance(b, dict) else {'name': b, 'image_path': None}
+        for b in normalized['badges']
+    ]
     normalized.setdefault('master_points', 0)
     normalized.setdefault('bonus_points', 0)
     normalized.setdefault('league_bonus', 0)

@@ -40,5 +40,6 @@
   "debugDuelChoosePokemon": "debug_duel_choose_pokemon",
   "debugDuelRollBattle": "debug_duel_roll_battle",
   "debugResolvePendingActionForTestPlayer": "debug_resolve_pending_action_for_test_player",
-  "dismissRevealedCard": "dismiss_revealed_card"
+  "dismissRevealedCard": "dismiss_revealed_card",
+  "confirmLeagueIntermission": "confirm_league_intermission"
 }

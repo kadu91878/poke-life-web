@@ -3227,6 +3227,12 @@ def _grant_special_tile_reward(state: dict, player_id: str, reward_key: str, *, 
         _log(state, player['name'], f"Recebeu 1 Pokébola em {source}.")
         return state
 
+    if normalized_key == 'master_ball':
+        player['master_balls'] = max(0, int(player.get('master_balls', 0))) + 1
+        sync_player_inventory(player)
+        _log(state, player['name'], f"Recebeu Master Ball em {source}.")
+        return state
+
     add_item(player, normalized_key, 1)
     item_def = get_item_def(normalized_key)
     item_name = item_def.get('name') or normalized_key
@@ -4236,19 +4242,16 @@ def _finalize_league_member_victory(state: dict, battle: dict, result: dict) -> 
     next_index = member_index + 1
     if not is_champion and next_index < len(_LEAGUE_MEMBERS):
         state['turn']['battle'] = None
-        state = _start_league_member_battle(
-            state, battle['challenger_id'],
-            member_index=next_index,
-            arrival_order=arrival_order,
-        )
+        state = _queue_league_intermission(state, battle['challenger_id'], next_index, arrival_order)
         return state, {
             **result,
             'mode': 'league',
             'gym_victory': False,
-            'battle_finished': False,
+            'battle_finished': True,
             'continues': True,
             'league_member_defeated': member_name,
             'next_league_member': _LEAGUE_MEMBERS[next_index]['name'],
+            'league_intermission': True,
         }
 
     # Derrotou o Campeão — fim da Liga
@@ -4284,6 +4287,49 @@ def _finalize_league_member_loss(state: dict, battle: dict, result: dict) -> tup
         'battle_finished': True,
         'continues': False,
         'league_failed': True,
+    }
+
+
+def _queue_league_intermission(state: dict, player_id: str, next_member_index: int, arrival_order: int) -> dict:
+    """Pausa entre membros da Liga para que o player use itens antes da próxima batalha."""
+    player = _get_player(state, player_id)
+    next_member = _LEAGUE_MEMBERS[next_member_index]
+    state['turn']['phase'] = 'league_intermission'
+    _set_pending_action(state, {
+        'type': 'league_intermission',
+        'player_id': player_id,
+        'next_member_index': next_member_index,
+        'arrival_order': arrival_order,
+        'next_member_name': next_member['name'],
+        'allowed_actions': ['confirm_league_intermission', 'use_item'],
+    })
+    if player:
+        _log(state, player['name'], f"Preparação antes de enfrentar {next_member['name']}. Use itens se necessário e confirme quando estiver pronto.")
+    return state
+
+
+def confirm_league_intermission(state: dict, player_id: str) -> tuple[dict | None, str | dict]:
+    """Confirma fim da preparação e inicia a próxima batalha da Liga."""
+    state = copy.deepcopy(state)
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    pending_action = state['turn'].get('pending_action') or {}
+    if pending_action.get('type') != 'league_intermission':
+        return None, 'Não há preparação de Liga pendente'
+    if pending_action.get('player_id') != player_id:
+        return None, 'Esta preparação não pertence a você'
+
+    next_member_index = int(pending_action.get('next_member_index', 0))
+    arrival_order = int(pending_action.get('arrival_order', 0))
+
+    _clear_pending_action(state)
+    state = _start_league_member_battle(state, player_id, member_index=next_member_index, arrival_order=arrival_order)
+    return state, {
+        'success': True,
+        'type': 'league_intermission_confirmed',
+        'next_member_index': next_member_index,
     }
 
 
@@ -5462,8 +5508,9 @@ def _finalize_gym_victory(state: dict, battle: dict, result: dict) -> tuple[dict
 
     if player:
         _mark_gym_progress(player, 'gyms_defeated', gym_id)
-        if badge_name and badge_name not in player.get('badges', []):
-            player['badges'].append(badge_name)
+        existing_badge_names = [b['name'] if isinstance(b, dict) else b for b in player.get('badges', [])]
+        if badge_name and badge_name not in existing_badge_names:
+            player['badges'].append({'name': badge_name, 'image_path': battle.get('badge_image_path')})
             rewards.append({'type': 'badge', 'badge': badge_name, 'image_path': battle.get('badge_image_path')})
 
         master_points_reward = int(battle.get('master_points_reward', 20) or 20)

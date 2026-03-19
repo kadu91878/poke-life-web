@@ -27,7 +27,10 @@
     </div>
 
     <div class="badges-row" v-if="player.badges?.length">
-      <span v-for="b in player.badges" :key="b" class="badge-icon" :title="b">🏅</span>
+      <template v-for="b in player.badges" :key="b.name ?? b">
+        <img v-if="b.image_path" :src="b.image_path" :alt="b.name ?? b" :title="b.name ?? b" class="badge-icon" />
+        <span v-else class="badge-icon" :title="b.name ?? b">🏅</span>
+      </template>
     </div>
 
     <div class="pokemon-count">

@@ -675,7 +675,7 @@ class TestGymBattles(TestCase):
 
         player_after_battle = next(p for p in state['players'] if p['id'] == p1_id)
         self.assertTrue(result['gym_victory'])
-        self.assertIn('Cascade Badge', player_after_battle['badges'])
+        self.assertIn('Cascade Badge', [b['name'] if isinstance(b, dict) else b for b in player_after_battle['badges']])
         self.assertEqual(player_after_battle['master_points'], 20)
         self.assertEqual(state['turn']['pending_action']['type'], 'gym_heal')
         self.assertTrue(player_after_battle['pokemon'][0]['knocked_out'])
@@ -4658,7 +4658,7 @@ class TestPokemonLeague(TestCase):
         self.assertIsNotNone(result)
 
     def test_league_defeat_member_advances_to_next(self):
-        """Derrotar todos os Pokémon de Lorelei avança para Bruno."""
+        """Derrotar todos os Pokémon de Lorelei entra em intermission, confirmando avança para Bruno."""
         state, p1_id, p2_id = self._ready_state()
         self._set_team(state, p1_id, [_make_pokemon(name='Dragonite', bp=15)])
         self._prime_turn(state, p1_id)
@@ -4672,6 +4672,15 @@ class TestPokemonLeague(TestCase):
             with patch('game.engine.state.roll_battle_dice', side_effect=[6, 1]):
                 state, result = engine.register_battle_roll(state, p1_id)
 
+        # Após derrotar Lorelei, deve entrar em intermission
+        self.assertEqual(state['turn'].get('phase'), 'league_intermission')
+        self.assertIsNone(state['turn'].get('battle'))
+        pending = state['turn'].get('pending_action') or {}
+        self.assertEqual(pending.get('type'), 'league_intermission')
+        self.assertEqual(pending.get('next_member_name'), 'Bruno')
+
+        # Confirma intermission → inicia batalha com Bruno
+        state, _ = engine.confirm_league_intermission(state, p1_id)
         battle = state['turn'].get('battle')
         self.assertIsNotNone(battle)
         self.assertEqual(battle['defender_name'], 'Bruno')

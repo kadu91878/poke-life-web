@@ -841,6 +841,16 @@ class GameConsumer(AsyncWebsocketConsumer):
         saved_state = await self.save_game_state(new_state)
         await self.broadcast_state(saved_state, {'type': 'pending_action_resolved', 'player_id': self.player_id, 'result': result})
 
+    async def handle_confirm_league_intermission(self, data):
+        state = await self.get_game_state()
+        new_state, result = game_state.confirm_league_intermission(state, self.player_id)
+        if new_state is None:
+            await self.send_error(result)
+            return
+
+        saved_state = await self.save_game_state(new_state)
+        await self.broadcast_state(saved_state, {'type': 'league_intermission_confirmed', 'player_id': self.player_id, 'result': result})
+
     async def handle_dismiss_revealed_card(self, data):
         state = await self.get_game_state()
         new_state, result = game_state.dismiss_revealed_card(state, self.player_id)

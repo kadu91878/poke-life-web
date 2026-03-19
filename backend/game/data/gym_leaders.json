@@ -6,7 +6,7 @@
       "leader_name": "Brock",
       "gym_name": "Pewter City Gym",
       "badge_name": "Boulder Badge",
-      "badge_image_path": "/assets/split_remaining_assets_v2/Items & Miscellaneous/kanto_badges_5x/item_25.png",
+      "badge_image_path": "/assets/items/boulder_badge.png",
       "master_points_reward": 20,
       "leader_team": [
         { "name": "Onix", "battle_points": 4, "types": ["Rock", "Ground"] }
@@ -18,7 +18,7 @@
       "leader_name": "Misty",
       "gym_name": "Cerulean City Gym",
       "badge_name": "Cascade Badge",
-      "badge_image_path": "/assets/split_remaining_assets_v2/Items & Miscellaneous/kanto_badges_5x/item_26.png",
+      "badge_image_path": "/assets/items/cascade_badge.png",
       "master_points_reward": 20,
       "leader_team": [
         { "name": "Horsea", "battle_points": 5, "types": ["Water"] },
@@ -31,7 +31,7 @@
       "leader_name": "Lt. Surge",
       "gym_name": "Vermillion City Gym",
       "badge_name": "Thunder Badge",
-      "badge_image_path": "/assets/split_remaining_assets_v2/Items & Miscellaneous/kanto_badges_5x/item_27.png",
+      "badge_image_path": "/assets/items/thunder_badge.png",
       "master_points_reward": 20,
       "leader_team": [
         { "name": "Electabuzz", "battle_points": 6, "types": ["Electric"] },
@@ -44,7 +44,7 @@
       "leader_name": "Erika",
       "gym_name": "Celadon City Gym",
       "badge_name": "Rainbow Badge",
-      "badge_image_path": "/assets/split_remaining_assets_v2/Items & Miscellaneous/kanto_badges_5x/item_28.png",
+      "badge_image_path": "/assets/items/rainbow_badge.png",
       "master_points_reward": 20,
       "leader_team": [
         { "name": "Gloom", "battle_points": 6, "types": ["Grass", "Poison"] },
@@ -57,7 +57,7 @@
       "leader_name": "Koga",
       "gym_name": "Fuchsia City Gym",
       "badge_name": "Soul Badge",
-      "badge_image_path": "/assets/split_remaining_assets_v2/Items & Miscellaneous/kanto_badges_5x/item_29.png",
+      "badge_image_path": "/assets/items/soul_badge.png",
       "master_points_reward": 20,
       "leader_team": [
         { "name": "Venomoth", "battle_points": 4, "types": ["Bug", "Poison"] },
@@ -71,7 +71,7 @@
       "leader_name": "Sabrina",
       "gym_name": "Saffron City Gym",
       "badge_name": "Marsh Badge",
-      "badge_image_path": "/assets/split_remaining_assets_v2/Items & Miscellaneous/kanto_badges_5x/item_30.png",
+      "badge_image_path": "/assets/items/marsh_badge.png",
       "master_points_reward": 20,
       "leader_team": [
         { "name": "Hypno", "battle_points": 8, "types": ["Psychic"] },
@@ -84,7 +84,7 @@
       "leader_name": "Blaine",
       "gym_name": "Cinnabar Island Gym",
       "badge_name": "Volcano Badge",
-      "badge_image_path": "/assets/split_remaining_assets_v2/Items & Miscellaneous/kanto_badges_5x/item_31.png",
+      "badge_image_path": "/assets/items/volcano_badge.png",
       "master_points_reward": 20,
       "leader_team": [
         { "name": "Charmeleon", "battle_points": 7, "types": ["Fire"] },
@@ -98,7 +98,7 @@
       "leader_name": "Giovanni",
       "gym_name": "Viridian City Gym",
       "badge_name": "Earth Badge",
-      "badge_image_path": "/assets/split_remaining_assets_v2/Items & Miscellaneous/kanto_badges_5x/item_32.png",
+      "badge_image_path": "/assets/items/earth_badge.png",
       "master_points_reward": 20,
       "leader_team": [
         { "name": "Dugtrio", "battle_points": 8, "types": ["Ground"] },

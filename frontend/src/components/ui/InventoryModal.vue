@@ -187,9 +187,10 @@
           <span>{{ player.badges?.length ?? 0 }} badge(s)</span>
         </div>
         <div v-if="player.badges?.length" class="badge-list">
-          <div v-for="badge in player.badges" :key="badge" class="badge-entry">
-            <span class="badge-icon-lg">🏅</span>
-            <span>{{ badge }}</span>
+          <div v-for="badge in player.badges" :key="badge.name ?? badge" class="badge-entry">
+            <img v-if="badge.image_path" :src="badge.image_path" :alt="badge.name ?? badge" class="badge-icon-lg" />
+            <span v-else class="badge-icon-lg">🏅</span>
+            <span>{{ badge.name ?? badge }}</span>
           </div>
         </div>
         <p v-else class="empty-copy">Nenhuma badge conquistada ainda.</p>
