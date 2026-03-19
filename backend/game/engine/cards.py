@@ -651,7 +651,7 @@ def apply_simple_reward(state: dict, player: dict, reward: dict) -> None:
     if reward_type == 'gain_master_points':
         amount = int(reward.get('amount', 0) or 0)
         player['bonus_points'] = player.get('bonus_points', 0) + amount
-        player['master_points'] += amount
+        player['bonus_master_points'] = player.get('bonus_master_points', 0) + amount
         sync_player_inventory(player)
 
 
@@ -827,7 +827,7 @@ def apply_event_effect(state: dict, player_id: str, card: dict) -> tuple[dict, d
             return state, result
         if effect_type == 'steal_master_points':
             if roll <= 3:
-                player['master_points'] = max(0, int(player.get('master_points', 0)) - 20)
+                player['bonus_master_points'] = player.get('bonus_master_points', 0) - 20
             sync_player_inventory(player)
             return state, result
         if effect_type == 'move_forward_trigger':
@@ -856,7 +856,7 @@ def apply_victory_effect(state: dict, player_id: str, card: dict) -> tuple[dict,
     if category == 'master_points':
         amount = parse_master_points(description) or 0
         player['bonus_points'] = player.get('bonus_points', 0) + amount
-        player['master_points'] += amount
+        player['bonus_master_points'] = player.get('bonus_master_points', 0) + amount
         sync_player_inventory(player)
         result['amount'] = amount
         return state, result

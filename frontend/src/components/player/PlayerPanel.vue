@@ -26,13 +26,6 @@
       🏥 <span class="tile-name">{{ lastPokemonCenterLabel }}</span>
     </div>
 
-    <div class="badges-row" v-if="player.badges?.length">
-      <template v-for="b in player.badges" :key="b.name ?? b">
-        <img v-if="b.image_path" :src="b.image_path" :alt="b.name ?? b" :title="b.name ?? b" class="badge-icon" />
-        <span v-else class="badge-icon" :title="b.name ?? b">🏅</span>
-      </template>
-    </div>
-
     <div class="pokemon-count">
       <img v-if="player.starter_pokemon?.image_path"
            :src="player.starter_pokemon.image_path"
@@ -213,8 +206,6 @@ function primaryAbilityStatus(pokemon) {
   text-overflow: ellipsis;
 }
 
-.badges-row { display: flex; gap: 2px; flex-wrap: wrap; }
-.badge-icon { font-size: 0.75rem; }
 
 .pokemon-count {
   font-size: 0.72rem;

@@ -173,15 +173,40 @@
               <span class="duel-stats" v-if="action.hasCharges">{{ action.chargesRemaining }}/{{ action.chargesTotal }}</span>
             </button>
           </div>
-          <template v-if="isFreeCapture">
+          <template v-if="choosingMasterBall">
+            <div class="event-card">
+              <div class="event-title">🟣 Master Ball</div>
+              <div class="event-description">
+                Escolha explicitamente o valor do dado de captura entre 1 e 6.
+              </div>
+            </div>
+            <div class="item-shortcuts">
+              <button
+                v-for="value in masterBallRollOptions"
+                :key="`master-ball-action-roll-${value}`"
+                class="btn-secondary duel-btn"
+                @click="selectedMasterBallRoll = value"
+              >
+                🎯 Resultado {{ value }}<span class="duel-stats" v-if="selectedMasterBallRoll === value">selecionado</span>
+              </button>
+            </div>
+            <button class="btn-secondary" :disabled="selectedMasterBallRoll == null" @click="confirmMasterBallChoice()">
+              🟣 Confirmar Master Ball {{ selectedMasterBallRoll != null ? `(${selectedMasterBallRoll})` : '' }}
+            </button>
+            <button class="btn-ghost" @click="cancelMasterBallChoice()">Cancelar Master Ball</button>
+          </template>
+          <template v-else-if="isFreeCapture">
             <button class="btn-accent" @click="store.actions.rollCaptureDice()">🆓 Captura Gratuita!</button>
+            <button v-if="canOfferMasterBallInActionPhase" class="btn-secondary" @click="startMasterBallChoice()">🟣 Usar Master Ball</button>
           </template>
           <template v-else-if="isLegendaryCapture">
             <button class="btn-primary" :disabled="(me?.pokeballs ?? 0) < 2" @click="store.actions.rollCaptureDice(false)">🎲 Rolar captura (2 Pokébolas)</button>
             <button class="btn-secondary" :disabled="(me?.full_restores ?? 0) <= 0" @click="store.actions.rollCaptureDice(true)">💊 Rolar com Full Restore ({{ me?.full_restores ?? 0 }})</button>
+            <button v-if="canOfferMasterBallInActionPhase" class="btn-secondary" @click="startMasterBallChoice()">🟣 Usar Master Ball</button>
           </template>
           <template v-else>
             <button class="btn-primary" @click="store.actions.rollCaptureDice()">🎲 Rolar dado de captura</button>
+            <button v-if="canOfferMasterBallInActionPhase" class="btn-secondary" @click="startMasterBallChoice()">🟣 Usar Master Ball</button>
           </template>
           <button class="btn-ghost" @click="store.actions.skipAction()">{{ safariRemaining > 0 ? 'Pular este Pokémon' : 'Pular' }}</button>
         </template>
@@ -332,16 +357,40 @@
         <div class="event-description">{{ waitingActionDescription }}</div>
       </div>
     </template>
-    <div class="mini-log">
-      <div v-for="(entry, i) in lastLogs" :key="i" class="log-entry">
-        <span class="log-player">{{ entry.player }}</span>: {{ entry.message }}
+    <div class="log-chat-panel">
+      <div class="log-chat-tabs">
+        <button :class="['tab-btn', logChatTab === 'log' ? 'tab-active' : '']" @click="logChatTab = 'log'">Log</button>
+        <button :class="['tab-btn', logChatTab === 'chat' ? 'tab-active' : '']" @click="logChatTab = 'chat'">Chat</button>
+      </div>
+      <div v-if="logChatTab === 'log'" class="mini-log">
+        <div v-for="(entry, i) in lastLogs" :key="i" class="log-entry">
+          <span class="log-player">{{ entry.player }}</span>: {{ entry.message }}
+        </div>
+      </div>
+      <div v-else class="chat-panel">
+        <div ref="chatListEl" class="chat-list">
+          <div v-for="(msg, i) in chatMessages" :key="i" class="chat-msg" :class="{ 'chat-msg--mine': msg.player_id === store.playerId }">
+            <span class="chat-author">{{ msg.player_name }}</span>: {{ msg.text }}
+          </div>
+          <div v-if="!chatMessages.length" class="chat-empty">Nenhuma mensagem ainda.</div>
+        </div>
+        <div class="chat-input-row">
+          <input
+            v-model="chatInput"
+            class="chat-input"
+            placeholder="Mensagem..."
+            maxlength="300"
+            @keydown.enter.prevent="sendChat"
+          />
+          <button class="chat-send-btn" :disabled="!chatInput.trim()" @click="sendChat">➤</button>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import gameActions from '@/constants/gameActions'
 import { useGameStore } from '@/stores/gameStore'
 
@@ -424,15 +473,20 @@ const captureRollButtonLabel = computed(() =>
     ? 'Rolar novamente o dado de captura'
     : 'Rolar dado de captura'
 )
-const masterBallQuantity = computed(() =>
-  inventoryItems.value.find(item => item.key === 'master_ball')?.quantity ?? 0
-)
+const masterBallQuantity = computed(() => me.value?.master_balls ?? 0)
 const canOfferMasterBallChoice = computed(() =>
   canRollPendingCapture.value
   && masterBallQuantity.value > 0
   && pendingAction.value?.type === 'capture_attempt'
   && !pendingMasterBallInUse.value
   && pendingCaptureRolls.value.length === 0
+)
+const canOfferMasterBallInActionPhase = computed(() =>
+  phase.value === 'action'
+  && !pendingAction.value
+  && !!pendingPokemon.value
+  && masterBallQuantity.value > 0
+  && isMyTurn.value
 )
 const pendingReleaseOptions = computed(() => {
   if (Array.isArray(pendingReleaseChoice.value?.options) && pendingReleaseChoice.value.options.length > 0) {
@@ -532,6 +586,24 @@ const eventEffectClass = computed(() => {
 })
 
 const lastLogs = computed(() => (store.gameState?.log ?? []).slice(-5).reverse())
+
+const logChatTab  = ref('log')
+const chatInput   = ref('')
+const chatListEl  = ref(null)
+const chatMessages = computed(() => store.chatMessages)
+
+watch(chatMessages, () => {
+  nextTick(() => {
+    if (chatListEl.value) chatListEl.value.scrollTop = chatListEl.value.scrollHeight
+  })
+}, { deep: true })
+
+function sendChat() {
+  const text = chatInput.value.trim()
+  if (!text) return
+  store.actions.sendChat(text)
+  chatInput.value = ''
+}
 const PHASE_LABELS = {
   select_starter:'🌟 Escolha seu Pokémon inicial', roll:'🎲 Role o dado', action:'🎯 Escolha uma ação',
   battle:'⚔️ Batalha em andamento', event:'📋 Carta de Evento', item_choice:'🎒 Inventário cheio',
@@ -678,11 +750,13 @@ watch(
     captureRollCount: pendingCaptureRolls.value.length,
     masterBallInUse: pendingMasterBallInUse.value,
     masterBallQuantity: masterBallQuantity.value,
+    hasPendingPokemon: !!pendingPokemon.value,
   }),
   (snapshot) => {
+    const inCaptureAttempt = snapshot.type === 'capture_attempt' && snapshot.phase === 'action'
+    const inActionPhaseWithPokemon = snapshot.phase === 'action' && snapshot.hasPendingPokemon && !snapshot.type
     const shouldReset = (
-      snapshot.type !== 'capture_attempt'
-      || snapshot.phase !== 'action'
+      (!inCaptureAttempt && !inActionPhaseWithPokemon)
       || !snapshot.isMyTurn
       || snapshot.captureRollCount > 0
       || snapshot.masterBallInUse
@@ -735,7 +809,22 @@ button { width:100%; }
   background: rgba(255, 224, 102, .05);
 }
 .roll-btn { font-size:1rem; padding:.75rem; }
-.mini-log { border-top:1px solid rgba(255,255,255,.07); padding-top:.35rem; display:flex; flex-direction:column; gap:.18rem; max-height:100px; overflow-y:auto; }
+.log-chat-panel { border-top:1px solid rgba(255,255,255,.07); display:flex; flex-direction:column; }
+.log-chat-tabs { display:flex; gap:2px; padding:.25rem 0 0; }
+.tab-btn { flex:1; font-size:.7rem; padding:.2rem; background:transparent; border:1px solid rgba(255,255,255,.1); border-radius:4px 4px 0 0; color:var(--color-text-muted); cursor:pointer; }
+.tab-btn.tab-active { background:rgba(255,255,255,.08); color:var(--color-accent); border-color:var(--color-accent); }
+.mini-log { padding-top:.35rem; display:flex; flex-direction:column; gap:.18rem; max-height:100px; overflow-y:auto; }
 .log-entry { font-size:.68rem; color:var(--color-text-muted); line-height:1.3; }
 .log-player { color:var(--color-accent); font-weight:600; }
+.chat-panel { display:flex; flex-direction:column; gap:.3rem; padding-top:.3rem; }
+.chat-list { display:flex; flex-direction:column; gap:.15rem; max-height:90px; overflow-y:auto; }
+.chat-msg { font-size:.68rem; color:var(--color-text-muted); line-height:1.3; word-break:break-word; }
+.chat-msg--mine .chat-author { color:var(--color-secondary); }
+.chat-author { color:var(--color-accent); font-weight:600; }
+.chat-empty { font-size:.65rem; color:rgba(255,255,255,.3); font-style:italic; }
+.chat-input-row { display:flex; gap:.3rem; align-items:center; }
+.chat-input { flex:1; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.1); border-radius:var(--radius); color:var(--color-text); font-size:.72rem; padding:.3rem .5rem; outline:none; }
+.chat-input:focus { border-color:var(--color-accent); }
+.chat-send-btn { background:transparent; border:1px solid rgba(255,255,255,.15); border-radius:var(--radius); color:var(--color-accent); font-size:.75rem; padding:.3rem .5rem; cursor:pointer; flex-shrink:0; width:auto; }
+.chat-send-btn:disabled { opacity:.4; cursor:default; }
 </style>

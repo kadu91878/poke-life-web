@@ -676,7 +676,8 @@ class TestGymBattles(TestCase):
         player_after_battle = next(p for p in state['players'] if p['id'] == p1_id)
         self.assertTrue(result['gym_victory'])
         self.assertIn('Cascade Badge', [b['name'] if isinstance(b, dict) else b for b in player_after_battle['badges']])
-        self.assertEqual(player_after_battle['master_points'], 20)
+        pokemon_mp = sum(p.get('master_points', 0) for p in player_after_battle.get('pokemon', []))
+        self.assertEqual(player_after_battle['master_points'], pokemon_mp + 20)
         self.assertEqual(state['turn']['pending_action']['type'], 'gym_heal')
         self.assertTrue(player_after_battle['pokemon'][0]['knocked_out'])
 
@@ -1415,11 +1416,13 @@ class TestCapture(TestCase):
     def test_capture_adds_master_points(self):
         state, p1_id = self._state_with_pending_pokemon()
         mp = load_playable_pokemon_by_name('Pidgey').get('master_points', 0)
+        p1_before = next(p for p in state['players'] if p['id'] == p1_id)
+        mp_before = p1_before['master_points']
 
         with patch('game.engine.state.roll_capture_dice', return_value=4):
             new_state, result = engine.capture_pokemon(state, p1_id)
         p1 = next(p for p in new_state['players'] if p['id'] == p1_id)
-        self.assertEqual(p1['master_points'], mp)
+        self.assertEqual(p1['master_points'], mp_before + mp)
 
     def test_capture_with_full_party_enters_release_phase(self):
         state, p1_id = self._state_with_pending_pokemon()
@@ -1869,7 +1872,8 @@ class TestCapture(TestCase):
         self.assertTrue(result['master_ball_consumed'])
         self.assertEqual(engine.get_item_quantity(player_after, 'master_ball'), before_quantity - 1)
 
-    def test_master_ball_cancel_preserves_item_when_capture_does_not_conclude(self):
+    def test_master_ball_captures_when_pokeballs_empty(self):
+        """Master Ball deve contar como slot de Pokébola: captura mesmo com pokebolas = 0."""
         state, p1_id = self._state_with_pending_pokemon()
         player = next(p for p in state['players'] if p['id'] == p1_id)
         engine.add_item(player, 'master_ball', 1)
@@ -1884,13 +1888,10 @@ class TestCapture(TestCase):
             chosen_capture_roll=2,
         )
 
-        self.assertTrue(result['requires_release'])
-        self.assertEqual(state['turn']['phase'], 'release_pokemon')
-
-        cancelled_state = engine.skip_action(state, p1_id)
-        player_after = next(p for p in cancelled_state['players'] if p['id'] == p1_id)
-        self.assertEqual(engine.get_item_quantity(player_after, 'master_ball'), before_quantity)
-        self.assertEqual(player_after['pokemon'], [])
+        # Captura deve ter sucesso usando a Master Ball como slot
+        self.assertFalse(result.get('requires_release', False))
+        player_after = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertEqual(engine.get_item_quantity(player_after, 'master_ball'), before_quantity - 1)
 
     def test_master_ball_on_moltres_controls_only_first_roll_and_is_preserved_on_failure(self):
         state, p1_id, p2_id = _init_two_player_game()
@@ -3486,8 +3487,8 @@ class TestBattleEffects(TestCase):
         state, p1_id, p2_id = self._two_players_with_specific_pokemon(haunter, magikarp)
 
         p2 = next(p for p in state['players'] if p['id'] == p2_id)
-        p2['master_points'] = 20
-        mp_before = 20
+        sync_player_inventory(p2)
+        mp_before = p2['master_points']
 
         state = engine.start_duel(state, p1_id, p2_id)
         state, _ = engine.register_battle_choice(state, p2_id, 0)
