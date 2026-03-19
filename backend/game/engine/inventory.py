@@ -76,10 +76,10 @@ ITEM_DEFS = {
         'key': 'master_ball',
         'name': 'Master Ball',
         'image_path': '/assets/items/master_ball.png',
-        'category': 'reward',
-        'effect': 'special_tile_reward',
+        'category': 'capture',
+        'effect': 'choose_capture_dice',
         'implemented': True,
-        'notes': 'Usado como prêmio máximo do Game Corner.',
+        'notes': 'Funciona como Pokébola especial: permite escolher o valor de 1 dado de captura (1–6).',
     },
     'defender': {
         'key': 'defender',
@@ -136,8 +136,19 @@ def load_initial_item_rules() -> dict:
 def get_starting_resource_defaults() -> dict:
     defaults = {
         'pokeballs': 6,
-        'full_restores': 0,
-        'items': [],
+        'full_restores': 2,
+        'items': [
+            {
+                'key': 'full_restore',
+                'name': ITEM_DEFS['full_restore']['name'],
+                'quantity': 2,
+                'image_path': ITEM_DEFS['full_restore'].get('image_path'),
+                'category': ITEM_DEFS['full_restore'].get('category'),
+                'effect': ITEM_DEFS['full_restore'].get('effect'),
+                'implemented': ITEM_DEFS['full_restore'].get('implemented', False),
+                'notes': ITEM_DEFS['full_restore'].get('notes'),
+            }
+        ],
     }
     rules = load_initial_item_rules()
     for item in rules.get('starting_items', []):
@@ -295,6 +306,8 @@ def remove_item(player: dict, item_key: str, quantity: int = 1) -> bool:
 
 
 def sync_player_inventory(player: dict) -> dict:
+    player.setdefault('bonus_points', 0)
+    player.setdefault('league_bonus', 0)
     player['items'] = normalize_items(player.get('items'), player.get('full_restores', 0))
     player['item_capacity'] = ITEM_CAPACITY
     player['item_count'] = total_item_count(player)

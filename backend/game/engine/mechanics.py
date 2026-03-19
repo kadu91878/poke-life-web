@@ -268,7 +268,7 @@ def can_evolve(pokemon: dict) -> bool:
 def calculate_final_scores(players: list) -> list:
     """
     Calcula pontuações finais após o Pokemon League.
-    Master Points = soma dos MP dos Pokémon capturados + badges (20 pts cada) + bônus de liga.
+    Total = soma dos MPs dos Pokémon atuais + badges×20 + pontos de cartas/eventos + pontos da Liga.
     """
     results = []
     for player in players:
@@ -277,14 +277,16 @@ def calculate_final_scores(players: list) -> list:
             pokemon_mp += player['starter_pokemon'].get('master_points', 0)
 
         badge_mp = len(player.get('badges', [])) * 20
+        bonus_points = player.get('bonus_points', 0)
         league_bonus = player.get('league_bonus', 0)
-        total = pokemon_mp + badge_mp + league_bonus
+        total = pokemon_mp + badge_mp + bonus_points + league_bonus
 
         results.append({
             'player_id': player['id'],
             'player_name': player['name'],
             'pokemon_mp': pokemon_mp,
             'badge_mp': badge_mp,
+            'bonus_points': bonus_points,
             'league_bonus': league_bonus,
             'total': total,
         })

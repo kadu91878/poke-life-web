@@ -196,9 +196,12 @@ def _normalize_player(player: dict[str, Any], index: int) -> dict[str, Any]:
     normalized['items'] = normalize_items(normalized.get('items'), normalized.get('full_restores', starting_defaults['full_restores']))
     normalized.setdefault('badges', [])
     normalized.setdefault('master_points', 0)
+    normalized.setdefault('bonus_points', 0)
+    normalized.setdefault('league_bonus', 0)
     normalized.setdefault('gyms_attempted', [])
     normalized.setdefault('gyms_defeated', [])
     normalized.setdefault('has_reached_league', False)
+    normalized.setdefault('league_failed', False)
     normalized.setdefault('skip_turns', 0)
     return sync_player_inventory(normalized)
 

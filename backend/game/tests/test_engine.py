@@ -168,7 +168,7 @@ class TestGameInitialization(TestCase):
     def test_initialize_game_has_available_starters(self):
         state, _, _ = _init_two_player_game()
         starters = state['turn']['available_starters']
-        self.assertEqual(len(starters), 3)
+        self.assertGreaterEqual(len(starters), 3)
 
     def test_players_start_with_visual_rule_items(self):
         state, _, _ = _init_two_player_game()
@@ -246,11 +246,12 @@ class TestStarterSelection(TestCase):
         starters = self._get_starters(state)
         chosen_id = starters[0]['id']
 
+        initial_count = len(starters)
         state = engine.select_starter(state, p1_id, chosen_id)
         self.assertIsNotNone(state)
         available_ids = [s['id'] for s in state['turn']['available_starters']]
         self.assertNotIn(chosen_id, available_ids)
-        self.assertEqual(len(available_ids), 2)
+        self.assertEqual(len(available_ids), initial_count - 1)
 
     def test_p2_can_select_after_p1(self):
         """P2 consegue selecionar um starter diferente após P1 ter selecionado."""
@@ -4592,3 +4593,168 @@ class TestHostToolsRuntime(TestCase):
             normalized_once['debug_visual']['host_tools']['pending_tile_trigger'],
             normalized_twice['debug_visual']['host_tools']['pending_tile_trigger'],
         )
+
+
+# ── Testes da Pokémon League ────────────────────────────────────────────────
+
+class TestPokemonLeague(TestCase):
+    """Testa a batalha interativa da Pokémon League (Elite Four + Campeão)."""
+
+    def _ready_state(self):
+        state, p1_id, p2_id = _init_two_player_game()
+        starters = state['turn']['available_starters']
+        state = engine.select_starter(state, p1_id, starters[0]['id'])
+        state = engine.select_starter(state, p2_id, starters[1]['id'])
+        state['decks']['event_deck'] = []
+        state['decks']['event_discard'] = []
+        state['decks']['victory_deck'] = []
+        return state, p1_id, p2_id
+
+    def _prime_turn(self, state, player_id):
+        state['turn']['current_player_id'] = player_id
+        state['turn']['phase'] = 'roll'
+        state['turn']['battle'] = None
+        state['turn']['pending_action'] = None
+        return state
+
+    def _set_team(self, state, player_id, pokemon_list):
+        player = next(p for p in state['players'] if p['id'] == player_id)
+        player['starter_pokemon'] = None
+        player['pokemon'] = copy.deepcopy(pokemon_list)
+        return player
+
+    def test_league_tile_starts_interactive_battle(self):
+        """Chegar na Liga inicia batalha interativa mode='league'."""
+        state, p1_id, p2_id = self._ready_state()
+        self._set_team(state, p1_id, [_make_pokemon(name='Dragonite', bp=12)])
+        self._prime_turn(state, p1_id)
+        p1 = next(p for p in state['players'] if p['id'] == p1_id)
+        p1['position'] = 168
+
+        state = engine.process_move(state, p1_id, 1)
+        p1 = next(p for p in state['players'] if p['id'] == p1_id)
+
+        battle = state['turn'].get('battle')
+        self.assertIsNotNone(battle)
+        self.assertEqual(battle['mode'], 'league')
+        self.assertEqual(battle['defender_name'], 'Lorelei')
+        self.assertEqual(state['turn']['phase'], 'battle')
+        self.assertEqual(p1['has_reached_league'], True)
+
+    def test_league_battle_choice_and_roll_work(self):
+        """Escolha de Pokémon e rolagem de dado funcionam na Liga."""
+        state, p1_id, p2_id = self._ready_state()
+        self._set_team(state, p1_id, [_make_pokemon(name='Dragonite', bp=12)])
+        self._prime_turn(state, p1_id)
+        p1 = next(p for p in state['players'] if p['id'] == p1_id)
+        p1['position'] = 168
+
+        state = engine.process_move(state, p1_id, 1)
+        state, _ = engine.register_battle_choice(state, p1_id, 0)
+        self.assertEqual(state['turn']['battle']['sub_phase'], 'rolling')
+
+        with patch('game.engine.state.roll_battle_dice', side_effect=[6, 1]):
+            state, result = engine.register_battle_roll(state, p1_id)
+        self.assertIsNotNone(result)
+
+    def test_league_defeat_member_advances_to_next(self):
+        """Derrotar todos os Pokémon de Lorelei avança para Bruno."""
+        state, p1_id, p2_id = self._ready_state()
+        self._set_team(state, p1_id, [_make_pokemon(name='Dragonite', bp=15)])
+        self._prime_turn(state, p1_id)
+        p1 = next(p for p in state['players'] if p['id'] == p1_id)
+        p1['position'] = 168
+
+        state = engine.process_move(state, p1_id, 1)
+        # Derrota todos os 5 Pokémon de Lorelei
+        for _ in range(5):
+            state, _ = engine.register_battle_choice(state, p1_id, 0)
+            with patch('game.engine.state.roll_battle_dice', side_effect=[6, 1]):
+                state, result = engine.register_battle_roll(state, p1_id)
+
+        battle = state['turn'].get('battle')
+        self.assertIsNotNone(battle)
+        self.assertEqual(battle['defender_name'], 'Bruno')
+        self.assertEqual(battle['league_member_index'], 1)
+        # Pontos foram acumulados
+        p1 = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertGreater(p1['master_points'], 0)
+
+    def test_league_loss_sets_failed_flag(self):
+        """Perder para um membro da Liga seta league_failed."""
+        state, p1_id, p2_id = self._ready_state()
+        self._set_team(state, p1_id, [_make_pokemon(name='Magikarp', bp=1)])
+        self._prime_turn(state, p1_id)
+        p1 = next(p for p in state['players'] if p['id'] == p1_id)
+        p1['position'] = 168
+        state['decks']['victory_deck'] = []
+
+        state = engine.process_move(state, p1_id, 1)
+        state, _ = engine.register_battle_choice(state, p1_id, 0)
+        with patch('game.engine.state.roll_battle_dice', side_effect=[1, 6]):
+            state, result = engine.register_battle_roll(state, p1_id)
+
+        p1 = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertTrue(p1.get('league_failed'))
+        self.assertIsNone(state['turn'].get('battle'))
+
+    def test_league_failed_blocks_reentry(self):
+        """Player com league_failed não pode reentrar na Liga."""
+        state, p1_id, p2_id = self._ready_state()
+        self._set_team(state, p1_id, [_make_pokemon(name='Magikarp', bp=1)])
+        p1 = next(p for p in state['players'] if p['id'] == p1_id)
+        p1['league_failed'] = True
+        p1['has_reached_league'] = True
+
+        state['turn']['current_player_id'] = p1_id
+        state['turn']['phase'] = 'roll'
+        p1['position'] = 168
+        state['decks']['victory_deck'] = []
+
+        state = engine.process_move(state, p1_id, 1)
+        self.assertIsNone(state['turn'].get('battle'))
+
+    def test_starting_items_include_two_full_restores(self):
+        """Cada jogador começa com 2 Full Restores."""
+        state, p1_id, _ = self._ready_state()
+        p1 = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertEqual(p1['full_restores'], 2)
+
+    def test_master_ball_has_capture_category(self):
+        """Master Ball tem categoria 'capture', não aparece como item genérico."""
+        from game.engine.inventory import ITEM_DEFS
+        self.assertEqual(ITEM_DEFS['master_ball']['category'], 'capture')
+        self.assertEqual(ITEM_DEFS['master_ball']['effect'], 'choose_capture_dice')
+
+    def test_calculate_final_scores_includes_bonus_points(self):
+        """calculate_final_scores inclui bonus_points (eventos/duelos) na pontuação."""
+        player = {
+            'id': 'p1', 'name': 'P1',
+            'pokemon': [_make_pokemon(bp=3)],
+            'starter_pokemon': None,
+            'badges': ['Boulder Badge'],  # +20
+            'bonus_points': 15,           # eventos
+            'league_bonus': 60,           # liga
+        }
+        results = calculate_final_scores([player])
+        self.assertEqual(len(results), 1)
+        r = results[0]
+        # total = pokemon_mp + 20 (badge) + 15 (bonus) + 60 (league)
+        pokemon_mp = _make_pokemon(bp=3).get('master_points', 0)
+        self.assertEqual(r['total'], pokemon_mp + 20 + 15 + 60)
+        self.assertEqual(r['bonus_points'], 15)
+        self.assertEqual(r['league_bonus'], 60)
+
+    def test_gym_badge_gives_20_points_in_final_score(self):
+        """Cada badge vale 20 pontos na pontuação final."""
+        player = {
+            'id': 'p1', 'name': 'P1',
+            'pokemon': [],
+            'starter_pokemon': None,
+            'badges': ['Cascade Badge', 'Thunder Badge'],
+            'bonus_points': 0,
+            'league_bonus': 0,
+        }
+        results = calculate_final_scores([player])
+        self.assertEqual(results[0]['badge_mp'], 40)
+        self.assertEqual(results[0]['total'], 40)

@@ -43,6 +43,13 @@
         >
           Itens
         </button>
+        <button
+          class="tab-btn"
+          :class="{ 'tab-btn--active': activeTab === 'badges' }"
+          @click="activeTab = 'badges'"
+        >
+          Badges <span v-if="player.badges?.length">({{ player.badges.length }})</span>
+        </button>
       </div>
 
       <section v-if="activeTab === 'pokemon'" class="tab-panel">
@@ -139,14 +146,29 @@
         <p v-if="!pokemonInventory.length" class="empty-copy">Nenhum Pokemon guardado.</p>
       </section>
 
-      <section v-else class="tab-panel">
+      <section v-else-if="activeTab === 'items'" class="tab-panel">
         <div class="section-head">
           <h3>Inventario de itens</h3>
           <span>{{ itemCount }}/{{ itemCapacity }} ocupados</span>
         </div>
 
-        <div v-if="inventoryItems.length" class="item-card-grid">
-          <article v-for="item in inventoryItems" :key="item.key" class="item-card">
+        <div v-if="captureBalls.length" class="item-section">
+          <h4 class="item-section-title">Pokébolas Especiais</h4>
+          <div class="item-card-grid">
+            <article v-for="item in captureBalls" :key="item.key" class="item-card item-card--capture">
+              <img v-if="item.image_path" :src="item.image_path" :alt="item.name" class="item-card-image" />
+              <div class="item-card-top">
+                <span class="item-card-kind">captura</span>
+                <span class="item-card-qty">x{{ item.quantity }}</span>
+              </div>
+              <strong>{{ item.name }}</strong>
+              <p>{{ item.notes || itemDescription(item) }}</p>
+            </article>
+          </div>
+        </div>
+
+        <div v-if="regularItems.length" class="item-card-grid">
+          <article v-for="item in regularItems" :key="item.key" class="item-card">
             <img v-if="item.image_path" :src="item.image_path" :alt="item.name" class="item-card-image" />
             <div class="item-card-top">
               <span class="item-card-kind">{{ item.category || 'item' }}</span>
@@ -156,7 +178,21 @@
             <p>{{ item.notes || itemDescription(item) }}</p>
           </article>
         </div>
-        <p v-else class="empty-copy">Nenhum item guardado no momento.</p>
+        <p v-if="!captureBalls.length && !regularItems.length" class="empty-copy">Nenhum item guardado no momento.</p>
+      </section>
+
+      <section v-else-if="activeTab === 'badges'" class="tab-panel">
+        <div class="section-head">
+          <h3>Badges Conquistadas</h3>
+          <span>{{ player.badges?.length ?? 0 }} badge(s)</span>
+        </div>
+        <div v-if="player.badges?.length" class="badge-list">
+          <div v-for="badge in player.badges" :key="badge" class="badge-entry">
+            <span class="badge-icon-lg">🏅</span>
+            <span>{{ badge }}</span>
+          </div>
+        </div>
+        <p v-else class="empty-copy">Nenhuma badge conquistada ainda.</p>
       </section>
 
     </div>
@@ -186,6 +222,8 @@ defineEmits(['close'])
 
 const activeTab = ref('pokemon')
 const inventoryItems = computed(() => props.player.items ?? [])
+const captureBalls = computed(() => inventoryItems.value.filter(i => i.category === 'capture'))
+const regularItems = computed(() => inventoryItems.value.filter(i => i.category !== 'capture'))
 const pokemonInventory = computed(() => {
   if (props.player.pokemon_inventory?.length) {
     return props.player.pokemon_inventory
@@ -715,4 +753,12 @@ h3 {
     padding-bottom: 150px;
   }
 }
+
+.item-section { margin-bottom: 1rem; }
+.item-section-title { font-size: 0.78rem; color: #aac4ff; margin: 0 0 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.item-card--capture { border-color: #7c6bff; }
+
+.badge-list { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.5rem 0; }
+.badge-entry { display: flex; align-items: center; gap: 0.6rem; font-size: 0.92rem; padding: 0.4rem 0.6rem; background: rgba(255,255,255,0.05); border-radius: 8px; }
+.badge-icon-lg { font-size: 1.4rem; }
 </style>
