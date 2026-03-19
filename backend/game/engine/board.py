@@ -27,7 +27,7 @@ def calculate_new_position(current_position: int, dice_roll: int, board_data: di
     total = get_total_tiles(board_data)
     new_pos = current_position + dice_roll
     # Não ultrapassa a última casa
-    return min(new_pos, total - 1)
+    return max(0, min(new_pos, total - 1))
 
 
 def get_positions_between(start_position: int, end_position: int) -> list[int]:

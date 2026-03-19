@@ -5,6 +5,9 @@
       <div class="event-card">
         <div class="event-title">{{ pendingChoiceTitle }}</div>
         <div class="event-description">{{ pendingAction.prompt }}</div>
+        <div v-if="pendingAction?.type === 'pokemart_roll' && (pendingAction?.rolls?.length ?? 0)" class="safari-info">
+          Dados do Poké-Mart: {{ (pendingAction?.rolls ?? []).join(' → ') }}
+        </div>
       </div>
       <button
         v-for="option in pendingAction.options ?? []"
@@ -21,6 +24,9 @@
         <div class="event-card">
           <div class="event-title">{{ pendingChoiceTitle }}</div>
           <div class="event-description">{{ pendingAction.prompt }}</div>
+          <div v-if="pendingAction?.type === 'pokemart_roll' && (pendingAction?.rolls?.length ?? 0)" class="safari-info">
+            Dados do Poké-Mart: {{ (pendingAction?.rolls ?? []).join(' → ') }}
+          </div>
         </div>
         <button
           v-for="option in pendingAction.options ?? []"
@@ -44,15 +50,61 @@
             Dados de captura: {{ pendingCaptureRolls.join(' → ') }}
           </div>
         </div>
-        <template v-if="canRollPendingCapture && isFreeCapture">
+        <div v-if="masterBallQuantity > 0" class="hint">
+          Master Ball disponível: x{{ masterBallQuantity }}
+        </div>
+        <div v-if="captureAbilityActions.length" class="item-shortcuts ability-shortcuts">
+          <div class="hint">Habilidades disponíveis:</div>
+          <button
+            v-for="action in captureAbilityActions"
+            :key="action.key"
+            class="btn-secondary duel-btn"
+            @click="store.actions.useAbility({ slotKey: action.slotKey, abilityId: action.abilityId, actionId: action.actionId })"
+          >
+            ✨ {{ action.pokemonName }} · {{ action.label }}
+            <span class="duel-stats" v-if="action.hasCharges">{{ action.chargesRemaining }}/{{ action.chargesTotal }}</span>
+          </button>
+        </div>
+        <div v-if="pendingMasterBallInUse" class="hint">
+          A Master Ball controlou apenas a primeira rolagem desta captura. As próximas rolagens serão normais.
+        </div>
+        <div v-else-if="canOfferMasterBallChoice" class="hint">
+          A Master Ball controla apenas a primeira rolagem deste fluxo e só é consumida se a captura for concluída.
+        </div>
+        <template v-if="choosingMasterBall">
+          <div class="event-card">
+            <div class="event-title">🟣 Master Ball</div>
+            <div class="event-description">
+              Escolha explicitamente o valor do dado de captura entre 1 e 6.
+            </div>
+          </div>
+          <div class="item-shortcuts">
+            <button
+              v-for="value in masterBallRollOptions"
+              :key="`master-ball-roll-${value}`"
+              class="btn-secondary duel-btn"
+              @click="selectedMasterBallRoll = value"
+            >
+              🎯 Resultado {{ value }}<span class="duel-stats" v-if="selectedMasterBallRoll === value">selecionado</span>
+            </button>
+          </div>
+          <button class="btn-secondary" :disabled="selectedMasterBallRoll == null" @click="confirmMasterBallChoice()">
+            🟣 Confirmar Master Ball {{ selectedMasterBallRoll != null ? `(${selectedMasterBallRoll})` : '' }}
+          </button>
+          <button class="btn-ghost" @click="cancelMasterBallChoice()">Cancelar Master Ball</button>
+        </template>
+        <template v-else-if="canRollPendingCapture && isFreeCapture">
           <button class="btn-accent" @click="store.actions.rollCaptureDice()">🎲 {{ captureRollButtonLabel }} grátis</button>
+          <button v-if="canOfferMasterBallChoice" class="btn-secondary" @click="startMasterBallChoice()">🟣 Usar Master Ball</button>
         </template>
         <template v-else-if="canRollPendingCapture && isLegendaryCapture">
           <button class="btn-primary" :disabled="(me?.pokeballs ?? 0) < 2" @click="store.actions.rollCaptureDice(false)">🎲 {{ captureRollButtonLabel }} (2 Pokébolas)</button>
           <button class="btn-secondary" :disabled="(me?.full_restores ?? 0) <= 0" @click="store.actions.rollCaptureDice(true)">🎲 {{ captureRollButtonLabel }} usando Full Restore</button>
+          <button v-if="canOfferMasterBallChoice" class="btn-secondary" @click="startMasterBallChoice()">🟣 Usar Master Ball</button>
         </template>
         <template v-else-if="canRollPendingCapture">
           <button class="btn-primary" @click="store.actions.rollCaptureDice()">🎲 {{ captureRollButtonLabel }}</button>
+          <button v-if="canOfferMasterBallChoice" class="btn-secondary" @click="startMasterBallChoice()">🟣 Usar Master Ball</button>
         </template>
         <button v-if="canSkipPendingCapture" class="btn-ghost" @click="store.actions.skipAction()">{{ safariRemaining > 0 ? 'Pular este Pokémon' : 'Pular' }}</button>
       </template>
@@ -66,6 +118,30 @@
             @click="store.actions.useItem(item.key)"
           >
             🧰 {{ item.label }}<span class="duel-stats">x{{ item.quantity }}</span>
+          </button>
+        </div>
+        <div v-if="rollPhaseAbilityActions.length" class="item-shortcuts ability-shortcuts">
+          <div class="hint">Habilidades disponíveis:</div>
+          <button
+            v-for="action in rollPhaseAbilityActions"
+            :key="action.key"
+            class="btn-secondary duel-btn"
+            @click="store.actions.useAbility({ slotKey: action.slotKey, abilityId: action.abilityId, actionId: action.actionId })"
+          >
+            ✨ {{ action.pokemonName }} · {{ action.label }}
+            <span class="duel-stats" v-if="action.hasCharges">{{ action.chargesRemaining }}/{{ action.chargesTotal }}</span>
+          </button>
+        </div>
+        <div v-if="healAbilityActions.length" class="item-shortcuts ability-shortcuts">
+          <div class="hint">Habilidades disponíveis:</div>
+          <button
+            v-for="action in healAbilityActions"
+            :key="action.key"
+            class="btn-secondary duel-btn"
+            @click="store.actions.useAbility({ slotKey: action.slotKey, abilityId: action.abilityId, actionId: action.actionId })"
+          >
+            💊 {{ action.pokemonName }} · {{ action.label }}
+            <span class="duel-stats" v-if="action.hasCharges">{{ action.chargesRemaining }}/{{ action.chargesTotal }}</span>
           </button>
         </div>
         <button class="btn-primary roll-btn" @click="store.actions.rollDice()">🎲 Rolar Dado</button>
@@ -84,6 +160,18 @@
               <strong>{{ pendingPokemon.ability }}</strong>
             </div>
             <div v-if="safariRemaining > 0" class="safari-info">+{{ safariRemaining }} Pokémon na fila</div>
+          </div>
+          <div v-if="captureAbilityActions.length" class="item-shortcuts ability-shortcuts">
+            <div class="hint">Habilidades disponíveis:</div>
+            <button
+              v-for="action in captureAbilityActions"
+              :key="action.key"
+              class="btn-secondary duel-btn"
+              @click="store.actions.useAbility({ slotKey: action.slotKey, abilityId: action.abilityId, actionId: action.actionId })"
+            >
+              ✨ {{ action.pokemonName }} · {{ action.label }}
+              <span class="duel-stats" v-if="action.hasCharges">{{ action.chargesRemaining }}/{{ action.chargesTotal }}</span>
+            </button>
           </div>
           <template v-if="isFreeCapture">
             <button class="btn-accent" @click="store.actions.rollCaptureDice()">🆓 Captura Gratuita!</button>
@@ -111,6 +199,18 @@
           <button class="btn-ghost" @click="store.actions.skipAction()">Pular Duelo</button>
         </template>
         <template v-else>
+          <div v-if="healAbilityActions.length" class="item-shortcuts ability-shortcuts">
+            <div class="hint">Habilidades disponíveis:</div>
+            <button
+              v-for="action in healAbilityActions"
+              :key="action.key"
+              class="btn-secondary duel-btn"
+              @click="store.actions.useAbility({ slotKey: action.slotKey, abilityId: action.abilityId, actionId: action.actionId })"
+            >
+              💊 {{ action.pokemonName }} · {{ action.label }}
+              <span class="duel-stats" v-if="action.hasCharges">{{ action.chargesRemaining }}/{{ action.chargesTotal }}</span>
+            </button>
+          </div>
           <button class="btn-ghost" @click="store.actions.skipAction()">Encerrar Turno</button>
         </template>
       </template>
@@ -222,26 +322,11 @@
         <span class="log-player">{{ entry.player }}</span>: {{ entry.message }}
       </div>
     </div>
-    <div v-if="isDev && me" class="debug-panel">
-      <div class="phase-label">Debug de Itens</div>
-      <select v-model="debugItemKey" class="debug-select">
-        <option v-for="item in debugItemOptions" :key="item.key" :value="item.key">
-          {{ item.label }}
-        </option>
-      </select>
-      <input v-model.number="debugQuantity" class="debug-input" type="number" min="1" max="9" />
-      <button class="btn-secondary" @click="store.actions.debugAddItem(debugItemKey, debugQuantity || 1)">
-        Adicionar item
-      </button>
-      <button class="btn-secondary" :disabled="!canTriggerCurrentTileDebug" @click="store.actions.debugTriggerCurrentTile()">
-        Executar efeito do tile atual
-      </button>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import gameActions from '@/constants/gameActions'
 import { useGameStore } from '@/stores/gameStore'
 
@@ -280,12 +365,6 @@ const hasBlockingTurnInteraction = computed(() =>
   || !!pendingItemChoice.value
   || !!pendingReleaseChoice.value
 )
-const canTriggerCurrentTileDebug = computed(() =>
-  isMyTurn.value
-  && phase.value !== 'select_starter'
-  && !hasBlockingTurnInteraction.value
-)
-
 const captureContext     = computed(() => turn.value?.capture_context ?? null)
 const isFreeCapture      = computed(() => !!turn.value?.compound_eyes_active)
 const isLegendaryCapture = computed(() => !!turn.value?.seafoam_legendary || captureContext.value === 'power_plant')
@@ -293,11 +372,52 @@ const isDuelTile         = computed(() => currentTile.value?.type === 'duel')
 const safariRemaining    = computed(() => (turn.value?.pending_safari ?? []).length)
 const otherActivePlayers = computed(() => players.value.filter(p => p.id !== store.playerId && p.is_active))
 const inventoryItems = computed(() => me.value?.items ?? [])
+const pokemonAbilityActions = computed(() =>
+  (me.value?.pokemon_inventory ?? []).flatMap((pokemon) =>
+    (pokemon.abilities ?? []).flatMap((ability) =>
+      (ability.actions ?? [])
+        .filter(action => action.can_activate_now)
+        .map(action => ({
+          key: `${pokemon.slot_key ?? pokemon.id}-${ability.id}-${action.action_id}`,
+          slotKey: pokemon.slot_key,
+          pokemonName: pokemon.name,
+          abilityId: ability.id,
+          abilityName: ability.name,
+          actionId: action.action_id,
+          effectKind: action.effect_kind,
+          label: action.label,
+          hasCharges: ability.has_charges,
+          chargesRemaining: ability.charges_remaining,
+          chargesTotal: ability.charges_total,
+        })),
+    ),
+  ),
+)
+const rollPhaseAbilityActions = computed(() =>
+  pokemonAbilityActions.value.filter(action => action.effectKind === 'fixed_move')
+)
+const captureAbilityActions = computed(() =>
+  pokemonAbilityActions.value.filter(action => action.effectKind === 'capture_free_next')
+)
+const healAbilityActions = computed(() =>
+  pokemonAbilityActions.value.filter(action => action.effectKind === 'heal_other')
+)
 const pendingCaptureRolls = computed(() => (pendingAction.value?.type === 'capture_attempt' ? (pendingAction.value?.capture_rolls ?? []) : []))
+const pendingMasterBallInUse = computed(() => pendingAction.value?.type === 'capture_attempt' && !!pendingAction.value?.master_ball_in_use)
 const captureRollButtonLabel = computed(() =>
   pendingAction.value?.type === 'capture_attempt' && pendingAction.value?.requires_additional_roll
     ? 'Rolar novamente o dado de captura'
     : 'Rolar dado de captura'
+)
+const masterBallQuantity = computed(() =>
+  inventoryItems.value.find(item => item.key === 'master_ball')?.quantity ?? 0
+)
+const canOfferMasterBallChoice = computed(() =>
+  canRollPendingCapture.value
+  && masterBallQuantity.value > 0
+  && pendingAction.value?.type === 'capture_attempt'
+  && !pendingMasterBallInUse.value
+  && pendingCaptureRolls.value.length === 0
 )
 const pendingReleaseOptions = computed(() => {
   if (Array.isArray(pendingReleaseChoice.value?.options) && pendingReleaseChoice.value.options.length > 0) {
@@ -316,20 +436,9 @@ const releaseChoiceCancelLabel = computed(() =>
     ? 'Recusar este Pokémon'
     : 'Cancelar captura'
 )
-const isDev = import.meta.env.DEV
-const debugItemOptions = [
-  { key: 'bill', label: 'Bill' },
-  { key: 'full_restore', label: 'Full Restore' },
-  { key: 'gust_of_wind', label: 'Gust of Wind' },
-  { key: 'pluspower', label: 'PlusPower' },
-  { key: 'prof_oak', label: 'Prof. Oak' },
-  { key: 'miracle_stone', label: 'Miracle Stone' },
-  { key: 'gold_nugget', label: 'Gold Nugget' },
-  { key: 'master_ball', label: 'Master Ball' },
-  { key: 'master_points_nugget', label: 'Master Points Nugget' },
-]
-const debugItemKey = ref('bill')
-const debugQuantity = ref(1)
+const choosingMasterBall = ref(false)
+const selectedMasterBallRoll = ref(null)
+const masterBallRollOptions = [1, 2, 3, 4, 5, 6]
 
 const NEGATIVE_EVENT_CATEGORIES = new Set(['event', 'team_rocket'])
 const isNegativeEvent = computed(() => {
@@ -415,12 +524,18 @@ const PHASE_LABELS = {
 }
 const phaseLabel = computed(() => PHASE_LABELS[phase.value] ?? phase.value)
 const pendingChoiceTitle = computed(() => {
+  if (pendingAction.value?.type === 'ability_decision') return '✨ Habilidade de Pokémon'
+  if (pendingAction.value?.type === 'heal_other_choice') return '💊 Curar Pokémon'
+  if (pendingAction.value?.type === 'capture_choice_decision') return '✨ Habilidade de Captura'
+  if (pendingAction.value?.type === 'capture_reroll_decision') return '✨ Rerrolar Captura'
+  if (pendingAction.value?.type === 'battle_reroll_decision') return '✨ Rerrolar Batalha'
   if (pendingAction.value?.type === 'gym_heal') return '🏆 Cura pós-ginásio'
   if (pendingAction.value?.type === 'pokecenter_heal') {
     if (pendingAction.value?.center_tile_name === 'Pallet Town') return '🏡 Cura em Pallet Town'
     if (['returned', 'remained'].includes(pendingAction.value?.visit_kind)) return '🏥 Cura de Retorno'
     return '🏥 Cura de PokéCenter'
   }
+  if (pendingAction.value?.type === 'pokemart_roll') return '🛒 Poké-Mart'
   if (pendingAction.value?.type === 'miracle_stone_tile') return '💎 Miracle Stone'
   if (pendingAction.value?.type === 'bill_teleport') return "🧾 It's Bill!"
   if (pendingAction.value?.type === 'game_corner') return '🎰 Game Corner'
@@ -445,6 +560,13 @@ const waitingActionDescription = computed(() => {
   if (pendingAction.value.type === 'pokecenter_heal') {
     const place = pendingAction.value.center_tile_name ?? 'o ponto seguro'
     return `Aguardando ${owner} concluir a cura em ${place} antes do turno continuar.`
+  }
+  if (pendingAction.value.type === 'pokemart_roll') {
+    const place = pendingAction.value.source_name ?? 'o Poké-Mart'
+    if (pendingAction.value.pokemart_phase === 'reroll') {
+      return `Aguardando ${owner} concluir o reroll do Poké-Mart em ${place}.`
+    }
+    return `Aguardando ${owner} rolar o dado do Poké-Mart em ${place}.`
   }
   if (pendingAction.value.type === 'capture_attempt') {
     return `Aguardando ${owner} resolver a captura pendente.`
@@ -512,6 +634,49 @@ function playerHasAvailablePokemon(player) {
   }
   return team.length > 0
 }
+
+function startMasterBallChoice() {
+  choosingMasterBall.value = true
+  selectedMasterBallRoll.value = null
+}
+
+function cancelMasterBallChoice() {
+  choosingMasterBall.value = false
+  selectedMasterBallRoll.value = null
+}
+
+function confirmMasterBallChoice() {
+  if (selectedMasterBallRoll.value == null) return
+  store.actions.rollCaptureDice({
+    useMasterBall: true,
+    chosenCaptureRoll: selectedMasterBallRoll.value,
+  })
+  cancelMasterBallChoice()
+}
+
+watch(
+  () => ({
+    type: pendingAction.value?.type ?? null,
+    phase: phase.value,
+    isMyTurn: isMyTurn.value,
+    captureRollCount: pendingCaptureRolls.value.length,
+    masterBallInUse: pendingMasterBallInUse.value,
+    masterBallQuantity: masterBallQuantity.value,
+  }),
+  (snapshot) => {
+    const shouldReset = (
+      snapshot.type !== 'capture_attempt'
+      || snapshot.phase !== 'action'
+      || !snapshot.isMyTurn
+      || snapshot.captureRollCount > 0
+      || snapshot.masterBallInUse
+      || snapshot.masterBallQuantity <= 0
+    )
+    if (shouldReset) {
+      cancelMasterBallChoice()
+    }
+  },
+)
 </script>
 
 <style scoped>
@@ -547,18 +712,14 @@ button { width:100%; }
 .hint { font-size:.78rem; color:var(--color-text-muted); text-align:center; }
 .battle-hint { color:var(--color-primary); }
 .item-shortcuts { display:flex; flex-direction:column; gap:.4rem; }
+.ability-shortcuts {
+  padding: .45rem;
+  border: 1px solid rgba(255, 224, 102, .16);
+  border-radius: 10px;
+  background: rgba(255, 224, 102, .05);
+}
 .roll-btn { font-size:1rem; padding:.75rem; }
 .mini-log { border-top:1px solid rgba(255,255,255,.07); padding-top:.35rem; display:flex; flex-direction:column; gap:.18rem; max-height:100px; overflow-y:auto; }
 .log-entry { font-size:.68rem; color:var(--color-text-muted); line-height:1.3; }
 .log-player { color:var(--color-accent); font-weight:600; }
-.debug-panel { display:flex; flex-direction:column; gap:.45rem; padding-top:.35rem; border-top:1px solid rgba(255,255,255,.08); }
-.debug-select,
-.debug-input {
-  width:100%;
-  background:rgba(255,255,255,.05);
-  color:var(--color-text);
-  border:1px solid rgba(255,255,255,.1);
-  border-radius:8px;
-  padding:.45rem .55rem;
-}
 </style>

@@ -30,9 +30,20 @@ export const useGameStore = defineStore('game', () => {
 
   const turn = computed(() => gameState.value?.turn ?? {})
 
-  const debugVisual = computed(() => gameState.value?.debug_visual ?? { enabled: false, session_state: null })
+  const debugVisual = computed(() => gameState.value?.debug_visual ?? {
+    enabled: false,
+    session_state: null,
+    host_tools: { enabled: false, pending_tile_trigger: null, item_catalog: [], pokemon_catalog: [] },
+  })
 
   const debugSession = computed(() => debugVisual.value?.session_state ?? null)
+  const hostTools = computed(() => debugVisual.value?.host_tools ?? {
+    enabled: false,
+    pending_tile_trigger: null,
+    item_catalog: [],
+    pokemon_catalog: [],
+  })
+  const hostToolsEnabled = computed(() => !!hostTools.value?.enabled)
 
   const debugTestPlayer = computed(() =>
     debugSession.value?.players?.find(player => player.is_test_player) ?? debugSession.value?.players?.[0] ?? null
@@ -244,9 +255,19 @@ export const useGameStore = defineStore('game', () => {
         }
         return `Dado de ${rollType}: ${e.result}`
       },
-      pokemon_captured:    (e) => `Capturou ${e.result?.pokemon?.name ?? 'Pokémon'}!`,
+      pokemon_captured:    (e) => {
+        const pokemonName = e.result?.pokemon?.name ?? 'Pokémon'
+        if (e.result?.master_ball_consumed) {
+          return `Capturou ${pokemonName} usando Master Ball!`
+        }
+        return `Capturou ${pokemonName}!`
+      },
       capture_roll_resolved: (e) => {
+        if (e.result?.requires_additional_roll && e.result?.used_master_ball) {
+          return 'Master Ball definiu a primeira rolagem. Role o dado de captura novamente'
+        }
         if (e.result?.requires_additional_roll) return 'Captura: role o dado novamente'
+        if (e.result?.master_ball_preserved) return 'Captura falhou; a Master Ball foi preservada'
         return e.result?.success === false ? 'Captura falhou' : 'Rolagem de captura resolvida'
       },
       battle_resolved:     (e) => formatBattleResolvedMessage(e),
@@ -255,7 +276,12 @@ export const useGameStore = defineStore('game', () => {
       duel_started:        () => 'Duelo iniciado!',
       action_skipped:      () => 'Ação pulada',
       event_resolved:      () => 'Evento resolvido!',
-      ability_used:        () => 'Habilidade usada!',
+      ability_used:        (e) => {
+        if (e.result?.pokemon && e.result?.ability_name) {
+          return `${e.result.pokemon} usou ${e.result.ability_name}`
+        }
+        return 'Habilidade usada!'
+      },
       item_discarded:      () => 'Item descartado',
       item_used:           (e) => {
         if (e.item_key === 'full_restore' && e.result?.pokemon) {
@@ -265,6 +291,18 @@ export const useGameStore = defineStore('game', () => {
       },
       pokemon_released:    () => 'Pokémon liberado para abrir espaço',
       pending_action_resolved: (e) => {
+        if (e.result?.type === 'pokemart_roll') {
+          if (e.result?.requires_additional_roll) {
+            return `Poké-Mart: tirou ${e.result.roll ?? '?'}. Role novamente`
+          }
+          if (e.result?.reward_label) {
+            const rolls = Array.isArray(e.result.rolls) && e.result.rolls.length
+              ? e.result.rolls.join(' → ')
+              : (e.result.roll ?? '?')
+            return `Poké-Mart: ${rolls}. Recebeu ${e.result.reward_label}`
+          }
+          return 'Poké-Mart resolvido'
+        }
         if (e.result?.type === 'pokecenter_heal') {
           const healedCount = e.result.healed_slots?.length ?? 0
           return healedCount > 0
@@ -284,9 +322,21 @@ export const useGameStore = defineStore('game', () => {
         if (e.result?.type === 'teleporter_manual_roll') {
           return `Teleporter: dado escolhido ${e.result.dice_result}`
         }
+        if (e.result?.type === 'ability_decision') {
+          if (e.result?.awaiting_follow_up) {
+            return `Habilidade aplicada. Novo dado: ${e.result.final_roll}`
+          }
+          if (e.result?.used) {
+            return `Habilidade aplicada. Movimento final: ${e.result.final_roll}`
+          }
+          return `Sem habilidade. Movimento: ${e.result?.final_roll ?? '?'}`
+        }
         return 'Escolha resolvida'
       },
       debug_item_added:    () => 'Item de debug adicionado',
+      debug_host_tools_toggled: (e) => e.enabled ? 'Host Tools habilitado' : 'Host Tools desabilitado',
+      debug_host_moved: (e) => `Host moveu ${e.result?.steps ?? e.steps ?? 0} casa(s) em debug`,
+      debug_host_pokemon_added: (e) => `Host recebeu ${e.result?.pokemon?.name ?? e.pokemon_name ?? 'um Pokémon'}`,
       debug_tile_triggered: () => 'Efeito do tile executado',
       debug_test_player_toggled: (e) => e.enabled ? 'Player de teste habilitado' : 'Player de teste desabilitado',
       debug_test_player_pokemon_added: (e) => `Player de teste recebeu ${e.result?.pokemon?.name ?? e.pokemon_name ?? 'um Pokémon'}`,
@@ -308,8 +358,26 @@ export const useGameStore = defineStore('game', () => {
     startGame:        ()                          => send(gameActions.startGame),
     selectStarter:    (id)                        => send(gameActions.selectStarter, { starter_id: id }),
     rollDice:         ()                          => send(gameActions.rollDice),
-    capturePokemon:   (useFullRestore = false)    => send(gameActions.capturePokemon, { use_full_restore: useFullRestore }),
-    rollCaptureDice:  (useFullRestore = false)    => send(gameActions.rollCaptureDice, { use_full_restore: useFullRestore }),
+    capturePokemon:   (payload = false)           => {
+      const normalized = typeof payload === 'object' && payload !== null
+        ? payload
+        : { useFullRestore: !!payload }
+      send(gameActions.capturePokemon, {
+        use_full_restore: !!normalized.useFullRestore,
+        use_master_ball: !!normalized.useMasterBall,
+        chosen_capture_roll: normalized.chosenCaptureRoll ?? null,
+      })
+    },
+    rollCaptureDice:  (payload = false)           => {
+      const normalized = typeof payload === 'object' && payload !== null
+        ? payload
+        : { useFullRestore: !!payload }
+      send(gameActions.rollCaptureDice, {
+        use_full_restore: !!normalized.useFullRestore,
+        use_master_ball: !!normalized.useMasterBall,
+        chosen_capture_roll: normalized.chosenCaptureRoll ?? null,
+      })
+    },
     skipAction:       ()                          => send(gameActions.skipAction),
     passTurn:         ()                          => send(gameActions.passTurn),
     challengePlayer:  (targetId)                  => send(gameActions.challengePlayer, { target_player_id: targetId }),
@@ -329,6 +397,11 @@ export const useGameStore = defineStore('game', () => {
     ),
     useItem:          (itemKey, payload = {})     => send(gameActions.useItem, { item_key: itemKey, ...payload }),
     debugAddItem:     (itemKey, quantity = 1)     => send(gameActions.debugAddItem, { item_key: itemKey, quantity }),
+    debugToggleHostTools: (enabled)               => send(gameActions.debugToggleHostTools, { enabled }),
+    debugMoveHost: (steps)                        => send(gameActions.debugMoveHost, { steps }),
+    debugAddPokemonToHost: (pokemonName)          => send(gameActions.debugAddPokemonToHost, { pokemon_name: pokemonName }),
+    debugAddItemToHost: (itemKey, quantity = 1)   => send(gameActions.debugAddItem, { item_key: itemKey, quantity }),
+    debugTriggerHostTile: ()                      => send(gameActions.debugTriggerCurrentTile),
     debugAddPokemonToTestPlayer: (pokemonName)    => send(gameActions.debugAddPokemonToTestPlayer, { pokemon_name: pokemonName }),
     debugTriggerCurrentTile: ()                   => send(gameActions.debugTriggerCurrentTile),
     debugToggleTestPlayer: (enabled)              => send(gameActions.debugToggleTestPlayer, { enabled }),
@@ -343,8 +416,17 @@ export const useGameStore = defineStore('game', () => {
     debugDuelRollBattle: ()                                 => send(gameActions.debugDuelRollBattle),
     debugResolvePendingActionForTestPlayer: (optionId)      => send(gameActions.debugResolvePendingActionForTestPlayer, { option_id: optionId }),
     dismissRevealedCard: ()                        => send(gameActions.dismissRevealedCard),
-    useAbility:       (abilityAction, targetId, targetPosition) =>
-      send(gameActions.useAbility, { ability_action: abilityAction, target_id: targetId, target_position: targetPosition }),
+    useAbility:       (abilityAction, targetId, targetPosition) => {
+      if (typeof abilityAction === 'object' && abilityAction !== null) {
+        send(gameActions.useAbility, {
+          slot_key: abilityAction.slotKey,
+          ability_id: abilityAction.abilityId,
+          action_id: abilityAction.actionId,
+        })
+        return
+      }
+      send(gameActions.useAbility, { ability_action: abilityAction, target_id: targetId, target_position: targetPosition })
+    },
     saveState:        ()                          => send(gameActions.saveState),
     restoreState:     (state)                     => send(gameActions.restoreState, { state }),
   }
@@ -368,7 +450,7 @@ export const useGameStore = defineStore('game', () => {
     wsStatus, lastEvent, errorMsg, notification,
     // computed
     me, players, allPlayers, status, turn, isMyTurn, isHost, currentPlayer, phase,
-    finalScores, board, debugVisual, debugSession, debugTestPlayer, debugTurn, debugLog, debugRevealedCard,
+    finalScores, board, debugVisual, debugSession, debugTestPlayer, debugTurn, debugLog, debugRevealedCard, hostTools, hostToolsEnabled,
     // methods
     createRoom, fetchRoom, deleteRoom,
     connect, disconnect, send, handleMessage,

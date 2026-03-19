@@ -89,6 +89,12 @@
                     >
                       {{ group.pokemon.knocked_out ? 'KO' : 'OK' }}
                     </span>
+                    <span
+                      v-if="primaryAbility(group.pokemon)?.has_charges"
+                      class="pokemon-card-state pokemon-card-state--charge"
+                    >
+                      {{ primaryAbility(group.pokemon).charges_remaining }}/{{ primaryAbility(group.pokemon).charges_total }}
+                    </span>
                   </div>
                   <div class="pokemon-hover-card">
                     <img
@@ -105,6 +111,16 @@
                       >
                         {{ group.pokemon.knocked_out ? 'Nocauteado' : 'Disponivel' }}
                       </span>
+                    </div>
+                    <div v-if="primaryAbility(group.pokemon)" class="pokemon-hover-ability">
+                      <div class="pokemon-hover-ability-name">{{ primaryAbility(group.pokemon).name }}</div>
+                      <p class="pokemon-hover-ability-desc">{{ primaryAbility(group.pokemon).description }}</p>
+                      <div class="pokemon-hover-ability-meta">
+                        <span v-if="primaryAbility(group.pokemon).has_charges">
+                          Cargas: {{ primaryAbility(group.pokemon).charges_remaining }}/{{ primaryAbility(group.pokemon).charges_total }}
+                        </span>
+                        <span>{{ abilityAvailabilityLabel(group.pokemon) }}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -247,6 +263,20 @@ function pokemonKey(pokemon, index = 0) {
 
 function itemDescription(item) {
   return ITEM_DESCRIPTIONS[item.key] ?? 'Carta de item exibida no inventario.'
+}
+
+function primaryAbility(pokemon) {
+  return pokemon?.abilities?.[0] ?? pokemon?.ability_status ?? null
+}
+
+function abilityAvailabilityLabel(pokemon) {
+  const ability = primaryAbility(pokemon)
+  if (!ability) return 'Sem habilidade mapeada'
+  if (ability.awaiting_decision) return 'Aguardando decisão'
+  if (ability.is_spent) return 'Sem cargas restantes'
+  if (ability.disabled_reason) return ability.disabled_reason
+  if (ability.can_activate_now) return 'Disponível agora'
+  return 'Ativa automaticamente ou fora do contexto atual'
 }
 </script>
 
@@ -498,6 +528,11 @@ h3 {
   color: #d7eeff;
 }
 
+.pokemon-card-state--charge {
+  background: rgba(255, 224, 102, 0.9);
+  color: #1b2130;
+}
+
 .pokemon-card-state--ko {
   background: rgba(147, 25, 25, 0.9);
   color: #ffe2e2;
@@ -552,6 +587,34 @@ h3 {
 .pokemon-hover-status--ko {
   background: rgba(147, 25, 25, 0.26);
   color: #ffbcbc;
+}
+
+.pokemon-hover-ability {
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.pokemon-hover-ability-name {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #fff3bf;
+}
+
+.pokemon-hover-ability-desc {
+  margin: 0.2rem 0 0;
+  font-size: 0.69rem;
+  line-height: 1.35;
+  color: #dbe9ff;
+}
+
+.pokemon-hover-ability-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  margin-top: 0.35rem;
+  font-size: 0.64rem;
+  color: #9ec7ff;
 }
 
 .pokemon-slot-card:hover .pokemon-card-image {

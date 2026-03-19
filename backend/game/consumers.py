@@ -199,7 +199,10 @@ class GameConsumer(AsyncWebsocketConsumer):
             return
 
         rolled_state, roll_entry = game_state.perform_movement_roll(state, self.player_id)
-        new_state = game_state.process_move(rolled_state, self.player_id, int(roll_entry['final_result']))
+        if (rolled_state.get('turn', {}).get('pending_action') or {}).get('type') == 'ability_decision':
+            new_state = rolled_state
+        else:
+            new_state = game_state.process_move(rolled_state, self.player_id, int(roll_entry['final_result']))
         saved_state = await self.save_game_state(new_state)
         await self.broadcast_state(saved_state, {
             'type': 'dice_rolled',
@@ -258,7 +261,15 @@ class GameConsumer(AsyncWebsocketConsumer):
             return
 
         use_full_restore = bool(data.get('use_full_restore', False))
-        new_state, result = game_state.roll_capture_attempt(state, self.player_id, use_full_restore=use_full_restore)
+        use_master_ball = bool(data.get('use_master_ball', False))
+        chosen_capture_roll = data.get('chosen_capture_roll')
+        new_state, result = game_state.roll_capture_attempt(
+            state,
+            self.player_id,
+            use_full_restore=use_full_restore,
+            use_master_ball=use_master_ball,
+            chosen_capture_roll=chosen_capture_roll,
+        )
         if new_state is None:
             await self.send_error(result)
             return
@@ -422,14 +433,26 @@ class GameConsumer(AsyncWebsocketConsumer):
         ability_action = (data.get('ability_action') or '').strip().lower()
         target_id = data.get('target_id')
         target_position = data.get('target_position')
+        slot_key = data.get('slot_key')
+        ability_id = data.get('ability_id')
+        action_id = data.get('action_id')
 
-        new_state, result = game_state.use_ability(
-            state,
-            self.player_id,
-            ability_action,
-            target_id=target_id,
-            target_position=target_position,
-        )
+        if slot_key or ability_id or action_id:
+            new_state, result = game_state.use_pokemon_ability(
+                state,
+                self.player_id,
+                slot_key=slot_key,
+                ability_id=ability_id,
+                action_id=action_id,
+            )
+        else:
+            new_state, result = game_state.use_ability(
+                state,
+                self.player_id,
+                ability_action,
+                target_id=target_id,
+                target_position=target_position,
+            )
         if new_state is None:
             await self.send_error(result)
             return
@@ -461,14 +484,15 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.broadcast_state(saved_state, event)
 
     async def handle_debug_add_item(self, data):
-        if not settings.DEBUG:
-            await self.send_error('Debug de itens só está disponível em ambiente de desenvolvimento')
+        state = await self.get_game_state()
+        debug_error = self._get_debug_access_error(state, require_host_tools=True)
+        if debug_error:
+            await self.send_error(debug_error)
             return
 
-        state = await self.get_game_state()
         item_key = (data.get('item_key') or '').strip()
         quantity = int(data.get('quantity', 1))
-        new_state, result = game_state.debug_add_item(state, self.player_id, item_key, quantity)
+        new_state, result = game_state.debug_add_item_to_host(state, self.player_id, item_key, quantity)
         if new_state is None:
             await self.send_error(result)
             return
@@ -482,9 +506,48 @@ class GameConsumer(AsyncWebsocketConsumer):
             'result': result,
         })
 
-    async def handle_debug_add_pokemon_to_test_player(self, data):
-        if not settings.DEBUG:
-            await self.send_error('Player de teste visual só está disponível em ambiente de desenvolvimento')
+    async def handle_debug_toggle_host_tools(self, data):
+        state = await self.get_game_state()
+        debug_error = self._get_debug_access_error(state)
+        if debug_error:
+            await self.send_error(debug_error)
+            return
+
+        enabled = bool(data.get('enabled', False))
+        new_state, result = game_state.set_host_tools_enabled(state, enabled)
+        if new_state is None:
+            await self.send_error(result)
+            return
+
+        saved_state = await self.save_game_state(new_state)
+        await self.broadcast_state(saved_state, {'type': 'debug_host_tools_toggled', 'enabled': enabled, 'result': result})
+
+    async def handle_debug_move_host(self, data):
+        state = await self.get_game_state()
+        debug_error = self._get_debug_access_error(state, require_host_tools=True)
+        if debug_error:
+            await self.send_error(debug_error)
+            return
+
+        try:
+            steps = self._parse_non_zero_int(data.get('steps'), 'steps')
+        except ValueError as exc:
+            await self.send_error(str(exc))
+            return
+
+        new_state, result = game_state.debug_move_host(state, self.player_id, steps)
+        if new_state is None:
+            await self.send_error(result)
+            return
+
+        saved_state = await self.save_game_state(new_state)
+        await self.broadcast_state(saved_state, {'type': 'debug_host_moved', 'steps': steps, 'result': result})
+
+    async def handle_debug_add_pokemon_to_host(self, data):
+        state = await self.get_game_state()
+        debug_error = self._get_debug_access_error(state, require_host_tools=True)
+        if debug_error:
+            await self.send_error(debug_error)
             return
 
         pokemon_name = (data.get('pokemon_name') or '').strip()
@@ -492,7 +555,30 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.send_error('pokemon_name é obrigatório')
             return
 
+        new_state, result = game_state.debug_add_pokemon_to_host(state, self.player_id, pokemon_name)
+        if new_state is None:
+            await self.send_error(result)
+            return
+
+        saved_state = await self.save_game_state(new_state)
+        await self.broadcast_state(saved_state, {
+            'type': 'debug_host_pokemon_added',
+            'pokemon_name': pokemon_name,
+            'result': result,
+        })
+
+    async def handle_debug_add_pokemon_to_test_player(self, data):
         state = await self.get_game_state()
+        debug_error = self._get_debug_access_error(state)
+        if debug_error:
+            await self.send_error(debug_error)
+            return
+
+        pokemon_name = (data.get('pokemon_name') or '').strip()
+        if not pokemon_name:
+            await self.send_error('pokemon_name é obrigatório')
+            return
+
         new_state, result = game_state.debug_add_pokemon_to_test_player(state, pokemon_name)
         if new_state is None:
             await self.send_error(result)
@@ -506,12 +592,13 @@ class GameConsumer(AsyncWebsocketConsumer):
         })
 
     async def handle_debug_trigger_current_tile(self, data):
-        if not settings.DEBUG:
-            await self.send_error('Debug de tile só está disponível em ambiente de desenvolvimento')
+        state = await self.get_game_state()
+        debug_error = self._get_debug_access_error(state, require_host_tools=True)
+        if debug_error:
+            await self.send_error(debug_error)
             return
 
-        state = await self.get_game_state()
-        new_state, result = game_state.trigger_current_tile_effect(state, self.player_id, source='debug')
+        new_state, result = game_state.debug_trigger_host_current_tile(state, self.player_id)
         if new_state is None:
             await self.send_error(result)
             return
@@ -520,11 +607,12 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.broadcast_state(saved_state, {'type': 'debug_tile_triggered', 'player_id': self.player_id, 'result': result})
 
     async def handle_debug_toggle_test_player(self, data):
-        if not settings.DEBUG:
-            await self.send_error('Player de teste visual só está disponível em ambiente de desenvolvimento')
+        state = await self.get_game_state()
+        debug_error = self._get_debug_access_error(state)
+        if debug_error:
+            await self.send_error(debug_error)
             return
 
-        state = await self.get_game_state()
         enabled = bool(data.get('enabled', False))
         new_state, result = game_state.set_debug_test_player_enabled(state, enabled)
         if new_state is None:
@@ -535,8 +623,10 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.broadcast_state(saved_state, {'type': 'debug_test_player_toggled', 'enabled': enabled, 'result': result})
 
     async def handle_debug_move_test_player(self, data):
-        if not settings.DEBUG:
-            await self.send_error('Player de teste visual só está disponível em ambiente de desenvolvimento')
+        state = await self.get_game_state()
+        debug_error = self._get_debug_access_error(state)
+        if debug_error:
+            await self.send_error(debug_error)
             return
 
         try:
@@ -545,7 +635,6 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.send_error(str(exc))
             return
 
-        state = await self.get_game_state()
         new_state, result = game_state.move_debug_test_player(state, steps)
         if new_state is None:
             await self.send_error(result)
@@ -555,11 +644,12 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.broadcast_state(saved_state, {'type': 'debug_test_player_moved', 'steps': steps, 'result': result})
 
     async def handle_debug_roll_test_player(self, data):
-        if not settings.DEBUG:
-            await self.send_error('Player de teste visual só está disponível em ambiente de desenvolvimento')
+        state = await self.get_game_state()
+        debug_error = self._get_debug_access_error(state)
+        if debug_error:
+            await self.send_error(debug_error)
             return
 
-        state = await self.get_game_state()
         new_state, result = game_state.roll_debug_test_player(state)
         if new_state is None:
             await self.send_error(result)
@@ -569,11 +659,12 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.broadcast_state(saved_state, {'type': 'debug_test_player_rolled', 'result': result})
 
     async def handle_debug_trigger_test_player_tile(self, data):
-        if not settings.DEBUG:
-            await self.send_error('Player de teste visual só está disponível em ambiente de desenvolvimento')
+        state = await self.get_game_state()
+        debug_error = self._get_debug_access_error(state)
+        if debug_error:
+            await self.send_error(debug_error)
             return
 
-        state = await self.get_game_state()
         new_state, result = game_state.trigger_debug_test_player_tile(state)
         if new_state is None:
             await self.send_error(result)
@@ -583,12 +674,13 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.broadcast_state(saved_state, {'type': 'debug_test_player_tile_triggered', 'result': result})
 
     async def handle_debug_roll_capture_for_test_player(self, data):
-        if not settings.DEBUG:
-            await self.send_error('Player de teste visual só está disponível em ambiente de desenvolvimento')
+        state = await self.get_game_state()
+        debug_error = self._get_debug_access_error(state)
+        if debug_error:
+            await self.send_error(debug_error)
             return
 
         use_full_restore = bool(data.get('use_full_restore', False))
-        state = await self.get_game_state()
         new_state, result = game_state.debug_roll_capture_for_test_player(state, use_full_restore=use_full_restore)
         if new_state is None:
             await self.send_error(result)
@@ -599,12 +691,13 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.broadcast_state(saved_state, {'type': event_type, 'result': result})
 
     async def handle_debug_resolve_event_for_test_player(self, data):
-        if not settings.DEBUG:
-            await self.send_error('Player de teste visual só está disponível em ambiente de desenvolvimento')
+        state = await self.get_game_state()
+        debug_error = self._get_debug_access_error(state)
+        if debug_error:
+            await self.send_error(debug_error)
             return
 
         use_run_away = bool(data.get('use_run_away', False))
-        state = await self.get_game_state()
         new_state, result = game_state.debug_resolve_event_for_test_player(state, use_run_away=use_run_away)
         if new_state is None:
             await self.send_error(result)
@@ -614,11 +707,12 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.broadcast_state(saved_state, {'type': 'debug_test_player_event_resolved', 'result': result})
 
     async def handle_debug_skip_test_player_pending(self, data):
-        if not settings.DEBUG:
-            await self.send_error('Player de teste visual só está disponível em ambiente de desenvolvimento')
+        state = await self.get_game_state()
+        debug_error = self._get_debug_access_error(state)
+        if debug_error:
+            await self.send_error(debug_error)
             return
 
-        state = await self.get_game_state()
         new_state, result = game_state.debug_skip_test_player_pending(state)
         if new_state is None:
             await self.send_error(result)
@@ -628,8 +722,10 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.broadcast_state(saved_state, {'type': 'debug_test_player_pending_skipped', 'result': result})
 
     async def handle_debug_start_duel_with_player(self, data):
-        if not settings.DEBUG:
-            await self.send_error('Player de teste visual só está disponível em ambiente de desenvolvimento')
+        state = await self.get_game_state()
+        debug_error = self._get_debug_access_error(state)
+        if debug_error:
+            await self.send_error(debug_error)
             return
 
         target_player_id = (data.get('target_player_id') or '').strip()
@@ -637,7 +733,6 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.send_error('target_player_id é obrigatório')
             return
 
-        state = await self.get_game_state()
         new_state, result = game_state.debug_start_duel_with_player(state, target_player_id)
         if new_state is None:
             await self.send_error(result)
@@ -652,8 +747,10 @@ class GameConsumer(AsyncWebsocketConsumer):
         })
 
     async def handle_debug_duel_choose_pokemon(self, data):
-        if not settings.DEBUG:
-            await self.send_error('Player de teste visual só está disponível em ambiente de desenvolvimento')
+        state = await self.get_game_state()
+        debug_error = self._get_debug_access_error(state)
+        if debug_error:
+            await self.send_error(debug_error)
             return
 
         pokemon_slot_key = (data.get('pokemon_slot_key') or '').strip() or None
@@ -663,7 +760,6 @@ class GameConsumer(AsyncWebsocketConsumer):
         except (TypeError, ValueError):
             pokemon_index = 0
 
-        state = await self.get_game_state()
         new_state, result = game_state.debug_duel_choose_pokemon(
             state,
             pokemon_index,
@@ -680,11 +776,12 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.broadcast_state(saved_state, event)
 
     async def handle_debug_duel_roll_battle(self, data):
-        if not settings.DEBUG:
-            await self.send_error('Player de teste visual só está disponível em ambiente de desenvolvimento')
+        state = await self.get_game_state()
+        debug_error = self._get_debug_access_error(state)
+        if debug_error:
+            await self.send_error(debug_error)
             return
 
-        state = await self.get_game_state()
         new_state, result = game_state.debug_duel_roll_battle(state)
         if new_state is None:
             await self.send_error(result)
@@ -703,8 +800,10 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.broadcast_state(saved_state, event)
 
     async def handle_debug_resolve_pending_action_for_test_player(self, data):
-        if not settings.DEBUG:
-            await self.send_error('Player de teste visual só está disponível em ambiente de desenvolvimento')
+        state = await self.get_game_state()
+        debug_error = self._get_debug_access_error(state)
+        if debug_error:
+            await self.send_error(debug_error)
             return
 
         option_id = (data.get('option_id') or '').strip()
@@ -712,7 +811,6 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.send_error('option_id é obrigatório')
             return
 
-        state = await self.get_game_state()
         new_state, result = game_state.debug_resolve_pending_action_for_test_player(state, option_id)
         if new_state is None:
             await self.send_error(result)
@@ -852,7 +950,12 @@ class GameConsumer(AsyncWebsocketConsumer):
         if not self.player_id:
             return False
         player = next((p for p in state.get('players', []) if p['id'] == self.player_id), None)
-        return bool(player and player.get('is_host'))
+        if not player:
+            return False
+        if 'is_host' in player:
+            return bool(player.get('is_host'))
+        players = state.get('players', [])
+        return bool(players and players[0].get('id') == self.player_id)
 
     def _is_current_player(self, state):
         if not self.player_id:
@@ -874,6 +977,28 @@ class GameConsumer(AsyncWebsocketConsumer):
         if parsed <= 0:
             raise ValueError(f'{field_name} deve ser um inteiro positivo')
         return parsed
+
+    def _parse_non_zero_int(self, value, field_name: str) -> int:
+        if isinstance(value, bool):
+            raise ValueError(f'{field_name} deve ser um inteiro diferente de zero')
+        if isinstance(value, int):
+            parsed = value
+        elif isinstance(value, str) and re.fullmatch(r'[+-]?\d+', value.strip() or ''):
+            parsed = int(value.strip())
+        else:
+            raise ValueError(f'{field_name} deve ser um inteiro diferente de zero')
+        if parsed == 0:
+            raise ValueError(f'{field_name} deve ser um inteiro diferente de zero')
+        return parsed
+
+    def _get_debug_access_error(self, state, *, require_host_tools: bool = False):
+        if not settings.DEBUG:
+            return 'Ferramentas de debug só estão disponíveis em ambiente de desenvolvimento'
+        if not self._is_host(state):
+            return 'Apenas o host pode usar as ferramentas de debug'
+        if require_host_tools and not game_state.host_tools_enabled(state):
+            return 'O modo Host Tools está desabilitado'
+        return None
 
     @database_sync_to_async
     def room_exists(self):

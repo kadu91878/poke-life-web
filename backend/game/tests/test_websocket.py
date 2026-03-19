@@ -407,3 +407,94 @@ class DebugVisualWebSocketTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolution_event['type'], 'battle_resolved')
         self.assertIn('winner_id', resolution_event['result'])
         self.assertIsNone(holder['state']['turn'].get('battle'))
+
+
+class TestHostToolsWebsocket(unittest.IsolatedAsyncioTestCase):
+
+    def _host_tools_state(self):
+        state = build_initial_state('HOSTDBG')
+        state['players'] = [
+            {
+                'id': 'p1',
+                'name': 'Ash',
+                'is_host': True,
+                'is_active': True,
+                'is_connected': True,
+                'position': 0,
+                'pokeballs': 6,
+                'full_restores': 2,
+                'starter_pokemon': None,
+                'pokemon': [],
+                'capture_sequence_counter': 0,
+                'special_tile_flags': {'celadon_dept_store_bonus_claimed': False},
+                'items': {'pokeballs': 6, 'full_restores': 2},
+                'badges': [],
+                'master_points': 0,
+                'has_reached_league': False,
+                'color': 'red',
+            },
+            {
+                'id': 'p2',
+                'name': 'Misty',
+                'is_host': False,
+                'is_active': True,
+                'is_connected': True,
+                'position': 0,
+                'pokeballs': 6,
+                'full_restores': 2,
+                'starter_pokemon': None,
+                'pokemon': [],
+                'capture_sequence_counter': 0,
+                'special_tile_flags': {'celadon_dept_store_bonus_claimed': False},
+                'items': {'pokeballs': 6, 'full_restores': 2},
+                'badges': [],
+                'master_points': 0,
+                'has_reached_league': False,
+                'color': 'blue',
+            },
+        ]
+        state = engine.initialize_game(state)
+        state['turn']['current_player_id'] = 'p1'
+        state['turn']['phase'] = 'roll'
+        return state
+
+    async def test_host_can_toggle_host_tools(self):
+        consumer = _make_consumer(player_id='p1')
+        holder = _attach_state(consumer, self._host_tools_state())
+
+        with patch('game.consumers.settings.DEBUG', True):
+            await consumer.handle_debug_toggle_host_tools({'enabled': True})
+
+        self.assertTrue(holder['state']['debug_visual']['host_tools']['enabled'])
+        consumer.send_error.assert_not_called()
+        consumer.broadcast_state.assert_called()
+
+    async def test_second_player_cannot_toggle_host_tools(self):
+        consumer = _make_consumer(player_id='p2')
+        _attach_state(consumer, self._host_tools_state())
+
+        with patch('game.consumers.settings.DEBUG', True):
+            await consumer.handle_debug_toggle_host_tools({'enabled': True})
+
+        consumer.send_error.assert_called()
+        consumer.broadcast_state.assert_not_called()
+
+    async def test_second_player_cannot_use_host_debug_actions_even_if_mode_enabled(self):
+        consumer = _make_consumer(player_id='p2')
+        state = self._host_tools_state()
+        state, _ = engine.set_host_tools_enabled(state, True)
+        _attach_state(consumer, state)
+
+        guarded_calls = [
+            (consumer.handle_debug_move_host, {'steps': 2}),
+            (consumer.handle_debug_add_pokemon_to_host, {'pokemon_name': 'Pikachu'}),
+            (consumer.handle_debug_add_item, {'item_key': 'bill', 'quantity': 1}),
+            (consumer.handle_debug_trigger_current_tile, {}),
+        ]
+
+        with patch('game.consumers.settings.DEBUG', True):
+            for handler, payload in guarded_calls:
+                await handler(payload)
+                consumer.send_error.assert_called()
+                consumer.broadcast_state.assert_not_called()
+                consumer.send_error.reset_mock()

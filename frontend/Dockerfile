@@ -8,6 +8,9 @@ RUN npm ci
 
 COPY . .
 
+ARG VITE_DEBUG=False
+ENV VITE_DEBUG=$VITE_DEBUG
+
 RUN npm run build
 
 FROM nginx:1.27-alpine
