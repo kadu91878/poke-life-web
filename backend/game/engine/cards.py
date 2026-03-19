@@ -11,6 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from .inventory import add_item, remove_item, sync_player_inventory
+from .pokemon_abilities import adjust_primary_ability_charges
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / 'data'
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -137,6 +138,7 @@ def _metadata_to_pokemon(card: dict) -> dict:
         'rarity': card.get('engine_rarity') or card.get('rarity') or ('legendary' if card.get('engine_is_legendary') else 'unknown'),
         'battle_effect': card.get('engine_battle_effect') or card.get('battle_effect'),
         'ability_charges': card.get('charges'),
+        'ability_charges_total': card.get('charges'),
         'can_battle': printed_power is not None or card.get('engine_battle_points') is not None,
         'printed_power': printed_power,
         'reference_image': card.get('reference_image'),
@@ -195,6 +197,22 @@ def load_pokemon_by_name(name: str, *, allow_metadata_fallback: bool = True) -> 
     return load_playable_pokemon_by_name(name)
 
 
+def list_debug_pokemon_defs() -> list[dict]:
+    catalog = []
+    for card in sorted(load_pokemon_cards(), key=lambda entry: str(entry.get('name') or '').lower()):
+        catalog.append({
+            'id': card.get('id'),
+            'name': card.get('name'),
+            'types': copy.deepcopy(card.get('types') or []),
+            'battle_points': card.get('battle_points'),
+            'master_points': card.get('master_points'),
+            'slot_cost': card.get('pokeball_slots', 1),
+            'is_legendary': bool(card.get('is_legendary')),
+            'image_path': card.get('image_path'),
+        })
+    return catalog
+
+
 def get_supported_pokemon_details(pokemon_or_name: str | dict | None) -> dict:
     if isinstance(pokemon_or_name, dict):
         pokemon_name = pokemon_or_name.get('name') or pokemon_or_name.get('id')
@@ -217,6 +235,7 @@ def get_supported_pokemon_details(pokemon_or_name: str | dict | None) -> dict:
 
 _RUNTIME_MUTABLE_FIELDS = {
     'ability_charges',
+    'ability_runtime',
     'ability_used',
     'battle_slot_key',
     'capture_context',
@@ -765,9 +784,9 @@ def apply_event_effect(state: dict, player_id: str, card: dict) -> tuple[dict, d
                 all_pokemon.append(player['starter_pokemon'])
             affected = []
             for p in all_pokemon:
-                charges = int(p.get('ability_charges', 0) or 0)
-                if charges > 0:
-                    p['ability_charges'] = charges - 1
+                previous = p.get('ability_charges')
+                remaining = adjust_primary_ability_charges(p, -1)
+                if remaining is not None and remaining != previous:
                     affected.append(p['name'])
                     break  # apenas 1 Pokémon perde a carga
             result['affected_pokemon'] = affected

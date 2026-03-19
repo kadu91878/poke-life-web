@@ -1,9 +1,9 @@
 <template>
   <div class="game-board">
     <InventoryModal
-      v-if="debugInventoryOpen && debugTestPlayer"
-      :player="debugTestPlayer"
-      @close="debugInventoryOpen = false"
+      v-if="hostInventoryOpen && me"
+      :player="me"
+      @close="hostInventoryOpen = false"
     />
     <div class="board-header">
       <div>
@@ -38,7 +38,9 @@
               :style="spaceStyle(space.id)"
               :title="spaceTooltip(space)"
               @click="selectedTileId = space.id"
-            />
+            >
+              <span v-if="showDebugOverlay" class="tile-node-id">{{ space.id }}</span>
+            </button>
 
             <div
               v-for="player in positionedPlayers"
@@ -85,275 +87,140 @@
         </div>
 
         <div class="route-card">
-          <h4>Teste visual do pino</h4>
-          <label class="test-toggle">
-            <input :checked="debugEnabled" type="checkbox" @change="toggleDebugTestPlayer" />
-            <span>Habilitar player de teste isolado</span>
-          </label>
+          <h4>Host Tools</h4>
+          <template v-if="hostCanUseToolsPanel">
+            <label class="test-toggle">
+              <input :checked="hostToolsEnabled" type="checkbox" @change="toggleHostTools" />
+              <span>Habilitar ferramentas do host</span>
+            </label>
 
-          <template v-if="debugEnabled && debugTestPlayer">
-            <div class="debug-player-card">
-              <div class="debug-player-header">
-                <span class="player-dot" :style="{ background: debugTestPlayer.color }"></span>
-                <strong>{{ debugTestPlayer.name }}</strong>
-                <span class="debug-badge">Debug</span>
-                <button class="focus-btn focus-btn--inventory" @click="debugInventoryOpen = true">
-                  inventario
-                </button>
-              </div>
-
-              <p class="test-meta">
-                Posicao logica: <strong>{{ debugTestPlayer.position }}</strong>
-                <template v-if="debugSelectedSpace">
-                  · spaceId <strong>{{ debugSelectedSpace.id }}</strong>
-                  · {{ debugSelectedSpace.tileTypeId ?? 'sem tipo' }}
-                </template>
-              </p>
-              <p class="test-meta">
-                Tile atual: <strong>{{ tileName(debugTestPlayer.position) }}</strong>
-                · fase {{ debugPhaseLabel }}
-                <template v-if="debugLastRoll !== null">
-                  · ultimo dado {{ debugLastRoll }}
-                </template>
-              </p>
-
-              <!-- Controles de movimento — só quando não há pending -->
-              <template v-if="!debugHasPending">
-                <div class="test-controls">
-                  <button class="focus-btn" @click="store.actions.debugRollTestPlayer()">
-                    rolar dado
-                  </button>
-                  <button class="focus-btn" @click="store.actions.debugTriggerTestPlayerTile()">
-                    trigger tile
-                  </button>
-                  <button class="focus-btn" @click="focusDebugTestPlayer">
-                    focar
+            <template v-if="hostToolsEnabled">
+              <div class="debug-player-card">
+                <div class="debug-player-header">
+                  <span class="player-dot" :style="{ background: me.color }"></span>
+                  <strong>{{ me.name }}</strong>
+                  <span class="debug-badge">Host</span>
+                  <button class="focus-btn focus-btn--inventory" @click="hostInventoryOpen = true">
+                    inventario
                   </button>
                 </div>
 
-                <form class="debug-move-form" @submit.prevent="submitDebugMove">
+                <p class="test-meta">
+                  Posicao logica: <strong>{{ me.position }}</strong>
+                  · tile <strong>{{ currentHostTile?.id ?? me.position }}</strong>
+                  · {{ tileName(me.position) }}
+                </p>
+                <p class="test-meta">
+                  Movimento debug aceita valores positivos e negativos, mas não executa o tile automaticamente.
+                </p>
+                <p v-if="hostManualTilePending" class="test-meta">
+                  Tile pendente para trigger manual: <strong>{{ hostManualTilePending.position }}</strong>
+                  <template v-if="currentHostTile"> · {{ currentHostTile.name }}</template>
+                </p>
+
+                <div class="test-controls">
+                  <button class="focus-btn" @click="focusHostPlayer">
+                    focar
+                  </button>
+                  <button
+                    class="focus-btn focus-btn--primary"
+                    :disabled="!canTriggerHostTile"
+                    @click="store.actions.debugTriggerHostTile()"
+                  >
+                    trigger tile
+                  </button>
+                </div>
+
+                <form class="debug-move-form" @submit.prevent="submitHostMove">
                   <input
-                    v-model="debugMoveValue"
+                    v-model="hostMoveValue"
                     class="debug-number-input"
                     type="text"
                     inputmode="numeric"
-                    placeholder="Digite um inteiro positivo"
+                    placeholder="Ex.: 5 ou -3"
                   />
                   <button class="focus-btn focus-btn--primary" type="submit">
                     mover N casas
                   </button>
                 </form>
+                <p v-if="hostMoveError" class="error-copy">{{ hostMoveError }}</p>
 
-                <p v-if="debugMoveError" class="error-copy">{{ debugMoveError }}</p>
-              </template>
-
-              <form class="debug-move-form" @submit.prevent="submitDebugPokemon">
-                <input
-                  v-model="debugPokemonName"
-                  class="debug-number-input"
-                  type="text"
-                  placeholder="Adicionar Pokemon ao player de teste"
-                />
-                <button class="focus-btn focus-btn--primary" type="submit">
-                  adicionar Pokemon
-                </button>
-              </form>
-
-              <p v-if="debugPokemonError" class="error-copy">{{ debugPokemonError }}</p>
-
-              <!-- Pending: captura de Pokémon -->
-              <div v-if="debugPendingPokemon" class="debug-pending-block">
-                <p class="debug-pending-title">
-                  Pokémon apareceu: <strong>{{ debugPendingPokemon.name }}</strong>
-                  <template v-if="debugPendingPokemon.types?.length">
-                    ({{ debugPendingPokemon.types.join('/') }})
-                  </template>
-                </p>
-                <div class="test-controls">
-                  <button class="focus-btn focus-btn--primary" @click="store.actions.debugRollCaptureForTestPlayer()">
-                    rolar dado de captura
-                  </button>
-                  <button class="focus-btn" @click="store.actions.debugSkipTestPlayerPending()">
-                    pular captura
-                  </button>
-                </div>
-              </div>
-
-              <!-- Pending: evento -->
-              <div v-if="debugPendingEvent" class="debug-pending-block">
-                <p class="debug-pending-title">
-                  Evento: <strong>{{ debugPendingEvent.title ?? 'Carta de Evento' }}</strong>
-                </p>
-                <p v-if="debugPendingEvent.description" class="test-meta">{{ debugPendingEvent.description }}</p>
-                <div class="test-controls">
-                  <button class="focus-btn focus-btn--primary" @click="store.actions.debugResolveEventForTestPlayer()">
-                    resolver evento
-                  </button>
-                  <button class="focus-btn" @click="store.actions.debugSkipTestPlayerPending()">
-                    pular
-                  </button>
-                </div>
-              </div>
-
-              <!-- Pending: tile de duelo — escolher oponente real -->
-              <div v-if="debugIsDuelPending" class="debug-pending-block">
-                <p class="debug-pending-title">Tile de duelo — escolha um oponente</p>
-                <template v-if="players.length">
-                  <button
-                    v-for="p in players"
-                    :key="p.id"
-                    class="focus-btn focus-btn--primary"
-                    @click="store.actions.debugStartDuelWithPlayer(p.id)"
-                  >
-                    desafiar {{ p.name }}
-                  </button>
-                </template>
-                <p v-else class="test-meta">Nenhum jogador real disponível na partida.</p>
-                <button class="focus-btn" @click="store.actions.debugSkipTestPlayerPending()">
-                  pular duelo
-                </button>
-              </div>
-
-              <div v-if="debugSharedBattle" class="debug-pending-block">
-                <p class="debug-pending-title">Duelo em andamento no fluxo principal</p>
-                <p class="test-meta">
-                  <template v-if="debugSharedBattle.sub_phase === 'choosing' && !debugSharedBattle.defender_choice">
-                    Aguardando o jogador desafiado escolher o Pokémon no modal principal.
-                  </template>
-                  <template v-else-if="debugSharedBattle.sub_phase === 'choosing'">
-                    O desafiado já escolheu {{ debugSharedBattle.defender_choice?.name }}. Continue o duelo pelo modal principal.
-                  </template>
-                  <template v-else>
-                    O duelo continua no modal principal até a rolagem final.
-                  </template>
-                </p>
-              </div>
-
-              <!-- Battle phase: escolha de pokémon (challenge stage) -->
-              <div v-if="debugBattleIsChoosing" class="debug-pending-block">
-                <p class="debug-pending-title">
-                  {{ debugBattleLabel }} — escolha seu Pokémon
-                  <template v-if="debugBattle.defender_choice">
-                    (em campo: {{ debugBattle.defender_choice.name }})
-                  </template>
-                </p>
-                <button
-                  v-for="(pokemon, idx) in debugDuelPokemonPool"
-                  :key="pokemon.id"
-                  class="focus-btn focus-btn--primary"
-                  @click="store.actions.debugDuelChoosePokemon(idx)"
-                >
-                  {{ pokemon.name }} (BP {{ pokemon.battle_points ?? '?' }})
-                  <template v-if="pokemon.is_starter_slot || pokemon === debugTestPlayer?.starter_pokemon"> · inicial</template>
-                </button>
-                <button class="focus-btn" @click="store.actions.debugSkipTestPlayerPending()">
-                  cancelar duelo
-                </button>
-              </div>
-
-              <!-- Battle phase: rolagem de dados -->
-              <div v-if="debugBattleIsRolling" class="debug-pending-block">
-                <p class="debug-pending-title">
-                  {{ debugBattleLabel }} — rolar dado de batalha
-                </p>
-                <p class="test-meta">
-                  Você: <strong>{{ debugBattle.challenger_choice?.name }}</strong>
-                  (BP {{ debugBattle.challenger_choice?.battle_points ?? '?' }})
-                  vs {{ debugBattle.defender_choice?.name }}
-                  (BP {{ debugBattle.defender_choice?.battle_points ?? '?' }})
-                </p>
-                <button class="focus-btn focus-btn--primary" @click="store.actions.debugDuelRollBattle()">
-                  rolar dado de batalha
-                </button>
-                <button class="focus-btn" @click="store.actions.debugSkipTestPlayerPending()">
-                  cancelar duelo
-                </button>
-              </div>
-
-              <div v-if="debugPendingAction" class="debug-pending-block">
-                <p class="debug-pending-title">
-                  {{
-                    debugPendingAction.type === 'gym_heal'
-                      ? 'Cura pós-ginásio'
-                      : debugPendingAction.type === 'pokecenter_heal'
-                        ? 'Cura de PokéCenter'
-                        : 'Escolha pendente'
-                  }}
-                </p>
-                <p v-if="debugPendingAction.prompt" class="test-meta">{{ debugPendingAction.prompt }}</p>
-                <template v-if="debugPendingAction.options?.length">
-                  <button
-                    v-for="option in debugPendingAction.options"
-                    :key="option.id"
-                    class="focus-btn focus-btn--primary"
-                    @click="store.actions.debugResolvePendingActionForTestPlayer(option.id)"
-                  >
-                    {{ option.label }}
-                  </button>
-                </template>
-                <button class="focus-btn" @click="store.actions.debugSkipTestPlayerPending()">
-                  pular
-                </button>
-              </div>
-
-              <!-- Pending: escolha de item -->
-              <div v-if="debugPendingItemChoice" class="debug-pending-block">
-                <p class="debug-pending-title">Item recebido no tile</p>
-                <button class="focus-btn" @click="store.actions.debugSkipTestPlayerPending()">
-                  ok / pular
-                </button>
-              </div>
-
-              <!-- Carta revelada -->
-              <div v-if="debugRevealedCard?.card" class="debug-result-card">
-                <strong>{{ debugRevealedCard.card.title ?? debugRevealedCard.card.name ?? 'Carta revelada' }}</strong>
-                <p>{{ debugRevealedCard.card.description ?? 'Sem descricao adicional.' }}</p>
-              </div>
-
-              <!-- Inventário resumido (quando modal está fechado) -->
-              <div class="debug-inventory-grid">
-                <div class="inventory-block">
-                  <div class="inventory-title">Pokémon ({{ debugPokemonInventory.length }})</div>
-                  <div v-if="debugPokemonInventory.length" class="inventory-list">
-                    <span
-                      v-for="pokemon in debugPokemonInventory"
-                      :key="`${pokemon.id}-${pokemon.is_starter_slot ? 'starter' : 'team'}`"
-                      class="inventory-chip"
+                <div class="host-tools-grid">
+                  <div class="host-tools-block">
+                    <label class="inventory-title" for="host-pokemon-search">Adicionar Pokémon</label>
+                    <input
+                      id="host-pokemon-search"
+                      v-model="hostPokemonSearch"
+                      type="text"
+                      class="debug-number-input"
+                      placeholder="Filtrar... ex: pidg, char"
+                      autocomplete="off"
+                    />
+                    <select
+                      id="host-pokemon-select"
+                      v-model="hostPokemonName"
+                      class="debug-number-input"
+                      :size="filteredPokemonCatalog.length > 0 && hostPokemonSearch ? Math.min(filteredPokemonCatalog.length, 6) : 1"
                     >
-                      {{ pokemon.name }}<template v-if="pokemon.is_starter_slot"> · inicial</template>
-                    </span>
+                      <option v-if="filteredPokemonCatalog.length === 0" disabled value="">
+                        Nenhum resultado para "{{ hostPokemonSearch }}"
+                      </option>
+                      <option v-for="pokemon in filteredPokemonCatalog" :key="pokemon.id" :value="pokemon.name">
+                        {{ pokemon.name }}
+                      </option>
+                    </select>
+                    <button class="focus-btn focus-btn--primary" :disabled="!hostPokemonName || filteredPokemonCatalog.length === 0" @click="submitHostPokemon">
+                      adicionar Pokémon
+                    </button>
                   </div>
-                  <p v-else class="test-meta">Sem Pokémon.</p>
-                </div>
 
-                <div class="inventory-block">
-                  <div class="inventory-title">Itens</div>
-                  <div v-if="debugItems.length" class="inventory-list">
-                    <span v-for="item in debugItems" :key="item.key" class="inventory-chip">
-                      {{ item.name }} x{{ item.quantity }}
-                    </span>
+                  <div class="host-tools-block">
+                    <label class="inventory-title" for="host-item-search">Adicionar Item</label>
+                    <input
+                      id="host-item-search"
+                      v-model="hostItemSearch"
+                      type="text"
+                      class="debug-number-input"
+                      placeholder="Filtrar... ex: full, ball, bill"
+                      autocomplete="off"
+                    />
+                    <select
+                      id="host-item-select"
+                      v-model="hostItemKey"
+                      class="debug-number-input"
+                      :size="filteredItemCatalog.length > 0 && hostItemSearch ? Math.min(filteredItemCatalog.length, 6) : 1"
+                    >
+                      <option v-if="filteredItemCatalog.length === 0" disabled value="">
+                        Nenhum resultado para "{{ hostItemSearch }}"
+                      </option>
+                      <option v-for="item in filteredItemCatalog" :key="item.key" :value="item.key">
+                        {{ item.name }}
+                      </option>
+                    </select>
+                    <div class="test-controls">
+                      <input v-model.number="hostItemQuantity" class="debug-number-input debug-number-input--small" type="number" min="1" max="9" />
+                      <button class="focus-btn focus-btn--primary" :disabled="!hostItemKey || filteredItemCatalog.length === 0" @click="addHostItem">
+                        adicionar item
+                      </button>
+                    </div>
                   </div>
-                  <p v-else class="test-meta">Sem itens.</p>
                 </div>
               </div>
+            </template>
 
-              <!-- Log das últimas ações -->
-              <div v-if="lastDebugLogs.length" class="debug-log">
-                <div v-for="(entry, index) in lastDebugLogs" :key="index" class="debug-log-entry">
-                  <span class="log-player">{{ entry.player }}</span>: {{ entry.message }}
-                </div>
-              </div>
-            </div>
+            <p v-else class="test-meta">
+              Com o modo desabilitado, o host continua jogando como um player normal.
+            </p>
           </template>
 
           <p v-else class="test-meta">
-            Quando habilitado, o player de teste aparece aqui com inventario proprio e controles reais de debug.
+            As ferramentas do host só aparecem para o host em ambiente de desenvolvimento.
           </p>
         </div>
 
         <div class="players-card">
           <h4>Posicao dos jogadores</h4>
-          <p class="test-meta">Jogadores reais e player de teste ficam separados.</p>
+          <p class="test-meta">Posicoes atuais dos jogadores reais na partida.</p>
           <div
             v-for="player in players"
             :key="player.id"
@@ -399,16 +266,28 @@ import {
 const store = useGameStore()
 const selectedTileId = ref(null)
 const showDebugOverlay = ref(true)
+const isDev = import.meta.env.DEV || import.meta.env.VITE_DEBUG === 'True'
+const hostMoveValue = ref('1')
+const hostMoveError = ref('')
+const hostItemQuantity = ref(1)
+const hostInventoryOpen = ref(false)
+const hostPokemonName = ref('')
+const hostPokemonSearch = ref('')
+const hostItemKey = ref('')
+const hostItemSearch = ref('')
 const debugMoveValue = ref('1')
 const debugMoveError = ref('')
 const debugPokemonName = ref('')
 const debugPokemonError = ref('')
-const debugInventoryOpen = ref(false)
 
 const tiles = computed(() => store.gameState?.board?.tiles ?? [])
 const debugTiles = computed(() => store.debugSession?.board?.tiles ?? [])
 const players = computed(() => store.players)
 const me = computed(() => store.me)
+const isHost = computed(() => store.isHost)
+const isMyTurn = computed(() => store.isMyTurn)
+const hostTools = computed(() => store.hostTools ?? { enabled: false, pending_tile_trigger: null, item_catalog: [], pokemon_catalog: [] })
+const hostToolsEnabled = computed(() => store.hostToolsEnabled)
 const currentTile = computed(() => store.turn?.current_tile ?? null)
 const debugCurrentTile = computed(() => store.debugTurn?.current_tile ?? null)
 const debugEnabled = computed(() => Boolean(store.debugVisual?.enabled && store.debugTestPlayer))
@@ -443,6 +322,48 @@ const activeTile = computed(() => {
 
 const positionedPlayers = computed(() =>
   players.value.filter(player => playerHasMappedPosition(player.position))
+)
+
+const currentHostTile = computed(() => tiles.value[me.value?.position] ?? currentTile.value ?? null)
+const hostManualTilePending = computed(() => {
+  const pending = hostTools.value?.pending_tile_trigger
+  if (!pending || pending.player_id !== me.value?.id) return null
+  return pending
+})
+const hostToolItemCatalog = computed(() => hostTools.value?.item_catalog ?? [])
+const hostToolPokemonCatalog = computed(() => hostTools.value?.pokemon_catalog ?? [])
+
+const filteredPokemonCatalog = computed(() => {
+  const q = hostPokemonSearch.value.toLowerCase().trim()
+  if (!q) return hostToolPokemonCatalog.value
+  return hostToolPokemonCatalog.value.filter(p => p.name.toLowerCase().includes(q))
+})
+
+const filteredItemCatalog = computed(() => {
+  const q = hostItemSearch.value.toLowerCase().trim()
+  if (!q) return hostToolItemCatalog.value
+  return hostToolItemCatalog.value.filter(item =>
+    item.name.toLowerCase().includes(q) || item.key.toLowerCase().includes(q)
+  )
+})
+
+const hostCanUseToolsPanel = computed(() => isDev && isHost.value && !!me.value)
+const hostHasBlockingInteraction = computed(() => {
+  const turn = store.turn ?? {}
+  return Boolean(
+    turn.phase === 'battle'
+    || turn.pending_action
+    || turn.pending_event
+    || turn.pending_pokemon
+    || turn.pending_item_choice
+    || turn.pending_release_choice
+  )
+})
+const canTriggerHostTile = computed(() =>
+  hostToolsEnabled.value
+  && isMyTurn.value
+  && !hostHasBlockingInteraction.value
+  && !!hostManualTilePending.value
 )
 
 const testPinStyle = computed(() => {
@@ -524,6 +445,36 @@ watch(debugEnabled, enabled => {
   }
 })
 
+watch(hostToolsEnabled, enabled => {
+  if (!enabled) {
+    hostMoveError.value = ''
+  }
+})
+
+watch(hostToolPokemonCatalog, (catalog) => {
+  if (!hostPokemonName.value || !catalog.some(pokemon => pokemon.name === hostPokemonName.value)) {
+    hostPokemonName.value = catalog[0]?.name ?? ''
+  }
+}, { immediate: true })
+
+watch(filteredPokemonCatalog, (catalog) => {
+  if (hostPokemonSearch.value && !catalog.some(p => p.name === hostPokemonName.value)) {
+    hostPokemonName.value = catalog[0]?.name ?? ''
+  }
+})
+
+watch(hostToolItemCatalog, (catalog) => {
+  if (!hostItemKey.value || !catalog.some(item => item.key === hostItemKey.value)) {
+    hostItemKey.value = catalog[0]?.key ?? ''
+  }
+}, { immediate: true })
+
+watch(filteredItemCatalog, (catalog) => {
+  if (hostItemSearch.value && !catalog.some(item => item.key === hostItemKey.value)) {
+    hostItemKey.value = catalog[0]?.key ?? ''
+  }
+})
+
 const legendItems = [
   { type: 'grass', label: 'Captura', icon: '🌿' },
   { type: 'event', label: 'Evento', icon: '📋' },
@@ -555,6 +506,44 @@ function playerPositionStyle(tileId) {
 
 function playerHasMappedPosition(tileId) {
   return Boolean(getLogicalTilePosition(tileId))
+}
+
+function toggleHostTools(event) {
+  hostMoveError.value = ''
+  store.actions.debugToggleHostTools(event.target.checked)
+}
+
+function submitHostMove() {
+  const raw = hostMoveValue.value.trim()
+  if (!/^[+-]?\d+$/.test(raw)) {
+    hostMoveError.value = 'Digite um inteiro positivo ou negativo.'
+    return
+  }
+
+  const steps = Number.parseInt(raw, 10)
+  if (!Number.isInteger(steps) || steps === 0) {
+    hostMoveError.value = 'Digite um inteiro diferente de zero.'
+    return
+  }
+
+  hostMoveError.value = ''
+  store.actions.debugMoveHost(steps)
+}
+
+function focusHostPlayer() {
+  if (me.value) {
+    selectedTileId.value = me.value.position
+  }
+}
+
+function submitHostPokemon() {
+  if (!hostPokemonName.value) return
+  store.actions.debugAddPokemonToHost(hostPokemonName.value)
+}
+
+function addHostItem() {
+  if (!hostItemKey.value) return
+  store.actions.debugAddItemToHost(hostItemKey.value, Math.max(1, Number(hostItemQuantity.value) || 1))
 }
 
 function toggleDebugTestPlayer(event) {
@@ -773,8 +762,8 @@ function typeLabel(type, tile = null) {
 
 .tile-node {
   z-index: 2;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   border-radius: 999px;
   border: none;
   background: transparent;
@@ -787,6 +776,18 @@ function typeLabel(type, tile = null) {
   background: rgba(230, 57, 70, 0.82);
   border: 2px solid rgba(255, 255, 255, 0.92);
   color: #fff;
+}
+
+.tile-node-id {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
 }
 
 .player-pin,
@@ -1024,6 +1025,17 @@ function typeLabel(type, tile = null) {
   gap: 0.5rem;
 }
 
+.host-tools-grid {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.host-tools-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
 .debug-number-input {
   width: 100%;
   background: rgba(255, 255, 255, 0.05);
@@ -1031,6 +1043,10 @@ function typeLabel(type, tile = null) {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
   padding: 0.48rem 0.6rem;
+}
+
+.debug-number-input--small {
+  max-width: 82px;
 }
 
 .error-copy {

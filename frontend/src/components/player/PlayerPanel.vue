@@ -64,6 +64,9 @@
           :class="{ 'inventory-chip--ko': pokemon.knocked_out }"
         >
           {{ pokemon.name }} · {{ pokemon.slot_cost ?? pokemon.pokeball_slots ?? 1 }} slot(s)
+          <span v-if="primaryAbilityStatus(pokemon)?.charges_total != null">
+            · {{ primaryAbilityStatus(pokemon).charges_remaining }}/{{ primaryAbilityStatus(pokemon).charges_total }} carga(s)
+          </span>
           <strong v-if="pokemon.knocked_out"> · Nocauteado</strong>
         </span>
       </div>
@@ -125,6 +128,10 @@ const tileName = computed(() => {
   return tiles[pos]?.name ?? `Casa ${pos}`
 })
 const lastPokemonCenterLabel = computed(() => props.player.last_pokemon_center?.tile_name ?? null)
+
+function primaryAbilityStatus(pokemon) {
+  return pokemon?.abilities?.[0] ?? pokemon?.ability_status ?? null
+}
 </script>
 
 <style scoped>

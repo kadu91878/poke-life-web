@@ -1,8 +1,9 @@
 import copy
 from datetime import datetime, timezone
 from typing import Any
-from .engine.cards import canonicalize_runtime_pokemon
-from .engine.inventory import get_starting_resource_defaults, sync_player_inventory, normalize_items
+from .engine.cards import canonicalize_runtime_pokemon, list_debug_pokemon_defs
+from .engine.inventory import get_starting_resource_defaults, sync_player_inventory, normalize_items, list_debug_item_defs
+from .engine.pokemon_abilities import annotate_state_ability_snapshots, sync_pokemon_ability_state
 
 STATE_SCHEMA_VERSION = 1
 MAX_LOGS = 200
@@ -23,6 +24,7 @@ def _normalize_player_pokemon_metadata(player: dict[str, Any]) -> None:
                 for key, value in starter.items()
                 if key in {
                     'ability_charges',
+                    'ability_runtime',
                     'ability_used',
                     'knocked_out',
                     'acquisition_origin',
@@ -36,6 +38,7 @@ def _normalize_player_pokemon_metadata(player: dict[str, Any]) -> None:
         starter['acquisition_origin'] = 'starter'
         starter['capture_sequence'] = None
         starter.setdefault('capture_context', None)
+        sync_pokemon_ability_state(starter)
 
     highest_sequence = 0
     normalized_team = []
@@ -49,6 +52,7 @@ def _normalize_player_pokemon_metadata(player: dict[str, Any]) -> None:
                 for key, value in pokemon.items()
                 if key in {
                     'ability_charges',
+                    'ability_runtime',
                     'ability_used',
                     'knocked_out',
                     'acquisition_origin',
@@ -70,6 +74,7 @@ def _normalize_player_pokemon_metadata(player: dict[str, Any]) -> None:
         elif pokemon.get('capture_sequence') is None:
             pokemon['capture_sequence'] = None
         pokemon.setdefault('capture_context', None)
+        sync_pokemon_ability_state(pokemon)
     player['pokemon'] = normalized_team
 
     for pokemon in player.get('pokemon', []):
@@ -153,6 +158,12 @@ def build_initial_state(room_code: str) -> dict[str, Any]:
         'debug_visual': {
             'enabled': False,
             'session_state': None,
+            'host_tools': {
+                'enabled': False,
+                'pending_tile_trigger': None,
+                'item_catalog': list_debug_item_defs(),
+                'pokemon_catalog': list_debug_pokemon_defs(),
+            },
         },
         'revealed_card': None,
         'log': [],
@@ -201,6 +212,22 @@ def _normalize_debug_visual(debug_visual: dict[str, Any] | None) -> dict[str, An
         if isinstance(normalized.get('shared_battle_resume_state'), dict)
         else None
     )
+    host_tools = copy.deepcopy(normalized.get('host_tools')) if isinstance(normalized.get('host_tools'), dict) else {}
+    pending_tile_trigger = host_tools.get('pending_tile_trigger')
+    if isinstance(pending_tile_trigger, dict):
+        normalized_pending_tile_trigger = {
+            'player_id': pending_tile_trigger.get('player_id'),
+            'position': int(pending_tile_trigger.get('position', 0) or 0),
+            'steps': int(pending_tile_trigger.get('steps', 0) or 0),
+        }
+    else:
+        normalized_pending_tile_trigger = None
+    normalized['host_tools'] = {
+        'enabled': bool(host_tools.get('enabled', False)),
+        'pending_tile_trigger': normalized_pending_tile_trigger if bool(host_tools.get('enabled', False)) else None,
+        'item_catalog': list_debug_item_defs(),
+        'pokemon_catalog': list_debug_pokemon_defs(),
+    }
 
     session_state = normalized.get('session_state')
     if not normalized['enabled'] or not isinstance(session_state, dict):
@@ -259,6 +286,7 @@ def _normalize_debug_visual(debug_visual: dict[str, Any] | None) -> dict[str, An
     session['logs'] = logs[-MAX_LOGS:]
     session['log'] = session['logs']
     session.setdefault('revealed_card', None)
+    annotate_state_ability_snapshots(session)
 
     normalized['session_state'] = session
     return normalized
@@ -354,6 +382,7 @@ def normalize_state(room_code: str, raw_state: dict[str, Any] | None) -> dict[st
     state['debug_visual'] = _normalize_debug_visual(state.get('debug_visual'))
     state.setdefault('board', {})
     state.setdefault('revealed_card', None)
+    annotate_state_ability_snapshots(state)
 
     return state
 

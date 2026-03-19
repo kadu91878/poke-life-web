@@ -26,6 +26,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_DEBUG: ${POKEMON_LIFE_DEBUG:-True}
     depends_on:
       - backend
     ports:

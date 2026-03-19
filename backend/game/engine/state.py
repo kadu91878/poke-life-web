@@ -95,6 +95,15 @@ from .mechanics import (
     roll_market_dice,
     roll_team_rocket_dice,
 )
+from .pokemon_abilities import (
+    adjust_primary_ability_charges,
+    annotate_state_ability_snapshots,
+    build_move_roll_prompt_options,
+    get_static_ability_definitions,
+    mark_primary_ability_used,
+    reset_player_ability_runtime,
+    sync_pokemon_ability_state,
+)
 
 # Habilidades que se reiniciam a cada turno (demais são uma vez por partida)
 _PER_TURN_ABILITIES = frozenset({'compound_eyes', 'run_away', 'psychic', 'solar_beam'})
@@ -111,6 +120,7 @@ _MYSTERY_CAVE_POKEMON_NAMES = ['Gastly', 'Gastly', 'Haunter', 'Gengar', 'Ditto']
 _MAX_ROLL_HISTORY = 50
 _DEBUG_TEST_PLAYER_ID = '__debug_test_player__'
 _DEBUG_TEST_PLAYER_NAME = 'Player de teste'
+_HOST_TOOLS_LOG_PREFIX = '[HOST TOOLS]'
 _DEBUG_TEST_PLAYER_COLOR = '#f59f00'
 _SPECIAL_METHOD_EVOLUTION_NAMES = frozenset({
     'dratini',
@@ -140,6 +150,15 @@ _GAME_CORNER_PRIZES = (
     {'key': 'pokeball', 'label': 'Poké Ball'},
     {'key': 'master_ball', 'label': 'Master Ball'},
 )
+_POKEMART_PRIMARY_REWARDS = {
+    1: {'key': 'gust_of_wind', 'label': 'Gust of Wind'},
+    2: {'key': 'bill', 'label': 'Bill'},
+    3: {'key': 'full_restore', 'label': 'Full Restore'},
+    4: {'key': 'full_restore', 'label': 'Full Restore'},
+    5: {'key': 'miracle_stone', 'label': 'Miracle Stone'},
+}
+_POKEMART_REROLL_REWARD = {'key': 'pokeball', 'label': 'Poké Ball'}
+_POKEMART_JACKPOT_REWARD = {'key': 'master_ball', 'label': 'Master Ball'}
 
 
 # ── Helpers internos ────────────────────────────────────────────────────────
@@ -208,6 +227,80 @@ def _record_roll(
         player_for_log, message = _build_roll_log_message(roll_entry)
         _log(state, player_for_log, message)
     return roll_entry
+
+
+def host_tools_enabled(state: dict) -> bool:
+    return bool((((state or {}).get('debug_visual') or {}).get('host_tools') or {}).get('enabled'))
+
+
+def _get_host_tools_state(state: dict) -> dict:
+    debug_visual = state.setdefault('debug_visual', {})
+    host_tools = debug_visual.get('host_tools')
+    if not isinstance(host_tools, dict):
+        host_tools = {}
+    return host_tools
+
+
+def _set_host_tools_state(state: dict, host_tools: dict) -> dict:
+    debug_visual = copy.deepcopy(state.get('debug_visual') or {})
+    debug_visual['host_tools'] = copy.deepcopy(host_tools)
+    state['debug_visual'] = debug_visual
+    return state
+
+
+def _clear_host_tools_pending_tile(state: dict, *, player_id: str | None = None) -> dict:
+    host_tools = copy.deepcopy(_get_host_tools_state(state))
+    pending = host_tools.get('pending_tile_trigger')
+    if player_id is None or not isinstance(pending, dict) or pending.get('player_id') == player_id:
+        host_tools['pending_tile_trigger'] = None
+    return _set_host_tools_state(state, host_tools)
+
+
+def _set_host_tools_pending_tile(state: dict, *, player_id: str, position: int, steps: int) -> dict:
+    host_tools = copy.deepcopy(_get_host_tools_state(state))
+    host_tools['pending_tile_trigger'] = {
+        'player_id': player_id,
+        'position': int(position),
+        'steps': int(steps),
+    }
+    return _set_host_tools_state(state, host_tools)
+
+
+def _require_host_tools_enabled(state: dict) -> str | None:
+    if not host_tools_enabled(state):
+        return 'O modo Host Tools está desabilitado'
+    return None
+
+
+def _apply_debug_pokemon_grant(state: dict, player: dict, pokemon_name: str, *, log_prefix: str) -> tuple[dict | None, str | dict]:
+    pokemon_name = (pokemon_name or '').strip()
+    if not pokemon_name:
+        return None, 'pokemon_name é obrigatório'
+
+    pokemon = load_pokemon_by_name(pokemon_name)
+    if not pokemon:
+        return None, f'Pokémon "{pokemon_name}" não foi encontrado no dataset atual'
+
+    pokemon = _init_pokemon(pokemon)
+    pokemon['types'] = [str(poke_type).title() for poke_type in pokemon.get('types', [])]
+    pokemon['knocked_out'] = False
+    _apply_pokemon_acquisition_metadata(
+        pokemon,
+        acquisition_origin='debug',
+        capture_context='debug_add',
+    )
+
+    player.setdefault('pokemon', []).append(pokemon)
+    player['pokeballs'] = max(0, int(player.get('pokeballs', 0)) - pokemon_slot_cost(pokemon))
+    sync_player_inventory(player)
+
+    _log(state, player['name'], f"{log_prefix} Adicionou {pokemon['name']} ao time.")
+    return state, {
+        'success': True,
+        'pokemon': copy.deepcopy(pokemon),
+        'slot_cost': pokemon_slot_cost(pokemon),
+        'remaining_pokeball_slots': int(player.get('pokeballs', 0)),
+    }
 
 
 def _apply_pokemon_movement_roll_modifiers(
@@ -283,7 +376,14 @@ def resolve_movement_roll(state: dict, player_id: str, raw_roll: int) -> tuple[d
 
 def perform_movement_roll(state: dict, player_id: str) -> tuple[dict, dict]:
     raw_roll = roll_movement_dice()
-    return resolve_movement_roll(state, player_id, raw_roll)
+    state, roll_entry = resolve_movement_roll(state, player_id, raw_roll)
+    _queue_move_roll_ability_decision(
+        state,
+        player_id,
+        int(roll_entry['final_result']),
+        raw_roll=int(roll_entry['raw_result']),
+    )
+    return state, roll_entry
 
 
 def roll_capture_for_attempt(state: dict, player_id: str, capture_context: str | None) -> tuple[dict, dict]:
@@ -417,7 +517,7 @@ def _init_pokemon(pokemon: dict) -> dict:
     pokemon = copy.deepcopy(pokemon)
     pokemon.setdefault('ability_used', False)
     pokemon.setdefault('pokeball_slots', 1)
-    return pokemon
+    return sync_pokemon_ability_state(pokemon)
 
 
 def _sync_player(state: dict, player_id: str) -> dict | None:
@@ -612,6 +712,477 @@ def _get_player_pokemon_slot(player: dict, slot_key: str | None) -> dict | None:
     if 0 <= index < len(pokemon):
         return pokemon[index]
     return None
+
+
+def _update_last_movement_roll(
+    state: dict,
+    *,
+    final_result: int,
+    modifier: dict | None = None,
+    modifier_reason: str | None = None,
+) -> None:
+    payload = {
+        'final_result': int(final_result),
+        'modifier': copy.deepcopy(modifier),
+        'modifier_reason': modifier_reason,
+    }
+    history = state.get('turn', {}).get('roll_history') or []
+    for roll_entry in reversed(history):
+        if roll_entry.get('context') == 'movement':
+            roll_entry.update(payload)
+            break
+
+    last_roll = state.get('turn', {}).get('last_roll')
+    if isinstance(last_roll, dict) and last_roll.get('context') == 'movement':
+        last_roll.update(payload)
+
+
+def _queue_move_roll_ability_decision(
+    state: dict,
+    player_id: str,
+    current_roll: int,
+    *,
+    raw_roll: int | None = None,
+) -> bool:
+    player = _get_player(state, player_id)
+    if not player:
+        return False
+
+    flattened_options: list[dict] = []
+    for slot_key, pokemon in _iter_player_battle_slots(player, include_knocked_out=False):
+        sync_pokemon_ability_state(pokemon)
+        option_defs = build_move_roll_prompt_options(pokemon, int(current_roll))
+        for index, option in enumerate(option_defs):
+            flattened_options.append({
+                'id': f'ability:{slot_key}:{option["ability_id"]}:{option["effect_kind"]}:{index}',
+                'label': f'{pokemon.get("name", "Pokémon")}: {option["ability_name"]} ({option["label_suffix"]})',
+                'slot_key': slot_key,
+                'pokemon_name': pokemon.get('name'),
+                'ability_id': option['ability_id'],
+                'ability_name': option['ability_name'],
+                'effect_kind': option['effect_kind'],
+                'resolution': copy.deepcopy(option.get('resolution') or {}),
+                'charges_remaining': option.get('charges_remaining'),
+                'charges_total': option.get('charges_total'),
+            })
+
+    if not flattened_options:
+        return False
+
+    turn = state['turn']
+    decision_id = (
+        f"move-roll:{player_id}:{turn.get('round', 1)}:"
+        f"{len(turn.get('roll_history') or [])}:{int(current_roll)}"
+    )
+    flattened_options.append({
+        'id': 'skip',
+        'label': 'Não usar habilidade',
+        'effect_kind': 'skip',
+    })
+    _set_pending_action(state, {
+        'type': 'ability_decision',
+        'decision_kind': 'move_roll',
+        'decision_id': decision_id,
+        'player_id': player_id,
+        'prompt': f'Você rolou {int(current_roll)}. Deseja usar uma habilidade opcional antes de mover?',
+        'raw_roll': int(raw_roll if raw_roll is not None else current_roll),
+        'current_roll': int(current_roll),
+        'options': flattened_options,
+        'allowed_actions': ['resolve_pending_action'],
+    })
+    return True
+
+
+def _resolve_move_roll_ability_decision(
+    state: dict,
+    player_id: str,
+    pending_action: dict,
+    chosen: dict,
+) -> tuple[dict | None, str | dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    current_roll = int(pending_action.get('current_roll') or pending_action.get('raw_roll') or 0)
+    raw_roll = int(pending_action.get('raw_roll') or current_roll)
+
+    if chosen.get('id') == 'skip':
+        _clear_pending_action(state)
+        state = process_move(state, player_id, current_roll)
+        return state, {
+            'type': 'ability_decision',
+            'decision_kind': 'move_roll',
+            'used': False,
+            'final_roll': current_roll,
+        }
+
+    slot_key = chosen.get('slot_key')
+    pokemon = _get_player_pokemon_slot(player, slot_key)
+    if not pokemon:
+        return None, 'Pokémon da habilidade não encontrado'
+
+    sync_pokemon_ability_state(pokemon)
+    ability = next(
+        (
+            item for item in (pokemon.get('abilities') or [])
+            if item.get('id') == chosen.get('ability_id')
+        ),
+        None,
+    )
+    if not ability:
+        return None, 'Habilidade não encontrada neste Pokémon'
+    if ability.get('has_charges') and int(ability.get('charges_remaining') or 0) <= 0:
+        return None, 'Esta habilidade não possui cargas restantes'
+    if (ability.get('runtime') or {}).get('used_this_turn'):
+        return None, 'Esta habilidade já foi usada neste turno'
+
+    pokemon_name = pokemon.get('name', 'Pokémon')
+    ability_name = ability.get('name') or 'Habilidade'
+    effect_kind = chosen.get('effect_kind')
+    resolution = copy.deepcopy(chosen.get('resolution') or {})
+    consume_charge = ability.get('charges_total') is not None
+    next_roll = current_roll
+
+    if resolution.get('mode') == 'reroll':
+        state, reroll_entry = resolve_movement_roll(state, player_id, roll_movement_dice())
+        next_roll = int(reroll_entry['final_result'])
+        _log(
+            state,
+            player['name'],
+            f'Usou {ability_name} de {pokemon_name} para rerrolar o dado de movimento ({current_roll} -> {next_roll}).',
+        )
+    elif resolution.get('mode') == 'set':
+        try:
+            next_roll = int(resolution.get('result'))
+        except (TypeError, ValueError):
+            return None, 'Resultado inválido para a habilidade'
+        if next_roll == current_roll:
+            return None, 'Esta habilidade não altera o resultado atual do dado'
+        _log(
+            state,
+            player['name'],
+            f'Usou {ability_name} de {pokemon_name} para alterar o dado de movimento ({current_roll} -> {next_roll}).',
+        )
+    else:
+        return None, 'Resolução de habilidade ainda não suportada'
+
+    mark_primary_ability_used(
+        pokemon,
+        scope='turn',
+        consume_charge=consume_charge,
+        decision_id=pending_action.get('decision_id'),
+    )
+    _update_last_movement_roll(
+        state,
+        final_result=next_roll,
+        modifier={
+            'source': 'pokemon_ability',
+            'effect_kind': effect_kind,
+            'source_name': f'{pokemon_name}: {ability_name}',
+        },
+        modifier_reason=f'{pokemon_name}: {ability_name}',
+    )
+    _clear_pending_action(state)
+
+    if _queue_move_roll_ability_decision(state, player_id, next_roll, raw_roll=raw_roll):
+        return state, {
+            'type': 'ability_decision',
+            'decision_kind': 'move_roll',
+            'used': True,
+            'pokemon': pokemon_name,
+            'ability_name': ability_name,
+            'effect_kind': effect_kind,
+            'final_roll': next_roll,
+            'awaiting_follow_up': True,
+        }
+
+    state = process_move(state, player_id, next_roll)
+    return state, {
+        'type': 'ability_decision',
+        'decision_kind': 'move_roll',
+        'used': True,
+        'pokemon': pokemon_name,
+        'ability_name': ability_name,
+        'effect_kind': effect_kind,
+        'final_roll': next_roll,
+    }
+
+
+def _queue_capture_choice_decision(
+    state: dict,
+    player_id: str,
+    use_full_restore: bool,
+    *,
+    pending_capture_action: dict,
+    slot_key: str,
+    pokemon: dict,
+    ability: dict,
+) -> tuple[dict, dict]:
+    """Fila uma decisão de capture_choice antes do dado de captura ser rolado."""
+    pokemon_name = pokemon.get('name', 'Pokémon')
+    ability_name = ability.get('name') or 'Habilidade'
+    options = [
+        {'id': str(val), 'label': f'Escolher {val}', 'value': val}
+        for val in range(1, 7)
+    ]
+    options.append({'id': 'skip', 'label': 'Não usar habilidade', 'value': None})
+    _set_pending_action(state, {
+        'type': 'capture_choice_decision',
+        'player_id': player_id,
+        'slot_key': slot_key,
+        'pokemon_name': pokemon_name,
+        'ability_id': ability.get('id', 'primary'),
+        'ability_name': ability_name,
+        'has_charges': bool(ability.get('has_charges')),
+        'use_full_restore': use_full_restore,
+        'original_capture_action': copy.deepcopy(pending_capture_action),
+        'prompt': f'{pokemon_name} pode usar {ability_name}. Escolha o resultado do dado de captura:',
+        'options': options,
+        'allowed_actions': ['resolve_pending_action'],
+    })
+    return state, {
+        'success': False,
+        'requires_ability_decision': True,
+        'decision_type': 'capture_choice',
+        'pokemon_name': pokemon_name,
+        'ability_name': ability_name,
+    }
+
+
+def _queue_capture_reroll_decision(
+    state: dict,
+    player_id: str,
+    use_full_restore: bool,
+    *,
+    pending_capture_action: dict,
+    capture_roll: dict,
+    slot_key: str,
+    pokemon: dict,
+    ability: dict,
+) -> tuple[dict, dict]:
+    """Fila uma decisão de capture_reroll após o dado de captura ser rolado."""
+    pokemon_name = pokemon.get('name', 'Pokémon')
+    ability_name = ability.get('name') or 'Habilidade'
+    current_roll = int(capture_roll['raw_result'])
+    _set_pending_action(state, {
+        'type': 'capture_reroll_decision',
+        'player_id': player_id,
+        'slot_key': slot_key,
+        'pokemon_name': pokemon_name,
+        'ability_id': ability.get('id', 'primary'),
+        'ability_name': ability_name,
+        'has_charges': bool(ability.get('has_charges')),
+        'use_full_restore': use_full_restore,
+        'original_capture_action': copy.deepcopy(pending_capture_action),
+        'current_roll': current_roll,
+        'capture_roll_result': copy.deepcopy(capture_roll),
+        'prompt': f'Você rolou {current_roll}. {pokemon_name} pode usar {ability_name} para rerrolar:',
+        'options': [
+            {'id': 'reroll', 'label': f'Rerrolar ({pokemon_name}: {ability_name})'},
+            {'id': 'keep', 'label': f'Manter resultado atual ({current_roll})'},
+        ],
+        'allowed_actions': ['resolve_pending_action'],
+    })
+    return state, {
+        'success': False,
+        'requires_ability_decision': True,
+        'decision_type': 'capture_reroll',
+        'pokemon_name': pokemon_name,
+        'ability_name': ability_name,
+        'current_roll': current_roll,
+    }
+
+
+def _resolve_capture_choice_decision(
+    state: dict,
+    player_id: str,
+    pending_action: dict,
+    chosen: dict,
+) -> tuple[dict | None, str | dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    original_action = copy.deepcopy(pending_action.get('original_capture_action') or {})
+    original_action['capture_choice_used'] = True
+    use_full_restore = bool(pending_action.get('use_full_restore'))
+    chosen_value = chosen.get('value')
+
+    if chosen.get('id') == 'skip' or chosen_value is None:
+        _set_pending_action(state, original_action)
+        return roll_capture_attempt(state, player_id, use_full_restore)
+
+    slot_key = pending_action.get('slot_key')
+    pokemon = _get_player_pokemon_slot(player, slot_key)
+    if pokemon:
+        sync_pokemon_ability_state(pokemon)
+        mark_primary_ability_used(pokemon, scope='turn', consume_charge=bool(pending_action.get('has_charges')))
+
+    _set_pending_action(state, original_action)
+    ability_name = pending_action.get('ability_name', 'Habilidade')
+    pokemon_name = pending_action.get('pokemon_name', 'Pokémon')
+    _log(state, player['name'], f'Usou {ability_name} de {pokemon_name} para escolher {chosen_value} no dado de captura.')
+    return roll_capture_attempt(state, player_id, use_full_restore, ability_chosen_roll=int(chosen_value))
+
+
+def _resolve_capture_reroll_decision(
+    state: dict,
+    player_id: str,
+    pending_action: dict,
+    chosen: dict,
+) -> tuple[dict | None, str | dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    original_action = copy.deepcopy(pending_action.get('original_capture_action') or {})
+    original_action['capture_reroll_used'] = True
+    use_full_restore = bool(pending_action.get('use_full_restore'))
+    current_roll = int(pending_action.get('current_roll') or 0)
+    ability_name = pending_action.get('ability_name', 'Habilidade')
+    pokemon_name = pending_action.get('pokemon_name', 'Pokémon')
+
+    if chosen.get('id') == 'keep':
+        _set_pending_action(state, original_action)
+        _log(state, player['name'], f'Manteve o resultado {current_roll} no dado de captura.')
+        return roll_capture_attempt(state, player_id, use_full_restore, ability_chosen_roll=current_roll)
+
+    # "reroll"
+    slot_key = pending_action.get('slot_key')
+    pokemon = _get_player_pokemon_slot(player, slot_key)
+    if pokemon:
+        sync_pokemon_ability_state(pokemon)
+        mark_primary_ability_used(pokemon, scope='turn', consume_charge=bool(pending_action.get('has_charges')))
+
+    _set_pending_action(state, original_action)
+    _log(state, player['name'], f'Usou {ability_name} de {pokemon_name} para rerrolar o dado de captura (anterior: {current_roll}).')
+    return roll_capture_attempt(state, player_id, use_full_restore)
+
+
+def _resolve_heal_other_choice(
+    state: dict,
+    player_id: str,
+    pending_action: dict,
+    chosen: dict,
+) -> tuple[dict | None, str | dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    target_slot_key = chosen.get('slot_key') or chosen.get('id')
+    target_poke = _get_player_pokemon_slot(player, target_slot_key)
+    if not target_poke:
+        return None, 'Pokémon alvo não encontrado'
+    if not target_poke.get('knocked_out'):
+        return None, 'Este Pokémon não está desmaiado'
+
+    healer_slot_key = pending_action.get('healer_slot_key')
+    healer = _get_player_pokemon_slot(player, healer_slot_key)
+    ability_name = pending_action.get('ability_name', 'Habilidade')
+    healer_name = pending_action.get('healer_name', 'Pokémon')
+    target_name = target_poke.get('name', target_slot_key)
+
+    _heal_player_pokemon_slots(player, [target_slot_key])
+    if healer:
+        sync_pokemon_ability_state(healer)
+        mark_primary_ability_used(healer, scope='turn', consume_charge=False)
+    sync_player_inventory(player)
+    _clear_pending_action(state)
+    _log(state, player['name'], f'Usou {ability_name} de {healer_name} para curar {target_name}.')
+    return state, {
+        'type': 'heal_other_choice',
+        'healer': healer_name,
+        'healed': target_name,
+        'slot_key': target_slot_key,
+    }
+
+
+def _queue_battle_reroll_decision(
+    state: dict,
+    player_id: str,
+    *,
+    roll: int,
+    is_challenger: bool,
+    slot_key: str,
+    pokemon: dict,
+    ability: dict,
+) -> tuple[dict, dict]:
+    """Fila uma decisão de battle_reroll após o dado de batalha ser rolado."""
+    pokemon_name = pokemon.get('name', 'Pokémon')
+    ability_name = ability.get('name') or 'Habilidade'
+    _set_pending_action(state, {
+        'type': 'battle_reroll_decision',
+        'player_id': player_id,
+        'slot_key': slot_key,
+        'pokemon_name': pokemon_name,
+        'ability_id': ability.get('id', 'primary'),
+        'ability_name': ability_name,
+        'has_charges': bool(ability.get('has_charges')),
+        'original_roll': roll,
+        'is_challenger': is_challenger,
+        'prompt': f'Você rolou {roll}. {pokemon_name} pode usar {ability_name} para rerrolar o dado de batalha:',
+        'options': [
+            {'id': 'reroll', 'label': f'Rerrolar ({pokemon_name}: {ability_name})'},
+            {'id': 'keep', 'label': f'Manter resultado atual ({roll})'},
+        ],
+        'allowed_actions': ['resolve_pending_action'],
+    })
+    return state, {
+        'success': False,
+        'requires_ability_decision': True,
+        'decision_type': 'battle_reroll',
+        'pokemon_name': pokemon_name,
+        'ability_name': ability_name,
+        'current_roll': roll,
+    }
+
+
+def _resolve_battle_reroll_decision(
+    state: dict,
+    player_id: str,
+    pending_action: dict,
+    chosen: dict,
+) -> tuple[dict | None, str | dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    battle = state['turn'].get('battle')
+    if not battle:
+        return None, 'Nenhuma batalha ativa'
+
+    original_roll = int(pending_action.get('original_roll') or 0)
+    is_challenger = bool(pending_action.get('is_challenger'))
+    mode = battle.get('mode', 'player')
+    ability_name = pending_action.get('ability_name', 'Habilidade')
+    pokemon_name = pending_action.get('pokemon_name', 'Pokémon')
+    _clear_pending_action(state)
+
+    if chosen.get('id') == 'keep':
+        _log(state, player['name'], f'Manteve o resultado {original_roll} no dado de batalha.')
+    else:
+        # 'reroll': mark used, consume charge, do fresh roll
+        slot_key = pending_action.get('slot_key')
+        poke = _get_player_pokemon_slot(player, slot_key)
+        if poke:
+            sync_pokemon_ability_state(poke)
+            mark_primary_ability_used(poke, scope='battle', consume_charge=bool(pending_action.get('has_charges')))
+
+        new_roll = roll_battle_dice()
+        _log(state, player['name'], f'Usou {ability_name} de {pokemon_name} para rerrolar o dado de batalha ({original_roll} → {new_roll}).')
+        if is_challenger:
+            battle['challenger_roll'] = new_roll
+        else:
+            battle['defender_roll'] = new_roll
+
+    if mode == 'trainer':
+        return _resolve_trainer_battle(state)
+    if mode == 'gym':
+        return _resolve_gym_battle(state)
+    # PvP: resolve only when both have rolled
+    if battle.get('challenger_roll') is not None and battle.get('defender_roll') is not None:
+        return _resolve_duel(state)
+    return state, None
 
 
 def _remove_player_pokemon_slot(player: dict, slot_key: str | None) -> dict | None:
@@ -883,6 +1454,150 @@ def _queue_market_event(state: dict, player_id: str, *, source: str, source_tile
     source_name = source_tile.get('name') if isinstance(source_tile, dict) else source
     _log(state, player['name'], f"Chegou em {source_name}. O tile funciona como PokéMarket.")
     return state
+
+
+def _build_pokemart_roll_prompt(source_name: str, phase: str, rolls: list[int] | None = None) -> str:
+    resolved_rolls = [int(roll) for roll in (rolls or [])]
+    if phase == 'reroll':
+        first_roll = resolved_rolls[0] if resolved_rolls else 6
+        return (
+            f"Primeira rolagem em {source_name}: {first_roll}. "
+            "Role novamente o dado do Poké-Mart para definir entre Poké Ball e Master Ball."
+        )
+    return f"Você caiu em {source_name}. Role o dado do Poké-Mart para descobrir qual item vai receber."
+
+
+def _queue_pokemart_roll_action(
+    state: dict,
+    player_id: str,
+    *,
+    tile_id: int | str | None,
+    source_name: str,
+    phase: str = 'initial_roll',
+    rolls: list[int] | None = None,
+) -> dict:
+    resolved_rolls = [int(roll) for roll in (rolls or [])]
+    button_label = 'Rerrolar dado do Poké-Mart' if phase == 'reroll' else 'Rolar dado do Poké-Mart'
+    _set_pending_action(state, {
+        'type': 'pokemart_roll',
+        'player_id': player_id,
+        'tile_id': tile_id,
+        'source_name': source_name,
+        'pending_pokemart_roll': True,
+        'pokemart_phase': phase,
+        'rolls': resolved_rolls,
+        'prompt': _build_pokemart_roll_prompt(source_name, phase, resolved_rolls),
+        'options': [{'id': 'roll', 'label': button_label}],
+        'allowed_actions': ['resolve_pending_action'],
+    })
+    state['turn']['phase'] = 'action'
+    return state
+
+
+def _resolve_pokemart_tile(state: dict, player_id: str, tile: dict) -> dict:
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    source_name = tile.get('name', 'Poké-Mart')
+    _log(state, player['name'], f"Caiu em {source_name}. Aguardando rolagem explícita do dado do Poké-Mart.")
+    return _queue_pokemart_roll_action(
+        state,
+        player_id,
+        tile_id=tile.get('id'),
+        source_name=source_name,
+        phase='initial_roll',
+    )
+
+
+def _resolve_pokemart_roll_action(state: dict, player_id: str, pending_action: dict) -> tuple[dict, dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return state, {
+            'success': False,
+            'type': 'pokemart_roll',
+            'error': 'Jogador não encontrado',
+        }
+
+    source_name = pending_action.get('source_name', 'Poké-Mart')
+    phase = pending_action.get('pokemart_phase', 'initial_roll')
+    prior_rolls = [int(roll) for roll in (pending_action.get('rolls') or [])]
+    roll = roll_market_dice()
+    metadata = {
+        'tile_id': pending_action.get('tile_id'),
+        'stage': 'reroll' if phase == 'reroll' else 'initial',
+    }
+    if prior_rolls:
+        metadata['prior_rolls'] = prior_rolls
+        metadata['initial_roll'] = prior_rolls[0]
+    _record_roll(
+        state,
+        roll_type='poké-mart',
+        player_id=player_id,
+        player_name=player['name'],
+        raw_result=roll,
+        final_result=roll,
+        context='pokemart_tile',
+        metadata=metadata,
+    )
+    current_rolls = prior_rolls + [roll]
+
+    if phase != 'reroll':
+        reward = _POKEMART_PRIMARY_REWARDS.get(roll)
+        if reward is None:
+            _log(
+                state,
+                player['name'],
+                f"Rolou 6 em {source_name}. O Poké-Mart agora aguarda uma segunda rolagem explícita para definir o prêmio.",
+            )
+            state = _queue_pokemart_roll_action(
+                state,
+                player_id,
+                tile_id=pending_action.get('tile_id'),
+                source_name=source_name,
+                phase='reroll',
+                rolls=current_rolls,
+            )
+            return state, {
+                'success': True,
+                'type': 'pokemart_roll',
+                'source_name': source_name,
+                'pokemart_phase': 'reroll',
+                'roll': roll,
+                'rolls': current_rolls,
+                'requires_additional_roll': True,
+            }
+
+        _clear_pending_action(state)
+        _log(state, player['name'], f"Rolou {roll} em {source_name} e ganhou {reward['label']}.")
+        state = _grant_special_tile_reward(state, player_id, reward['key'], source=source_name)
+        state = _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True)
+        return state, {
+            'success': True,
+            'type': 'pokemart_roll',
+            'source_name': source_name,
+            'pokemart_phase': phase,
+            'roll': roll,
+            'rolls': current_rolls,
+            'reward_key': reward['key'],
+            'reward_label': reward['label'],
+        }
+
+    reward = _POKEMART_REROLL_REWARD if roll <= 5 else _POKEMART_JACKPOT_REWARD
+    _clear_pending_action(state)
+    _log(state, player['name'], f"No reroll de {source_name}, tirou {roll} e ganhou {reward['label']}.")
+    state = _grant_special_tile_reward(state, player_id, reward['key'], source=source_name)
+    state = _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True)
+    return state, {
+        'success': True,
+        'type': 'pokemart_roll',
+        'source_name': source_name,
+        'pokemart_phase': phase,
+        'roll': roll,
+        'rolls': current_rolls,
+        'reward_key': reward['key'],
+        'reward_label': reward['label'],
+    }
 
 
 def _queue_game_corner_action(state: dict, player_id: str, *, current_prize_index: int = -1, stage: str | None = None) -> dict:
@@ -1311,6 +2026,7 @@ def _queue_release_pokemon_choice(
     pokemon: dict,
     capture_cost: int | None = None,
     use_full_restore: bool = False,
+    use_master_ball: bool = False,
     capture_roll: dict | None = None,
     reward_source: str | None = None,
     capture_context: str | None = None,
@@ -1335,6 +2051,7 @@ def _queue_release_pokemon_choice(
         'resolution_type': resolution_type,
         'capture_cost': None if capture_cost is None else int(capture_cost),
         'use_full_restore': bool(use_full_restore),
+        'use_master_ball': bool(use_master_ball),
         'pokemon': copy.deepcopy(pokemon),
         'capture_roll': copy.deepcopy(capture_roll),
         'reward_source': reward_source,
@@ -1349,6 +2066,7 @@ def _queue_release_pokemon_choice(
         'pokemon': copy.deepcopy(pokemon),
         'capture_cost': None if capture_cost is None else int(capture_cost),
         'capture_roll': copy.deepcopy(capture_roll),
+        'use_master_ball': bool(use_master_ball),
         'options': copy.deepcopy(options),
         'resolution_type': resolution_type,
     }
@@ -1458,13 +2176,26 @@ def _build_capture_attempt_prompt(
     source: str,
     capture_rolls: list[int] | None = None,
     requires_additional_roll: bool = False,
+    master_ball_in_use: bool = False,
 ) -> str:
     if requires_additional_roll:
         latest = capture_rolls[-1] if capture_rolls else '?'
         if encounter_source:
+            if master_ball_in_use:
+                return (
+                    f"Você rolou {latest} no dado de captura em {encounter_source} usando a Master Ball. "
+                    "A próxima rolagem será normal. Role novamente para concluir o encontro."
+                )
             return f"Você rolou {latest} no dado de captura em {encounter_source}. Role novamente para concluir o encontro."
         if pokemon:
+            if master_ball_in_use:
+                return (
+                    f"Você rolou {latest} no dado de captura para {pokemon.get('name', 'o Pokémon')} usando a Master Ball. "
+                    "A próxima rolagem será normal. Role novamente para concluir a captura."
+                )
             return f"Você rolou {latest} no dado de captura para {pokemon.get('name', 'o Pokémon')}. Role novamente para concluir a captura."
+        if master_ball_in_use:
+            return f"Você rolou {latest} no dado de captura usando a Master Ball. A próxima rolagem será normal. Role novamente para concluir a captura."
         return f"Você rolou {latest} no dado de captura. Role novamente para concluir a captura."
     if encounter_source:
         return f"Você caiu em {encounter_source}. Role o dado de captura para descobrir o encontro."
@@ -1491,6 +2222,7 @@ def _queue_capture_attempt(
     encounter_source: str | None = None,
     capture_rolls: list[int] | None = None,
     requires_additional_roll: bool = False,
+    master_ball_in_use: bool = False,
     prompt: str | None = None,
 ) -> dict:
     state['turn']['phase'] = 'action'
@@ -1510,12 +2242,14 @@ def _queue_capture_attempt(
         'encounter_source': encounter_source,
         'capture_rolls': resolved_rolls,
         'requires_additional_roll': bool(requires_additional_roll),
+        'master_ball_in_use': bool(master_ball_in_use),
         'prompt': prompt or _build_capture_attempt_prompt(
             pokemon=pokemon,
             encounter_source=encounter_source,
             source=source,
             capture_rolls=resolved_rolls,
             requires_additional_roll=requires_additional_roll,
+            master_ball_in_use=master_ball_in_use,
         ),
         'allowed_actions': ['roll_capture_dice', 'skip_action'],
     })
@@ -1754,6 +2488,7 @@ def _finalize_capture(
         )
     player['pokemon'].append(pokemon_copy)
     player['master_points'] += pokemon.get('master_points', 0)
+    _award_team_bonus_mp(state, player, pokemon_copy)
     sync_player_inventory(player)
 
     state['turn']['pending_pokemon'] = None
@@ -1777,6 +2512,122 @@ def _find_pokemon_with_ability(player: dict, ability_action: str) -> dict | None
         if normalized == ability_action:
             return p
     return None
+
+
+def _find_available_capture_ability(
+    player: dict,
+    effect_kind: str,
+) -> tuple[str, dict, dict] | None:
+    """Encontra o primeiro Pokémon disponível com a habilidade de captura do tipo effect_kind.
+
+    Retorna (slot_key, pokemon, ability_snapshot) ou None.
+    """
+    for slot_key, pokemon in _iter_player_battle_slots(player, include_knocked_out=False):
+        sync_pokemon_ability_state(pokemon)
+        for ability in (pokemon.get('abilities') or []):
+            if ability.get('effect_kind') != effect_kind:
+                continue
+            if ability.get('implemented') is not True:
+                continue
+            runtime = ability.get('runtime') or {}
+            if runtime.get('used_this_turn'):
+                continue
+            if ability.get('has_charges') and int(ability.get('charges_remaining') or 0) <= 0:
+                continue
+            return slot_key, pokemon, ability
+    return None
+
+
+def _find_available_battle_reroll_ability(
+    player: dict,
+    battle_choice: dict,
+) -> tuple[str, dict, dict] | None:
+    """Encontra a habilidade battle_reroll no Pokémon atualmente em batalha.
+
+    Checa used_this_battle (não used_this_turn).
+    Retorna (slot_key, pokemon, ability_snapshot) ou None.
+    """
+    slot_key = battle_choice.get('battle_slot_key')
+    if not slot_key:
+        return None
+    pokemon = _get_player_pokemon_slot(player, slot_key)
+    if not pokemon:
+        return None
+    sync_pokemon_ability_state(pokemon)
+    for ability in (pokemon.get('abilities') or []):
+        if ability.get('effect_kind') != 'battle_reroll':
+            continue
+        if ability.get('implemented') is not True:
+            continue
+        runtime = ability.get('runtime') or {}
+        if runtime.get('used_this_battle'):
+            continue
+        if ability.get('has_charges') and int(ability.get('charges_remaining') or 0) <= 0:
+            continue
+        return slot_key, pokemon, ability
+    return None
+
+
+def _compute_team_bonus_bp(player: dict, chosen: dict) -> int:
+    """Retorna bônus de BP de habilidade team_bonus (ex.: múltiplos Beedrill).
+
+    Idempotente: calculado em runtime a partir do estado atual da equipe; não
+    é persistido no pokemon, portanto não há risco de duplicação em save/load.
+    """
+    sync_pokemon_ability_state(chosen)
+    chosen_slot_key = chosen.get('battle_slot_key', '')
+    for ability in (chosen.get('abilities') or []):
+        for effect in (ability.get('effects') or []):
+            if effect.get('effect_kind') != 'team_bonus' or not effect.get('implemented'):
+                continue
+            params = effect.get('params') or {}
+            bonus_per_ally = int(params.get('bonus_bp_per_ally') or 0)
+            ally_name = params.get('ally_name') or chosen.get('name', '')
+            if not bonus_per_ally or not ally_name:
+                continue
+            ally_name_lc = ally_name.lower()
+            count = sum(
+                1
+                for slot_key, p in _iter_player_battle_slots(player, include_knocked_out=True)
+                if (p.get('name') or '').lower() == ally_name_lc and slot_key != chosen_slot_key
+            )
+            return count * bonus_per_ally
+    return 0
+
+
+def _award_team_bonus_mp(state: dict, player: dict, pokemon: dict) -> None:
+    """Concede MP extra de habilidade team_bonus ao adicionar pokemon à equipe.
+
+    Deve ser chamado DEPOIS de appended ao player['pokemon'], para que o contador
+    inclua o novo pokemon e `other_count = total - 1` seja correto.
+    Idempotente por design: só é chamado uma vez, no momento de aquisição.
+    """
+    for definition in get_static_ability_definitions(pokemon):
+        for effect in (definition.get('effects') or []):
+            if effect.get('effect_kind') != 'team_bonus' or not effect.get('implemented'):
+                continue
+            params = effect.get('params') or {}
+            bonus_per_ally = int(params.get('bonus_mp_per_ally') or 0)
+            ally_name = params.get('ally_name') or pokemon.get('name', '')
+            if not bonus_per_ally or not ally_name:
+                continue
+            ally_name_lc = ally_name.lower()
+            total_count = sum(
+                1
+                for _, p in _iter_player_battle_slots(player, include_knocked_out=True)
+                if (p.get('name') or '').lower() == ally_name_lc
+            )
+            other_count = total_count - 1  # exclui o recém-adicionado
+            if other_count > 0:
+                bonus_mp = other_count * bonus_per_ally
+                player['master_points'] += bonus_mp
+                _log(
+                    state,
+                    player['name'],
+                    f"Bônus de equipe ({pokemon.get('name', '')}): +{bonus_mp} MP "
+                    f"({other_count} aliado(s) com o mesmo nome na equipe)",
+                )
+            return
 
 
 def _next_player_id(state: dict) -> str:
@@ -2135,8 +2986,12 @@ def process_move(state: dict, player_id: str, dice_result: int) -> dict:
     Processa rolagem de dado: move o jogador e resolve o efeito da casa.
     """
     state = copy.deepcopy(state)
+    state = _clear_host_tools_pending_tile(state, player_id=player_id)
     player = _get_player(state, player_id)
     board_data = state['board']
+    pending_action = state['turn'].get('pending_action') or {}
+    if pending_action.get('type') == 'ability_decision' and pending_action.get('player_id') == player_id:
+        _clear_pending_action(state)
 
     old_pos = player['position']
     natural_destination = calculate_new_position(old_pos, dice_result, board_data)
@@ -2256,7 +3111,7 @@ def _resolve_tile_effect(state: dict, player_id: str, tile: dict, effect: dict) 
                 _log(state, player['name'], f"Parou em {tile['name']} e pode curar até 3 Pokémon nocauteados.")
                 return state
         elif city_kind == 'pokemart':
-            return _queue_market_event(state, player_id, source='pokemart', source_tile=tile)
+            return _resolve_pokemart_tile(state, player_id, tile)
         # Cidade: recupera 1 Full Restore gratuitamente
         add_item(player, 'full_restore', 1)
         _log(state, player['name'], f"Chegou em {tile['name']} e recuperou 1 Full Restore")
@@ -3090,6 +3945,132 @@ def use_ability(state: dict, player_id: str, ability_action: str,
     return state, base_result
 
 
+def use_pokemon_ability(
+    state: dict,
+    player_id: str,
+    *,
+    slot_key: str | None,
+    ability_id: str | None = None,
+    action_id: str | None = None,
+) -> tuple[dict | None, dict | str]:
+    state = copy.deepcopy(state)
+    turn = state.get('turn') or {}
+
+    if turn.get('current_player_id') != player_id:
+        return None, 'Não é seu turno'
+
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    annotate_state_ability_snapshots(state)
+    pokemon = _get_player_pokemon_slot(player, slot_key)
+    if not pokemon:
+        return None, 'Pokémon inválido para ativar habilidade'
+
+    selected_ability_id = (ability_id or 'primary').strip() or 'primary'
+    selected_action_id = (action_id or '').strip()
+    if not selected_action_id:
+        return None, 'Ação de habilidade inválida'
+
+    ability = next(
+        (
+            item for item in (pokemon.get('abilities') or [])
+            if item.get('id') == selected_ability_id
+        ),
+        None,
+    )
+    if not ability:
+        return None, 'Habilidade não encontrada'
+
+    action = next(
+        (
+            item for item in (ability.get('actions') or [])
+            if item.get('action_id') == selected_action_id
+        ),
+        None,
+    )
+    if not action:
+        return None, 'Ação de habilidade não encontrada'
+    if not action.get('supported'):
+        return None, 'Esta ação de habilidade ainda não possui handler seguro'
+    if not action.get('can_activate_now'):
+        return None, action.get('disabled_reason') or 'Esta habilidade não pode ser usada agora'
+
+    pokemon_name = pokemon.get('name', 'Pokémon')
+    ability_name = ability.get('name') or 'Habilidade'
+    effect_kind = action.get('effect_kind')
+    consume_charge = ability.get('charges_total') is not None
+
+    if effect_kind == 'fixed_move':
+        steps = int((action.get('params') or {}).get('steps') or 0)
+        if steps <= 0:
+            return None, 'Movimento fixo inválido'
+        mark_primary_ability_used(pokemon, scope='turn', consume_charge=consume_charge)
+        _log(state, player['name'], f'Usou {ability_name} de {pokemon_name} para mover {steps} casa(s) sem rolar o dado.')
+        state = process_move(state, player_id, steps)
+        return state, {
+            'type': 'manual_pokemon_ability',
+            'pokemon': pokemon_name,
+            'ability_name': ability_name,
+            'effect_kind': effect_kind,
+            'steps': steps,
+        }
+
+    if effect_kind == 'capture_free_next':
+        mark_primary_ability_used(pokemon, scope='turn', consume_charge=consume_charge)
+        state['turn']['compound_eyes_active'] = True
+        _log(state, player['name'], f'Usou {ability_name} de {pokemon_name}. A próxima captura deste turno não gastará Pokébola.')
+        return state, {
+            'type': 'manual_pokemon_ability',
+            'pokemon': pokemon_name,
+            'ability_name': ability_name,
+            'effect_kind': effect_kind,
+            'capture_free': True,
+        }
+
+    if effect_kind == 'heal_other':
+        if state['turn'].get('phase') == 'battle':
+            return None, 'Não é possível curar outro Pokémon durante uma batalha'
+        # Find knocked-out Pokémon excluding the ability user's own slot
+        options = []
+        for target_slot_key, target_poke in _iter_player_battle_slots(player, include_knocked_out=True):
+            if target_slot_key == slot_key:
+                continue
+            if not target_poke.get('knocked_out'):
+                continue
+            label = target_poke.get('name', target_slot_key)
+            if target_slot_key == 'starter':
+                label = f'{label} (Starter)'
+            options.append({
+                'id': target_slot_key,
+                'slot_key': target_slot_key,
+                'label': f'Curar {label}',
+                'pokemon_name': target_poke.get('name', target_slot_key),
+            })
+        if not options:
+            return None, 'Nenhum Pokémon elegível para curar (nenhum desmaiado)'
+        _set_pending_action(state, {
+            'type': 'heal_other_choice',
+            'player_id': player_id,
+            'healer_slot_key': slot_key,
+            'healer_name': pokemon_name,
+            'ability_name': ability_name,
+            'prompt': f'{pokemon_name} pode curar um Pokémon desmaiado:',
+            'options': options,
+            'allowed_actions': ['resolve_pending_action'],
+        })
+        return state, {
+            'type': 'manual_pokemon_ability',
+            'pokemon': pokemon_name,
+            'ability_name': ability_name,
+            'effect_kind': effect_kind,
+            'awaiting_target': True,
+        }
+
+    return None, 'Esta ação de habilidade ainda não foi implementada com segurança'
+
+
 def _resolve_league(state: dict, player_id: str) -> dict:
     """Resolve a fase da Liga Pokémon (Elite Four + Campeão)."""
     player = _get_player(state, player_id)
@@ -3164,6 +4145,7 @@ def _resolve_successful_capture(
     capture_context: str,
     capture_cost: int,
     use_full_restore: bool,
+    use_master_ball: bool,
     capture_roll: dict,
 ) -> tuple[dict | None, str | dict]:
     if state['turn'].get('compound_eyes_active'):
@@ -3184,6 +4166,12 @@ def _resolve_successful_capture(
         return None, result
 
     player = _get_player(state, player_id)
+    master_ball_consumed = False
+    if use_master_ball:
+        if not remove_item(player, 'master_ball', 1):
+            return None, 'Sem Master Ball disponível para concluir esta captura'
+        master_ball_consumed = True
+        _log(state, player['name'], 'A Master Ball foi consumida porque a captura foi concluída com sucesso.')
     _log(state, player['name'], f"Capturou {pokemon['name']}! +{pokemon.get('master_points', 0)} MP")
     _clear_pending_action(state)
 
@@ -3199,18 +4187,30 @@ def _resolve_successful_capture(
             capture_context='safari',
             source='safari_zone',
         )
-        return state, {**result, 'safari_next': True, 'capture_roll': capture_roll}
+        return state, {
+            **result,
+            'safari_next': True,
+            'capture_roll': capture_roll,
+            'used_master_ball': use_master_ball,
+            'master_ball_consumed': master_ball_consumed,
+        }
 
     state['turn']['pending_safari'] = None
     state['turn']['capture_context'] = None
     state = end_turn(state)
-    return state, {**result, 'capture_roll': capture_roll}
+    return state, {
+        **result,
+        'capture_roll': capture_roll,
+        'used_master_ball': use_master_ball,
+        'master_ball_consumed': master_ball_consumed,
+    }
 
 
 def _resolve_failed_capture(state: dict, player_id: str, capture_roll: dict, reason: str) -> tuple[dict, dict]:
     player = _get_player(state, player_id)
     pokemon = state['turn'].get('pending_pokemon')
     pending_action = state['turn'].get('pending_action') or {}
+    used_master_ball = bool(pending_action.get('master_ball_in_use'))
     if player:
         if pokemon:
             _log(state, player['name'], f"Falhou ao capturar {pokemon['name']}: {reason}")
@@ -3218,6 +4218,8 @@ def _resolve_failed_capture(state: dict, player_id: str, capture_roll: dict, rea
             _log(state, player['name'], f"Falhou ao resolver o encontro em {pending_action['encounter_source']}: {reason}")
         else:
             _log(state, player['name'], f"Falhou ao resolver a captura: {reason}")
+        if used_master_ball:
+            _log(state, player['name'], 'A Master Ball não foi consumida porque a captura não foi concluída.')
 
     state['turn']['pending_pokemon'] = None
     _clear_pending_action(state)
@@ -3236,15 +4238,34 @@ def _resolve_failed_capture(state: dict, player_id: str, capture_roll: dict, rea
             capture_context='safari',
             source='safari_zone',
         )
-        return state, {'success': False, 'capture_roll': capture_roll, 'safari_next': True}
+        return state, {
+            'success': False,
+            'capture_roll': capture_roll,
+            'safari_next': True,
+            'used_master_ball': used_master_ball,
+            'master_ball_preserved': used_master_ball,
+        }
 
     state['turn']['pending_safari'] = None
     state['turn']['capture_context'] = None
     state = end_turn(state)
-    return state, {'success': False, 'capture_roll': capture_roll}
+    return state, {
+        'success': False,
+        'capture_roll': capture_roll,
+        'used_master_ball': used_master_ball,
+        'master_ball_preserved': used_master_ball,
+    }
 
 
-def roll_capture_attempt(state: dict, player_id: str, use_full_restore: bool = False) -> tuple[dict | None, str | dict]:
+def roll_capture_attempt(
+    state: dict,
+    player_id: str,
+    use_full_restore: bool = False,
+    *,
+    use_master_ball: bool = False,
+    chosen_capture_roll: int | None = None,
+    ability_chosen_roll: int | None = None,
+) -> tuple[dict | None, str | dict]:
     state = copy.deepcopy(state)
     player = _get_player(state, player_id)
     if not player:
@@ -3261,11 +4282,98 @@ def roll_capture_attempt(state: dict, player_id: str, use_full_restore: bool = F
     resolver_card = pending_action.get('resolver_card')
     encounters = pending_action.get('encounters') or []
     prior_rolls = [int(roll) for roll in (pending_action.get('capture_rolls') or [])]
-    state, capture_roll = roll_capture_for_attempt(state, player_id, capture_context)
+    master_ball_in_use = bool(pending_action.get('master_ball_in_use'))
+    using_master_ball_now = bool(use_master_ball)
+
+    if use_full_restore and using_master_ball_now:
+        return None, 'Escolha entre Full Restore ou Master Ball para esta captura'
+    if using_master_ball_now and prior_rolls:
+        return None, 'A Master Ball só pode controlar a primeira rolagem da captura'
+    if using_master_ball_now and master_ball_in_use:
+        return None, 'Esta captura já está usando uma Master Ball'
+
+    # capture_choice: antes de rolar, primeira rolagem, sem master ball, sem context lendário
+    if (
+        not prior_rolls
+        and not using_master_ball_now
+        and ability_chosen_roll is None
+        and not pending_action.get('capture_choice_used')
+    ):
+        is_legendary_ctx = state['turn'].get('seafoam_legendary') or capture_context == 'power_plant'
+        if not is_legendary_ctx:
+            cap_choice = _find_available_capture_ability(player, 'capture_choice')
+            if cap_choice:
+                slot_key, cap_pokemon, cap_ability = cap_choice
+                return _queue_capture_choice_decision(
+                    state, player_id, use_full_restore,
+                    pending_capture_action=pending_action,
+                    slot_key=slot_key,
+                    pokemon=cap_pokemon,
+                    ability=cap_ability,
+                )
+
+    if using_master_ball_now:
+        if get_item_quantity(player, 'master_ball') <= 0:
+            return None, 'Sem Master Ball disponível'
+        try:
+            forced_roll = int(chosen_capture_roll)
+        except (TypeError, ValueError):
+            return None, 'Escolha um valor válido de 1 a 6 para a Master Ball'
+        if not 1 <= forced_roll <= 6:
+            return None, 'Escolha um valor válido de 1 a 6 para a Master Ball'
+        capture_roll = _record_roll(
+            state,
+            roll_type='captura',
+            player_id=player_id,
+            player_name=player['name'],
+            raw_result=forced_roll,
+            final_result=forced_roll,
+            context=capture_context,
+            metadata={'forced_by': 'master_ball'},
+        )
+        _log(state, player['name'], f"Usou a Master Ball e escolheu {forced_roll} para o dado de captura.")
+    elif ability_chosen_roll is not None:
+        # Rolagem determinada por habilidade (capture_choice) ou resultado mantido (capture_reroll keep)
+        forced = int(ability_chosen_roll)
+        capture_roll = _record_roll(
+            state,
+            roll_type='captura',
+            player_id=player_id,
+            player_name=player['name'],
+            raw_result=forced,
+            final_result=forced,
+            context=capture_context,
+            metadata={'forced_by': 'ability'},
+        )
+    else:
+        state, capture_roll = roll_capture_for_attempt(state, player_id, capture_context)
+
+    # capture_reroll: após rolar, sem master ball, sem rolagem forçada por habilidade
+    if (
+        not using_master_ball_now
+        and ability_chosen_roll is None
+        and not pending_action.get('capture_reroll_used')
+    ):
+        cap_reroll = _find_available_capture_ability(player, 'capture_reroll')
+        if cap_reroll:
+            slot_key, cap_pokemon, cap_ability = cap_reroll
+            return _queue_capture_reroll_decision(
+                state, player_id, use_full_restore,
+                pending_capture_action=pending_action,
+                capture_roll=capture_roll,
+                slot_key=slot_key,
+                pokemon=cap_pokemon,
+                ability=cap_ability,
+            )
+
     current_rolls = prior_rolls + [int(capture_roll['raw_result'])]
     capture_roll_result = copy.deepcopy(capture_roll)
     capture_roll_result['all_rolls'] = current_rolls
     allowed_rolls = pending_action.get('allowed_rolls') or []
+    if using_master_ball_now:
+        pending_action = copy.deepcopy(pending_action)
+        pending_action['master_ball_in_use'] = True
+        _set_pending_action(state, pending_action)
 
     resolution = None
     success = not allowed_rolls or int(capture_roll['raw_result']) in allowed_rolls
@@ -3279,21 +4387,28 @@ def roll_capture_attempt(state: dict, player_id: str, use_full_restore: bool = F
         updated_action = copy.deepcopy(state['turn'].get('pending_action') or pending_action)
         updated_action['capture_rolls'] = current_rolls
         updated_action['requires_additional_roll'] = True
+        updated_action['master_ball_in_use'] = master_ball_in_use or using_master_ball_now
         updated_action['prompt'] = _build_capture_attempt_prompt(
             pokemon=pokemon,
             encounter_source=updated_action.get('encounter_source'),
             source=updated_action.get('source', 'capture_attempt'),
             capture_rolls=current_rolls,
             requires_additional_roll=True,
+            master_ball_in_use=updated_action['master_ball_in_use'],
         )
         _set_pending_action(state, updated_action)
         state['turn']['pending_pokemon'] = copy.deepcopy(pokemon) if pokemon else None
-        _log(state, player['name'], f"A captura exige nova rolagem. Dados atuais: {current_rolls}.")
+        if updated_action['master_ball_in_use']:
+            _log(state, player['name'], f"A Master Ball controlou a primeira rolagem. A próxima rolagem será normal. Dados atuais: {current_rolls}.")
+        else:
+            _log(state, player['name'], f"A captura exige nova rolagem. Dados atuais: {current_rolls}.")
         return state, {
             'success': False,
             'requires_additional_roll': True,
             'capture_roll': capture_roll_result,
             'capture_rolls': current_rolls,
+            'used_master_ball': updated_action['master_ball_in_use'],
+            'master_ball_consumed': False,
         }
 
     if resolution:
@@ -3340,7 +4455,9 @@ def roll_capture_attempt(state: dict, player_id: str, use_full_restore: bool = F
     slot_cost = pokemon_slot_cost(pokemon)
     capture_cost = slot_cost
 
-    if compound_eyes_active:
+    if master_ball_in_use or using_master_ball_now:
+        capture_cost = slot_cost
+    elif compound_eyes_active:
         capture_cost = 0
     elif is_legendary and not use_full_restore:
         capture_cost = max(2, slot_cost)
@@ -3362,6 +4479,7 @@ def roll_capture_attempt(state: dict, player_id: str, use_full_restore: bool = F
             pokemon=pokemon,
             capture_cost=capture_cost,
             use_full_restore=use_full_restore,
+            use_master_ball=master_ball_in_use or using_master_ball_now,
             capture_roll=capture_roll_result,
             capture_context=capture_context,
         )
@@ -3373,6 +4491,7 @@ def roll_capture_attempt(state: dict, player_id: str, use_full_restore: bool = F
         capture_context=capture_context,
         capture_cost=capture_cost,
         use_full_restore=use_full_restore,
+        use_master_ball=master_ball_in_use or using_master_ball_now,
         capture_roll=capture_roll_result,
     )
 
@@ -3464,6 +4583,7 @@ def release_pokemon_for_capture(
 
     resolution_type = pending.get('resolution_type', 'capture')
     capture_cost = int(pending.get('capture_cost', 1 if resolution_type == 'capture' else pokemon_slot_cost(pending.get('pokemon'))))
+    use_master_ball = bool(pending.get('use_master_ball'))
     if player['pokeballs'] < capture_cost:
         turn['pending_release_choice']['options'] = _build_release_pokemon_options(player)
         return state, {
@@ -3471,6 +4591,7 @@ def release_pokemon_for_capture(
             'requires_release': True,
             'pokeballs_left': player['pokeballs'],
             'capture_roll': pending.get('capture_roll'),
+            'use_master_ball': use_master_ball,
         }
 
     pokemon = pending.get('pokemon')
@@ -3497,6 +4618,7 @@ def release_pokemon_for_capture(
         capture_context=pending.get('capture_context') or state['turn'].get('capture_context', 'grass'),
         capture_cost=capture_cost,
         use_full_restore=use_full_restore,
+        use_master_ball=use_master_ball,
         capture_roll=pending.get('capture_roll'),
     )
     if finalized is None:
@@ -3522,11 +4644,13 @@ def skip_action(state: dict, player_id: str) -> dict:
     state = copy.deepcopy(state)
     turn = state['turn']
     player = _get_player(state, player_id)
+    pending_action = turn.get('pending_action') or {}
 
     pending_release_choice = turn.get('pending_release_choice') or {}
     if turn.get('phase') == 'release_pokemon' and pending_release_choice.get('player_id') == player_id:
         incoming = pending_release_choice.get('pokemon') or turn.get('pending_pokemon') or {}
         incoming_name = incoming.get('name', 'o Pokémon pendente')
+        use_master_ball = bool(pending_release_choice.get('use_master_ball'))
         _clear_pending_capture(state)
         turn.pop('compound_eyes_active', None)
         turn.pop('seafoam_legendary', None)
@@ -3541,9 +4665,13 @@ def skip_action(state: dict, player_id: str) -> dict:
 
         if player:
             _log(state, player['name'], f"Cancelou a captura de {incoming_name}")
+            if use_master_ball:
+                _log(state, player['name'], 'A Master Ball foi preservada porque a captura foi cancelada.')
         turn['phase'] = 'action'
 
     # Limpa Pokémon atual
+    if player and pending_action.get('type') == 'capture_attempt' and pending_action.get('master_ball_in_use'):
+        _log(state, player['name'], 'A Master Ball foi preservada porque a captura foi cancelada.')
     turn['pending_pokemon'] = None
     _clear_pending_action(state)
     turn.pop('compound_eyes_active', None)
@@ -3581,6 +4709,8 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
     pending_action = state['turn'].get('pending_action') or {}
     pending_type = pending_action.get('type')
     if pending_type not in (
+        'ability_decision',
+        'pokemart_roll',
         'reward_choice',
         'gym_heal',
         'pokecenter_heal',
@@ -3588,6 +4718,10 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
         'bill_teleport',
         'game_corner',
         'teleporter_manual_roll',
+        'capture_choice_decision',
+        'capture_reroll_decision',
+        'battle_reroll_decision',
+        'heal_other_choice',
     ):
         return None, 'Nenhuma escolha pendente'
     if pending_action.get('player_id') != player_id:
@@ -3597,6 +4731,26 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
     chosen = next((option for option in options if str(option.get('id')) == str(option_id)), None)
     if not chosen:
         return None, 'Opção inválida'
+
+    if pending_type == 'ability_decision':
+        if pending_action.get('decision_kind') == 'move_roll':
+            return _resolve_move_roll_ability_decision(state, player_id, pending_action, chosen)
+        return None, 'Tipo de decisão de habilidade ainda não suportado'
+
+    if pending_type == 'capture_choice_decision':
+        return _resolve_capture_choice_decision(state, player_id, pending_action, chosen)
+
+    if pending_type == 'capture_reroll_decision':
+        return _resolve_capture_reroll_decision(state, player_id, pending_action, chosen)
+
+    if pending_type == 'battle_reroll_decision':
+        return _resolve_battle_reroll_decision(state, player_id, pending_action, chosen)
+
+    if pending_type == 'heal_other_choice':
+        return _resolve_heal_other_choice(state, player_id, pending_action, chosen)
+
+    if pending_type == 'pokemart_roll':
+        return _resolve_pokemart_roll_action(state, player_id, pending_action)
 
     prompt = pending_action.get('prompt') or 'Escolha pendente'
     _log(state, player['name'], f"{prompt}: {chosen.get('label', option_id)}")
@@ -3923,6 +5077,99 @@ def trigger_current_tile_effect(state: dict, player_id: str, *, source: str = 'd
     return state, {'success': True, 'tile_id': tile.get('id'), 'tile_name': tile.get('name'), 'source': source}
 
 
+def set_host_tools_enabled(state: dict, enabled: bool) -> tuple[dict | None, str | dict]:
+    state = copy.deepcopy(state)
+    host_tools = copy.deepcopy(_get_host_tools_state(state))
+    host_tools['enabled'] = bool(enabled)
+    if not enabled:
+        host_tools['pending_tile_trigger'] = None
+    state = _set_host_tools_state(state, host_tools)
+    return state, {'enabled': bool(enabled)}
+
+
+def debug_move_host(state: dict, player_id: str, steps: int) -> tuple[dict | None, str | dict]:
+    state = copy.deepcopy(state)
+    error = _require_host_tools_enabled(state)
+    if error:
+        return None, error
+
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+    if state.get('status') != 'playing':
+        return None, 'A partida ainda não está em andamento'
+    if state.get('turn', {}).get('current_player_id') != player_id:
+        return None, 'Não é seu turno'
+    if turn_has_blocking_interaction(state.get('turn')):
+        return None, 'Não é possível mover com Host Tools durante uma interação pendente'
+
+    steps = int(steps or 0)
+    if steps == 0:
+        return None, 'O movimento de Host Tools exige um inteiro diferente de zero'
+
+    old_position = int(player.get('position', 0))
+    new_position = calculate_new_position(old_position, steps, state.get('board', {}))
+    tile = get_tile(state.get('board', {}), new_position)
+
+    player['position'] = new_position
+    state['turn']['dice_result'] = steps
+    state['turn']['current_tile'] = tile
+    state['turn']['movement_context'] = {
+        'start_position': old_position,
+        'dice_result': steps,
+        'natural_destination': int(new_position),
+        'resolved_destination': int(new_position),
+        'forced_stop_kind': 'host_tools_debug_move',
+    }
+    _record_roll(
+        state,
+        roll_type='movimento',
+        player_id=player_id,
+        player_name=player['name'],
+        raw_result=steps,
+        final_result=steps,
+        context='host_tools_debug_move',
+    )
+    state = _set_host_tools_pending_tile(state, player_id=player_id, position=new_position, steps=steps)
+    _log(
+        state,
+        player['name'],
+        f"{_HOST_TOOLS_LOG_PREFIX} Moveu {steps:+d} casa(s) para {tile.get('name', '?')} sem disparar o tile automaticamente.",
+    )
+    return state, {
+        'success': True,
+        'steps': steps,
+        'position': new_position,
+        'tile_id': tile.get('id'),
+        'tile_name': tile.get('name'),
+        'tile_pending': True,
+    }
+
+
+def debug_trigger_host_current_tile(state: dict, player_id: str) -> tuple[dict | None, str | dict]:
+    state = copy.deepcopy(state)
+    error = _require_host_tools_enabled(state)
+    if error:
+        return None, error
+
+    pending = ((_get_host_tools_state(state) or {}).get('pending_tile_trigger'))
+    if not isinstance(pending, dict) or pending.get('player_id') != player_id:
+        return None, 'Não há tile pendente para Host Tools neste turno'
+
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+    if int(player.get('position', 0)) != int(pending.get('position', 0)):
+        state = _clear_host_tools_pending_tile(state, player_id=player_id)
+        return None, 'O tile pendente não corresponde mais à posição atual do host'
+
+    state = _clear_host_tools_pending_tile(state, player_id=player_id)
+    new_state, result = trigger_current_tile_effect(state, player_id, source='host_tools')
+    if new_state is None:
+        return None, result
+    return new_state, result
+
+
 # ── Duelo ────────────────────────────────────────────────────────────────────
 
 
@@ -4165,6 +5412,8 @@ def _start_gym_battle(state: dict, player_id: str, tile: dict, gym_definition: d
     if not player:
         return state
 
+    reset_player_ability_runtime(player, 'battle')
+
     gym_id = gym_definition['id']
     _mark_gym_progress(player, 'gyms_attempted', gym_id)
     leader_team = build_gym_leader_team(gym_definition)
@@ -4394,6 +5643,8 @@ def _start_trainer_battle(state: dict, player_id: str, trainer_context: dict, so
     if not player:
         return state
 
+    reset_player_ability_runtime(player, 'battle')
+
     state['turn']['phase'] = 'battle'
     state['turn']['battle'] = {
         'mode': 'trainer',
@@ -4450,8 +5701,7 @@ def _apply_trainer_battle_rewards(state: dict, player_id: str, battle: dict) -> 
         if player.get('starter_pokemon'):
             all_pokemon.append(player['starter_pokemon'])
         for pokemon in all_pokemon:
-            if int(pokemon.get('ability_charges', 0) or 0) > 0:
-                pokemon['ability_charges'] = int(pokemon['ability_charges']) + 1
+            if adjust_primary_ability_charges(pokemon, 1) is not None:
                 rewards.append({'type': 'ability_charge', 'pokemon': pokemon['name']})
                 break
 
@@ -4677,6 +5927,9 @@ def start_duel(state: dict, challenger_id: str, defender_id: str) -> dict | None
     if not challenger_pool or not defender_pool:
         return None
 
+    reset_player_ability_runtime(challenger, 'battle')
+    reset_player_ability_runtime(defender, 'battle')
+
     state['turn']['phase'] = 'battle'
     state['turn']['battle'] = {
         'mode': 'player',
@@ -4763,6 +6016,11 @@ def register_battle_choice(
         chosen['battle_points'] = chosen.get('battle_points', 0) + 2
         chosen['pluspower_applied'] = True
 
+    team_bp_bonus = _compute_team_bonus_bp(player, chosen)
+    if team_bp_bonus > 0:
+        chosen['battle_points'] = chosen.get('battle_points', 0) + team_bp_bonus
+        chosen['team_bonus_bp'] = team_bp_bonus
+
     if is_challenger:
         battle['challenger_choice'] = chosen
     else:
@@ -4844,6 +6102,26 @@ def register_battle_roll(state: dict, player_id: str) -> tuple[dict, dict | None
         battle['challenger_roll'] = roll
     else:
         battle['defender_roll'] = roll
+
+    # battle_reroll: offer reroll to the rolling player (challenger only in trainer/gym)
+    battle_choice = battle.get('challenger_choice' if is_challenger else 'defender_choice') or {}
+    br = _find_available_battle_reroll_ability(player, battle_choice)
+    if br:
+        slot_key, br_pokemon, br_ability = br
+        if mode == 'trainer':
+            trainer_roll = roll_battle_dice()
+            battle['defender_roll'] = trainer_roll
+        elif mode == 'gym':
+            leader_roll = roll_battle_dice()
+            battle['defender_roll'] = leader_roll
+        return _queue_battle_reroll_decision(
+            state, player_id,
+            roll=roll,
+            is_challenger=is_challenger,
+            slot_key=slot_key,
+            pokemon=br_pokemon,
+            ability=br_ability,
+        )
 
     if mode == 'trainer':
         trainer_roll = roll_battle_dice()
@@ -5425,6 +6703,26 @@ def debug_add_item(state: dict, player_id: str, item_key: str, quantity: int) ->
     return state, {'item_key': item_key, 'quantity': quantity, 'debug_catalog': list_debug_item_defs()}
 
 
+def debug_add_item_to_host(state: dict, player_id: str, item_key: str, quantity: int) -> tuple[dict | None, str | dict]:
+    error = _require_host_tools_enabled(state)
+    if error:
+        return None, error
+    return debug_add_item(state, player_id, item_key, quantity)
+
+
+def debug_add_pokemon_to_host(state: dict, player_id: str, pokemon_name: str) -> tuple[dict | None, str | dict]:
+    state = copy.deepcopy(state)
+    error = _require_host_tools_enabled(state)
+    if error:
+        return None, error
+
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    return _apply_debug_pokemon_grant(state, player, pokemon_name, log_prefix=_HOST_TOOLS_LOG_PREFIX)
+
+
 def debug_add_pokemon_to_test_player(state: dict, pokemon_name: str) -> tuple[dict | None, str | dict]:
     state = copy.deepcopy(state)
     session = _get_debug_visual_session(state)
@@ -5435,35 +6733,11 @@ def debug_add_pokemon_to_test_player(state: dict, pokemon_name: str) -> tuple[di
     if not player:
         return None, 'Player de teste do debug não encontrado'
 
-    pokemon_name = (pokemon_name or '').strip()
-    if not pokemon_name:
-        return None, 'pokemon_name é obrigatório'
-
-    pokemon = load_pokemon_by_name(pokemon_name)
-    if not pokemon:
-        return None, f'Pokémon "{pokemon_name}" não foi encontrado no dataset atual'
-
-    pokemon = _init_pokemon(pokemon)
-    pokemon['types'] = [str(poke_type).title() for poke_type in pokemon.get('types', [])]
-    pokemon['knocked_out'] = False
-    _apply_pokemon_acquisition_metadata(
-        pokemon,
-        acquisition_origin='debug',
-        capture_context='debug_add',
-    )
-
-    player.setdefault('pokemon', []).append(pokemon)
-    player['pokeballs'] = max(0, int(player.get('pokeballs', 0)) - pokemon_slot_cost(pokemon))
-    sync_player_inventory(player)
-
-    _log(session, player['name'], f"[DEBUG] Adicionou {pokemon['name']} ao player de teste")
+    result_state, result = _apply_debug_pokemon_grant(session, player, pokemon_name, log_prefix='[DEBUG]')
+    if result_state is None:
+        return None, result
     _store_debug_visual_session(state, session, enabled=True)
-    return state, {
-        'success': True,
-        'pokemon': copy.deepcopy(pokemon),
-        'slot_cost': pokemon_slot_cost(pokemon),
-        'remaining_pokeball_slots': int(player.get('pokeballs', 0)),
-    }
+    return state, result
 
 
 def set_debug_test_player_enabled(state: dict, enabled: bool) -> tuple[dict | None, str | dict]:
@@ -5542,6 +6816,15 @@ def roll_debug_test_player(state: dict) -> tuple[dict | None, str | dict]:
     old_position = player.get('position', 0)
     old_name = player['name']
     session, roll_entry = perform_movement_roll(session, player['id'])
+    if (session.get('turn', {}).get('pending_action') or {}).get('type') == 'ability_decision':
+        _store_debug_visual_session(state, session, enabled=True)
+        return state, {
+            'success': True,
+            'roll': int(roll_entry['final_result']),
+            'raw_roll': int(roll_entry['raw_result']),
+            'requires_pending_action': True,
+        }
+
     player = _get_player(session, _DEBUG_TEST_PLAYER_ID)
     new_position = calculate_new_position(old_position, int(roll_entry['final_result']), session.get('board', {}))
     player['position'] = new_position
@@ -5789,7 +7072,12 @@ def end_turn(state: dict) -> dict:
     Verifica turno extra, atualiza jogador atual.
     """
     state = copy.deepcopy(state)
+    state = _clear_host_tools_pending_tile(state)
     turn = state['turn']
+    current_player = _get_player(state, turn.get('current_player_id'))
+    if current_player:
+        reset_player_ability_runtime(current_player, 'turn')
+        sync_player_inventory(current_player)
 
     # Turno extra (ex: carta de evento)
     if turn.get('extra_turn'):

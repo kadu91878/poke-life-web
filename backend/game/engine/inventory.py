@@ -8,6 +8,8 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
+from .pokemon_abilities import sync_pokemon_ability_state
+
 ITEM_CAPACITY = 8
 
 ITEM_DEFS = {
@@ -303,6 +305,7 @@ def sync_player_inventory(player: dict) -> dict:
 
     pokemon_inventory = []
     if player.get('starter_pokemon'):
+        sync_pokemon_ability_state(player['starter_pokemon'])
         pokemon_inventory.append({
             **copy.deepcopy(player['starter_pokemon']),
             'is_starter_slot': True,
@@ -310,6 +313,7 @@ def sync_player_inventory(player: dict) -> dict:
             'slot_cost': pokemon_slot_cost(player['starter_pokemon']),
         })
     for index, pokemon in enumerate(player.get('pokemon', [])):
+        sync_pokemon_ability_state(pokemon)
         pokemon_inventory.append({
             **copy.deepcopy(pokemon),
             'is_starter_slot': False,
