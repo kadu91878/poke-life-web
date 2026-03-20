@@ -19,6 +19,7 @@
           <div class="player-dot" :style="{ background: player.color }"></div>
           <span class="player-name">{{ player.name }}</span>
           <span v-if="player.is_host" class="badge host">Host</span>
+          <span v-if="player.is_cpu"  class="badge cpu">CPU</span>
           <span v-if="player.id === playerId" class="badge you">Você</span>
           <button v-if="isHost && player.id !== playerId"
                   class="btn-ghost remove-btn"
@@ -40,6 +41,12 @@
         Iniciar Partida ({{ players.length }}/5)
       </button>
       <p v-else class="waiting-msg">Aguardando o host iniciar a partida...</p>
+
+      <button v-if="isHost && players.length < 5" class="btn-ghost cpu-btn"
+              :disabled="wsStatus !== 'connected'"
+              @click="handleAddCpu">
+        + Adicionar CPU
+      </button>
 
       <button class="btn-ghost leave-btn" @click="handleLeave">Sair</button>
     </div>
@@ -77,6 +84,14 @@ function handleLeave() {
   store.actions.leaveGame()
   store.$reset()
   router.push({ name: 'home' })
+}
+
+async function handleAddCpu() {
+  try {
+    await store.addCpuPlayer()
+  } catch (e) {
+    console.error('Erro ao adicionar CPU:', e)
+  }
 }
 
 // Avança para o jogo quando iniciado
@@ -176,6 +191,7 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 .badge.host { background: var(--color-accent); color: #333; }
+.badge.cpu  { background: #7c3aed; color: #fff; }
 .badge.you  { background: var(--color-secondary); color: #fff; }
 
 .remove-btn { font-size: 0.8rem; padding: 0.2rem 0.6rem; color: #ff6b6b; }
@@ -188,6 +204,7 @@ onBeforeUnmount(() => {
 }
 
 .start-btn { width: 100%; padding: 1rem; font-size: 1.1rem; }
+.cpu-btn   { padding: 0.5rem 1.5rem; color: #7c3aed; border-color: #7c3aed; }
 .leave-btn { padding: 0.5rem 2rem; }
 
 .waiting-msg { color: var(--color-text-muted); }

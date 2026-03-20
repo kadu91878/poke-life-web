@@ -195,6 +195,46 @@ class StartGameView(RoomActionBase):
         return Response({'state': saved})
 
 
+class AddCpuPlayerView(RoomActionBase):
+    """Adiciona um jogador CPU à sala (apenas enquanto aguarda jogadores)."""
+
+    _CPU_NAMES = ['CPU Ash', 'CPU Misty', 'CPU Brock', 'CPU Gary', 'CPU Jessie']
+
+    def post(self, request, room_code):
+        room = self.get_room(room_code)
+        if not room:
+            return Response({'error': 'Sala não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+
+        state = self.get_state(room)
+
+        if state.get('status') != 'waiting':
+            return Response({'error': 'Só é possível adicionar CPU antes de iniciar a partida'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        active_players = [p for p in state['players'] if p.get('is_active', True)]
+        if len(active_players) >= 5:
+            return Response({'error': 'Sala cheia (máximo 5 jogadores)'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # Pick a name not already taken
+        existing_names = {p['name'] for p in state['players']}
+        cpu_name = next(
+            (n for n in self._CPU_NAMES if n not in existing_names),
+            f'CPU {len(active_players) + 1}',
+        )
+
+        player = _new_player(cpu_name, len(state['players']))
+        player['is_cpu'] = True
+        player['is_connected'] = False  # CPU tem presença lógica, não WebSocket
+
+        state['players'].append(player)
+        saved = self.save_state(room, state, {'type': 'cpu_player_added',
+                                              'player_id': player['id'],
+                                              'player_name': cpu_name})
+        return Response({'player_id': player['id'], 'state': saved},
+                        status=status.HTTP_201_CREATED)
+
+
 class SelectStarterView(RoomActionBase):
     def post(self, request, room_code):
         room = self.get_room(room_code)

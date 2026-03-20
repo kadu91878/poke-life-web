@@ -98,6 +98,12 @@ export const useGameStore = defineStore('game', () => {
     await axios.delete(`/api/rooms/${code}/`)
   }
 
+  async function addCpuPlayer() {
+    const { data } = await axios.post(`/api/rooms/${roomCode.value}/add-cpu/`)
+    if (data.state) gameState.value = data.state
+    return data
+  }
+
   // ── WebSocket ─────────────────────────────────────────────────────────────
   function connect(code, name) {
     const sameRoom = roomCode.value === code
@@ -464,7 +470,7 @@ export const useGameStore = defineStore('game', () => {
     me, players, allPlayers, status, turn, isMyTurn, isHost, currentPlayer, phase,
     finalScores, board, debugVisual, debugSession, debugTestPlayer, debugTurn, debugLog, debugRevealedCard, hostTools, hostToolsEnabled,
     // methods
-    createRoom, fetchRoom, deleteRoom,
+    createRoom, fetchRoom, deleteRoom, addCpuPlayer,
     connect, disconnect, send, handleMessage,
     actions,
     $reset,

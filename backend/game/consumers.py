@@ -10,6 +10,7 @@ from django.conf import settings
 
 from .engine import mechanics
 from .engine import state as game_state
+from .engine import cpu as cpu_engine
 from .engine.inventory import get_starting_resource_defaults
 from .models import GameRoom
 from .socket_contract import SOCKET_HANDLER_NAMES
@@ -932,6 +933,168 @@ class GameConsumer(AsyncWebsocketConsumer):
             self.room_group_name,
             {'type': 'send_state_update', 'state': state, 'event': event or {}},
         )
+        self._schedule_cpu_actions(state)
+
+    def _schedule_cpu_actions(self, state: dict) -> None:
+        """Schedule delayed tasks for any CPU players that need to act now."""
+        cpu_ids = cpu_engine.needs_cpu_action(state)
+        for i, cpu_id in enumerate(cpu_ids):
+            delay = 1.5 + i * 1.2
+            asyncio.create_task(self._delayed_cpu_action(cpu_id, delay))
+
+    async def _delayed_cpu_action(self, cpu_player_id: str, delay: float) -> None:
+        await asyncio.sleep(delay)
+        try:
+            async with self._room_lock():
+                state = await self.get_game_state()
+                await self._execute_cpu_action(state, cpu_player_id)
+        except Exception as exc:
+            print(f'[CPU] erro ao executar ação para cpu_player={cpu_player_id!r}: {exc}')
+
+    async def _execute_cpu_action(self, state: dict, cpu_player_id: str) -> None:
+        """Execute one CPU decision step, save, and broadcast."""
+        actions = cpu_engine.decide_action(state, cpu_player_id)
+        if not actions:
+            return
+        action_name, kwargs = actions[0]
+        if action_name == 'wait':
+            return
+
+        print(f'[CPU] player={cpu_player_id!r} action={action_name!r} kwargs={kwargs}')
+        result = await self._apply_cpu_action(state, cpu_player_id, action_name, kwargs)
+        if result is None:
+            return
+        new_state, event = result
+        saved = await self.save_game_state(new_state)
+        await self.broadcast_state(saved, event)
+
+    async def _apply_cpu_action(
+        self,
+        state: dict,
+        cpu_player_id: str,
+        action_name: str,
+        kwargs: dict,
+    ) -> tuple[dict, dict] | None:
+        """Map action_name to a game_state call. Returns (new_state, event) or None."""
+
+        if action_name == 'select_starter':
+            new_state = game_state.select_starter(state, cpu_player_id, kwargs['starter_id'])
+            if new_state is None:
+                return None
+            return new_state, {'type': 'starter_selected', 'player_id': cpu_player_id,
+                               'starter_id': kwargs['starter_id']}
+
+        if action_name == 'roll_dice':
+            rolled_state, roll_entry = game_state.perform_movement_roll(state, cpu_player_id)
+            if (rolled_state.get('turn', {}).get('pending_action') or {}).get('type') == 'ability_decision':
+                new_state = rolled_state
+            else:
+                new_state = game_state.process_move(rolled_state, cpu_player_id,
+                                                    int(roll_entry['final_result']))
+            return new_state, {
+                'type': 'dice_rolled', 'roll_type': 'movement',
+                'player_id': cpu_player_id,
+                'result': roll_entry['final_result'],
+                'final_result': roll_entry['final_result'],
+            }
+
+        if action_name == 'pass_turn':
+            new_state = game_state.end_turn(state)
+            return new_state, {'type': 'turn_passed', 'player_id': cpu_player_id}
+
+        if action_name == 'resolve_event':
+            use_run_away = kwargs.get('use_run_away', False)
+            new_state, err = game_state.resolve_event(state, cpu_player_id,
+                                                      use_run_away=use_run_away)
+            if new_state is None:
+                print(f'[CPU] resolve_event falhou: {err}')
+                return None
+            return new_state, {'type': 'event_resolved', 'player_id': cpu_player_id}
+
+        if action_name == 'roll_capture_dice':
+            new_state, result = game_state.roll_capture_attempt(
+                state, cpu_player_id,
+                use_full_restore=kwargs.get('use_full_restore', False),
+                use_master_ball=kwargs.get('use_master_ball', False),
+            )
+            if new_state is None:
+                print(f'[CPU] roll_capture_attempt falhou: {result}')
+                return None
+            ev_type = ('pokemon_captured'
+                       if isinstance(result, dict) and result.get('pokemon')
+                       else 'capture_roll_resolved')
+            return new_state, {'type': ev_type, 'player_id': cpu_player_id, 'result': result}
+
+        if action_name == 'skip_action':
+            new_state = game_state.skip_action(state, cpu_player_id)
+            return new_state, {'type': 'action_skipped', 'player_id': cpu_player_id}
+
+        if action_name == 'battle_choice':
+            new_state, result = game_state.register_battle_choice(
+                state, cpu_player_id,
+                kwargs.get('pokemon_index', 0),
+                pokemon_slot_key=kwargs.get('pokemon_slot_key'),
+            )
+            if result and result.get('error'):
+                print(f'[CPU] battle_choice falhou: {result["error"]}')
+                return None
+            if result and result.get('ignored'):
+                return None
+            return new_state, {'type': 'battle_choice_registered', 'player_id': cpu_player_id}
+
+        if action_name == 'roll_battle_dice':
+            new_state, result = game_state.register_battle_roll(state, cpu_player_id)
+            if result and result.get('error'):
+                print(f'[CPU] roll_battle_dice falhou: {result["error"]}')
+                return None
+            if result and result.get('ignored'):
+                return None
+            ev = {'type': 'battle_roll_registered', 'player_id': cpu_player_id}
+            if result and not result.get('reroll_required') and (
+                result.get('winner_id') is not None
+                or result.get('mode') in ('trainer', 'gym')
+                or result.get('battle_finished')
+            ):
+                ev = {'type': 'battle_resolved', 'result': result}
+            return new_state, ev
+
+        if action_name == 'resolve_pending_action':
+            new_state, result = game_state.resolve_pending_action(
+                state, cpu_player_id, kwargs.get('option_id'))
+            if new_state is None:
+                print(f'[CPU] resolve_pending_action falhou: {result}')
+                return None
+            return new_state, {'type': 'pending_action_resolved',
+                               'player_id': cpu_player_id, 'result': result}
+
+        if action_name == 'confirm_league_intermission':
+            new_state, result = game_state.confirm_league_intermission(state, cpu_player_id)
+            if new_state is None:
+                print(f'[CPU] confirm_league_intermission falhou: {result}')
+                return None
+            return new_state, {'type': 'league_intermission_confirmed',
+                               'player_id': cpu_player_id, 'result': result}
+
+        if action_name == 'release_pokemon':
+            new_state, result = game_state.release_pokemon_for_capture(
+                state, cpu_player_id,
+                pokemon_slot_key=kwargs.get('pokemon_slot_key'),
+            )
+            if new_state is None:
+                print(f'[CPU] release_pokemon falhou: {result}')
+                return None
+            return new_state, {'type': 'pokemon_released',
+                               'player_id': cpu_player_id, 'result': result}
+
+        if action_name == 'dismiss_revealed_card':
+            new_state, result = game_state.dismiss_revealed_card(state, cpu_player_id)
+            if new_state is None:
+                print(f'[CPU] dismiss_revealed_card falhou: {result}')
+                return None
+            return new_state, {'type': 'revealed_card_dismissed', 'player_id': cpu_player_id}
+
+        print(f'[CPU] ação desconhecida: {action_name!r}')
+        return None
 
     async def send_state_update(self, message):
         try:

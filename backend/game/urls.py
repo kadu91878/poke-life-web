@@ -14,6 +14,7 @@ urlpatterns = [
     path('rooms/<str:room_code>/', views.RoomDetailView.as_view(), name='room-detail'),
     path('rooms/<str:room_code>/join/', views.JoinRoomView.as_view(), name='room-join'),
     path('rooms/<str:room_code>/start/', views.StartGameView.as_view(), name='room-start'),
+    path('rooms/<str:room_code>/add-cpu/', views.AddCpuPlayerView.as_view(), name='room-add-cpu'),
     path('rooms/<str:room_code>/select-starter/', views.SelectStarterView.as_view(), name='room-select-starter'),
     path('rooms/<str:room_code>/roll/', views.RollDiceView.as_view(), name='room-roll'),
     path('rooms/<str:room_code>/move/', views.MovePlayerView.as_view(), name='room-move'),
