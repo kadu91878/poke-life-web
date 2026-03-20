@@ -998,6 +998,30 @@ class GameConsumer(AsyncWebsocketConsumer):
                 'final_result': roll_entry['final_result'],
             }
 
+        if action_name == 'challenge_player':
+            target_id = kwargs.get('target_player_id')
+            new_state = game_state.start_duel(state, cpu_player_id, target_id)
+            if new_state is None:
+                print(f'[CPU] challenge_player falhou: target={target_id!r}')
+                return None
+            return new_state, {
+                'type': 'duel_started',
+                'challenger_id': cpu_player_id,
+                'defender_id': target_id,
+            }
+
+        if action_name == 'discard_item':
+            item_key = (kwargs.get('item_key') or '').strip()
+            new_state, result = game_state.discard_item(state, cpu_player_id, item_key)
+            if new_state is None:
+                print(f'[CPU] discard_item falhou: item={item_key!r} error={result}')
+                return None
+            return new_state, {
+                'type': 'item_discarded',
+                'player_id': cpu_player_id,
+                'item_key': item_key,
+            }
+
         if action_name == 'pass_turn':
             new_state = game_state.end_turn(state)
             return new_state, {'type': 'turn_passed', 'player_id': cpu_player_id}
