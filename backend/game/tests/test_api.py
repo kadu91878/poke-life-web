@@ -38,27 +38,31 @@ class RoomApiTests(APITestCase):
         self.client.post(reverse('room-start', kwargs={'room_code': room_code}), {'player_id': host_id}, format='json')
 
         detail = self.client.get(reverse('room-detail', kwargs={'room_code': room_code})).data
-        starters = detail['game_state']['turn']['available_starters']
+        game_state = detail['game_state']
+        starters = game_state['turn']['available_starters']
+        turn_order = game_state['turn_order']
 
-        self.client.post(reverse('room-select-starter', kwargs={'room_code': room_code}), {'player_id': host_id, 'starter_id': starters[0]['id']}, format='json')
-        self.client.post(reverse('room-select-starter', kwargs={'room_code': room_code}), {'player_id': player2_id, 'starter_id': starters[1]['id']}, format='json')
+        self.client.post(reverse('room-select-starter', kwargs={'room_code': room_code}), {'player_id': turn_order[0], 'starter_id': starters[0]['id']}, format='json')
+        self.client.post(reverse('room-select-starter', kwargs={'room_code': room_code}), {'player_id': turn_order[1], 'starter_id': starters[1]['id']}, format='json')
 
-        move = self.client.post(reverse('room-move', kwargs={'room_code': room_code}), {'player_id': host_id, 'dice_result': 2}, format='json')
+        first_player_id = turn_order[0]
+
+        move = self.client.post(reverse('room-move', kwargs={'room_code': room_code}), {'player_id': first_player_id, 'dice_result': 2}, format='json')
         self.assertEqual(move.status_code, status.HTTP_200_OK)
 
         final_state = self.client.get(reverse('room-detail', kwargs={'room_code': room_code})).data['game_state']
         current = final_state['turn']['current_player_id']
         self.assertIn(current, [host_id, player2_id])
-        self.assertEqual(current, host_id)
+        self.assertEqual(current, first_player_id)
         self.assertEqual(final_state['turn']['phase'], 'action')
         self.assertIsNotNone(final_state['turn']['pending_action'])
 
-        pass_turn = self.client.post(reverse('room-pass-turn', kwargs={'room_code': room_code}), {'player_id': host_id}, format='json')
+        pass_turn = self.client.post(reverse('room-pass-turn', kwargs={'room_code': room_code}), {'player_id': first_player_id}, format='json')
         self.assertEqual(pass_turn.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('interação pendente', pass_turn.data['error'])
 
         final_state = self.client.get(reverse('room-detail', kwargs={'room_code': room_code})).data['game_state']
-        self.assertEqual(final_state['turn']['current_player_id'], host_id)
+        self.assertEqual(final_state['turn']['current_player_id'], first_player_id)
 
     def test_save_restore_and_remove(self):
         room_code = self._create_room()

@@ -23,9 +23,18 @@ export const useGameStore = defineStore('game', () => {
     gameState.value?.players?.find(p => p.id === playerId.value) ?? null
   )
 
-  const players = computed(() =>
-    gameState.value?.players?.filter(p => p.is_active) ?? []
-  )
+  const players = computed(() => {
+    const activePlayers = gameState.value?.players?.filter(p => p.is_active) ?? []
+    const turnOrder = gameState.value?.turn_order ?? []
+    if (!turnOrder.length) return activePlayers
+
+    const byId = new Map(activePlayers.map(player => [player.id, player]))
+    const orderedPlayers = turnOrder
+      .map(playerId => byId.get(playerId))
+      .filter(Boolean)
+    const missingPlayers = activePlayers.filter(player => !turnOrder.includes(player.id))
+    return [...orderedPlayers, ...missingPlayers]
+  })
 
   const status = computed(() => gameState.value?.status ?? 'waiting')
 
@@ -80,6 +89,7 @@ export const useGameStore = defineStore('game', () => {
   const finalScores = computed(() => gameState.value?.final_scores ?? null)
 
   const board = computed(() => gameState.value?.board ?? null)
+  const revealedCardHistory = computed(() => gameState.value?.revealed_card_history ?? [])
 
   // ── API REST ─────────────────────────────────────────────────────────────
   async function createRoom() {
@@ -468,7 +478,7 @@ export const useGameStore = defineStore('game', () => {
     wsStatus, lastEvent, errorMsg, notification, chatMessages,
     // computed
     me, players, allPlayers, status, turn, isMyTurn, isHost, currentPlayer, phase,
-    finalScores, board, debugVisual, debugSession, debugTestPlayer, debugTurn, debugLog, debugRevealedCard, hostTools, hostToolsEnabled,
+    finalScores, board, revealedCardHistory, debugVisual, debugSession, debugTestPlayer, debugTurn, debugLog, debugRevealedCard, hostTools, hostToolsEnabled,
     // methods
     createRoom, fetchRoom, deleteRoom, addCpuPlayer,
     connect, disconnect, send, handleMessage,

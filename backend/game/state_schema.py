@@ -166,6 +166,7 @@ def build_initial_state(room_code: str) -> dict[str, Any]:
             },
         },
         'revealed_card': None,
+        'revealed_card_history': [],
         'log': [],
         'logs': [],
     }
@@ -293,6 +294,7 @@ def _normalize_debug_visual(debug_visual: dict[str, Any] | None) -> dict[str, An
     session['logs'] = logs[-MAX_LOGS:]
     session['log'] = session['logs']
     session.setdefault('revealed_card', None)
+    session.setdefault('revealed_card_history', [])
     annotate_state_ability_snapshots(session)
 
     normalized['session_state'] = session
@@ -389,6 +391,7 @@ def normalize_state(room_code: str, raw_state: dict[str, Any] | None) -> dict[st
     state['debug_visual'] = _normalize_debug_visual(state.get('debug_visual'))
     state.setdefault('board', {})
     state.setdefault('revealed_card', None)
+    state.setdefault('revealed_card_history', [])
     annotate_state_ability_snapshots(state)
 
     return state

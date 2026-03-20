@@ -363,13 +363,18 @@ def append_to_discard(discard: list, card: dict | None) -> list:
 def reveal_card(state: dict, player_id: str, card: dict, deck_type: str, *, resolved: bool = False) -> dict:
     players = state.get('players', [])
     player = next((p for p in players if p['id'] == player_id), None)
-    state['revealed_card'] = {
+    history = state.setdefault('revealed_card_history', [])
+    reveal_entry = {
         'deck_type': deck_type,
         'card': copy.deepcopy(card),
         'player_id': player_id,
         'player_name': player.get('name') if player else '',
         'resolved': resolved,
+        'round': state.get('turn', {}).get('round', 0),
+        'history_index': len(history) + 1,
     }
+    state['revealed_card'] = copy.deepcopy(reveal_entry)
+    history.append(copy.deepcopy(reveal_entry))
     return state
 
 

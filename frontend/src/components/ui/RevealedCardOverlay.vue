@@ -1,13 +1,13 @@
 <template>
-  <div v-if="revealed" class="reveal-overlay">
+  <div v-if="visibleRevealed" class="reveal-overlay">
     <div class="reveal-card">
       <div class="reveal-head">
         <div>
           <p class="eyebrow">{{ pileLabel }}</p>
           <h3>{{ card.title }}</h3>
-          <p class="subcopy">{{ revealed.player_name }} revelou esta carta</p>
+          <p class="subcopy">{{ visibleRevealed.player_name }} revelou esta carta</p>
         </div>
-        <button class="btn-ghost close-btn" @click="store.actions.dismissRevealedCard()">Fechar</button>
+        <button class="btn-ghost close-btn" @click="dismissLocally()">Fechar</button>
       </div>
 
       <div class="reveal-body">
@@ -27,18 +27,43 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useGameStore } from '@/stores/gameStore'
 
 const store = useGameStore()
+const dismissedRevealKey = ref(null)
 
 const revealed = computed(() => store.gameState?.revealed_card ?? null)
-const card = computed(() => revealed.value?.card ?? {})
+const revealKey = computed(() => {
+  if (!revealed.value) return null
+  return [
+    revealed.value.deck_type ?? 'card',
+    revealed.value.history_index ?? revealed.value.round ?? 'na',
+    revealed.value.player_id ?? 'na',
+    revealed.value.card?.id ?? revealed.value.card?.title ?? 'unknown',
+  ].join(':')
+})
+const visibleRevealed = computed(() => {
+  if (!revealed.value) return null
+  if (dismissedRevealKey.value === revealKey.value) return null
+  return revealed.value
+})
+const card = computed(() => visibleRevealed.value?.card ?? {})
 const pileLabel = computed(() => {
-  if (revealed.value?.deck_type === 'victory') return 'Victory Card'
-  if (revealed.value?.deck_type === 'event') return 'Event Card'
+  if (visibleRevealed.value?.deck_type === 'victory') return 'Victory Card'
+  if (visibleRevealed.value?.deck_type === 'event') return 'Event Card'
   return 'Carta Revelada'
 })
+
+watch(revealKey, (currentKey, previousKey) => {
+  if (currentKey && currentKey !== previousKey) {
+    dismissedRevealKey.value = null
+  }
+})
+
+function dismissLocally() {
+  dismissedRevealKey.value = revealKey.value
+}
 </script>
 
 <style scoped>
