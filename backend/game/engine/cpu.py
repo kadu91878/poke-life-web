@@ -13,6 +13,8 @@ from __future__ import annotations
 
 __all__ = ['is_cpu_player', 'get_cpu_player_ids', 'needs_cpu_action', 'decide_action']
 
+from .mechanics import calculate_type_bonus
+
 # ---------------------------------------------------------------------------
 # Public helpers
 # ---------------------------------------------------------------------------
@@ -47,6 +49,12 @@ def needs_cpu_action(state: dict) -> list[str]:
     # Current player is CPU
     if current_player_id in cpu_ids:
         active.append(current_player_id)
+
+    # Inventory discard may temporarily belong to another CPU (e.g. global effects)
+    pending_item_choice = turn.get('pending_item_choice') or {}
+    pending_item_player_id = pending_item_choice.get('player_id')
+    if pending_item_player_id in cpu_ids and pending_item_player_id not in active:
+        active.append(pending_item_player_id)
 
     # Battle: both participants may need to act independently
     battle = turn.get('battle')
@@ -85,7 +93,8 @@ def decide_action(state: dict, cpu_player_id: str) -> list[tuple[str, dict]]:
 
     Returns a list with ONE (action_name, kwargs) tuple.
     action_name values used by the consumer:
-        select_starter, roll_dice, skip_action, pass_turn,
+        select_starter, roll_dice, challenge_player, discard_item,
+        skip_action, pass_turn,
         resolve_event, roll_capture_dice, battle_choice,
         roll_battle_dice, resolve_pending_action,
         confirm_league_intermission, release_pokemon,
@@ -106,7 +115,12 @@ def decide_action(state: dict, cpu_player_id: str) -> list[tuple[str, dict]]:
     # ── Battle phase (either participant must act) ────────────────────────
     battle = turn.get('battle')
     if battle and phase == 'battle':
-        return _decide_battle(cpu_player_id, player, battle)
+        return _decide_battle(state, cpu_player_id, player, battle)
+
+    # ── Pending inventory discard (may belong to non-current CPU) ─────────
+    pending_item_choice = turn.get('pending_item_choice')
+    if pending_item_choice and pending_item_choice.get('player_id') == cpu_player_id:
+        return _decide_item_discard(player)
 
     # ── Only act on own turn for non-battle phases ────────────────────────
     if current_player_id != cpu_player_id:
@@ -135,7 +149,7 @@ def decide_action(state: dict, cpu_player_id: str) -> list[tuple[str, dict]]:
 
     # ── Action ───────────────────────────────────────────────────────────
     if phase == 'action':
-        return _decide_action_phase(player, turn)
+        return _decide_action_phase(state, player, turn)
 
     # ── Fallback: pass turn if nothing is blocking ─────────────────────
     from .state import turn_has_blocking_interaction
@@ -153,7 +167,12 @@ def _find_player(state: dict, player_id: str) -> dict | None:
     return next((p for p in state.get('players', []) if p['id'] == player_id), None)
 
 
-def _decide_battle(cpu_player_id: str, player: dict, battle: dict) -> list[tuple[str, dict]]:
+def _decide_battle(
+    state: dict,
+    cpu_player_id: str,
+    player: dict,
+    battle: dict,
+) -> list[tuple[str, dict]]:
     challenger_id = battle.get('challenger_id')
     defender_id = battle.get('defender_id')
     if cpu_player_id not in (challenger_id, defender_id):
@@ -161,6 +180,7 @@ def _decide_battle(cpu_player_id: str, player: dict, battle: dict) -> list[tuple
 
     sub_phase = battle.get('sub_phase', '')
     is_challenger = cpu_player_id == challenger_id
+    mode = battle.get('mode', 'player')
 
     if sub_phase == 'choosing':
         already_chose = (
@@ -169,7 +189,27 @@ def _decide_battle(cpu_player_id: str, player: dict, battle: dict) -> list[tuple
         )
         if already_chose:
             return [('wait', {})]
-        slot_key = _best_slot_key(player)
+
+        if mode == 'player':
+            choice_stage = battle.get('choice_stage', 'defender')
+            if is_challenger and choice_stage == 'defender':
+                return [('wait', {})]
+            if not is_challenger and choice_stage == 'challenger':
+                return [('wait', {})]
+
+        opponent_choice = (
+            battle.get('defender_choice') if is_challenger
+            else battle.get('challenger_choice')
+        )
+        opponent_id = defender_id if is_challenger else challenger_id
+        opponent_player = _find_player(state, opponent_id)
+        slot_key = _best_slot_key(
+            player,
+            opponent=opponent_choice,
+            opponent_player=opponent_player,
+        )
+        if slot_key is None:
+            return [('wait', {})]
         return [('battle_choice', {'pokemon_slot_key': slot_key, 'pokemon_index': 0})]
 
     if sub_phase == 'rolling':
@@ -261,6 +301,13 @@ def _decide_release(player: dict) -> list[tuple[str, dict]]:
     return [('release_pokemon', {'pokemon_slot_key': weakest.get('slot_key')})]
 
 
+def _decide_item_discard(player: dict) -> list[tuple[str, dict]]:
+    item_key = _pick_discard_item_key(player)
+    if not item_key:
+        return [('wait', {})]
+    return [('discard_item', {'item_key': item_key})]
+
+
 def _decide_select_starter(turn: dict) -> list[tuple[str, dict]]:
     available = turn.get('available_starters', [])
     if not available:
@@ -269,13 +316,17 @@ def _decide_select_starter(turn: dict) -> list[tuple[str, dict]]:
     return [('select_starter', {'starter_id': best['id']})]
 
 
-def _decide_action_phase(player: dict, turn: dict) -> list[tuple[str, dict]]:
+def _decide_action_phase(state: dict, player: dict, turn: dict) -> list[tuple[str, dict]]:
     # Pokemon encounter
     if turn.get('pending_pokemon'):
         return [('roll_capture_dice', {})]
     # Safari zone queue
     if turn.get('pending_safari'):
         return [('roll_capture_dice', {})]
+    if turn.get('capture_context') == 'duel':
+        target = _best_duel_target(state, player)
+        if target is not None:
+            return [('challenge_player', {'target_player_id': target['id']})]
     # Nothing to do: end turn
     return [('pass_turn', {})]
 
@@ -284,14 +335,185 @@ def _decide_action_phase(player: dict, turn: dict) -> list[tuple[str, dict]]:
 # Utility helpers
 # ---------------------------------------------------------------------------
 
-def _best_slot_key(player: dict) -> str | None:
-    """Return slot_key of the pokemon with highest battle_points (prefer not knocked out)."""
-    roster = player.get('pokemon_inventory', [])
-    available = [p for p in roster if not p.get('knocked_out', False)] or roster
-    if not available:
+def _best_slot_key(
+    player: dict,
+    *,
+    opponent: dict | None = None,
+    opponent_player: dict | None = None,
+) -> str | None:
+    """Return the slot_key of the best available Pokemon for the current matchup."""
+    roster = _available_battle_roster(player)
+    if not roster:
         return None
-    best = max(available, key=lambda p: p.get('battle_points', 0))
-    return best.get('slot_key')
+
+    opponent_pool = None
+    if opponent is None and opponent_player is not None:
+        opponent_pool = _available_battle_roster(opponent_player)
+
+    best = _best_roster_choice(roster, opponent=opponent, opponent_pool=opponent_pool)
+    return None if best is None else best.get('slot_key')
+
+
+def _best_duel_target(state: dict, player: dict) -> dict | None:
+    own_roster = _available_battle_roster(player)
+    if not own_roster:
+        return None
+
+    best_target: dict | None = None
+    best_rank: tuple | None = None
+
+    for opponent in state.get('players', []):
+        if opponent.get('id') == player.get('id'):
+            continue
+        if not opponent.get('is_active', True):
+            continue
+        opponent_roster = _available_battle_roster(opponent)
+        if not opponent_roster:
+            continue
+
+        projected_defender = _best_roster_choice(opponent_roster, opponent_pool=own_roster)
+        if projected_defender is None:
+            continue
+        projected_attacker = _best_roster_choice(own_roster, opponent=projected_defender)
+        if projected_attacker is None:
+            continue
+
+        candidate_rank = _pokemon_matchup_rank(projected_attacker, projected_defender)
+        if best_rank is None or candidate_rank > best_rank:
+            best_rank = candidate_rank
+            best_target = opponent
+
+    return best_target
+
+
+def _available_battle_roster(player: dict) -> list[dict]:
+    if not isinstance(player, dict):
+        return []
+
+    roster: list[dict] = []
+
+    starter = player.get('starter_pokemon')
+    if isinstance(starter, dict):
+        roster.append(_normalize_battle_candidate(starter, 'starter'))
+
+    for index, pokemon in enumerate(player.get('pokemon', [])):
+        if isinstance(pokemon, dict):
+            roster.append(_normalize_battle_candidate(pokemon, f'pokemon:{index}'))
+
+    available = [pokemon for pokemon in roster if not pokemon.get('knocked_out', False)]
+    if available or roster:
+        return available
+
+    fallback = []
+    for pokemon in player.get('pokemon_inventory', []):
+        if not isinstance(pokemon, dict):
+            continue
+        slot_key = pokemon.get('slot_key')
+        if not slot_key:
+            continue
+        fallback.append(_normalize_battle_candidate(pokemon, slot_key))
+    return [pokemon for pokemon in fallback if not pokemon.get('knocked_out', False)]
+
+
+def _normalize_battle_candidate(pokemon: dict, slot_key: str) -> dict:
+    candidate = dict(pokemon)
+    candidate['slot_key'] = slot_key
+    candidate['battle_points'] = int(candidate.get('battle_points', 0) or 0)
+    candidate['master_points'] = int(candidate.get('master_points', 0) or 0)
+    candidate['types'] = [str(poke_type).title() for poke_type in candidate.get('types', [])]
+    candidate['knocked_out'] = bool(candidate.get('knocked_out', False))
+    return candidate
+
+
+def _best_roster_choice(
+    roster: list[dict],
+    *,
+    opponent: dict | None = None,
+    opponent_pool: list[dict] | None = None,
+) -> dict | None:
+    if not roster:
+        return None
+
+    if opponent is not None:
+        return max(roster, key=lambda pokemon: _pokemon_matchup_rank(pokemon, opponent))
+
+    if opponent_pool:
+        return max(roster, key=lambda pokemon: _best_projected_matchup_rank(pokemon, opponent_pool))
+
+    return max(
+        roster,
+        key=lambda pokemon: (
+            int(pokemon.get('battle_points', 0) or 0),
+            int(pokemon.get('master_points', 0) or 0),
+            str(pokemon.get('name') or ''),
+        ),
+    )
+
+
+def _best_projected_matchup_rank(attacker: dict, opponent_pool: list[dict]) -> tuple:
+    if not opponent_pool:
+        return (
+            int(attacker.get('battle_points', 0) or 0),
+            int(attacker.get('battle_points', 0) or 0),
+            int(attacker.get('master_points', 0) or 0),
+            str(attacker.get('name') or ''),
+        )
+    return max(_pokemon_matchup_rank(attacker, defender) for defender in opponent_pool)
+
+
+def _pokemon_matchup_rank(attacker: dict, defender: dict) -> tuple:
+    attacker_effective_bp = _effective_battle_points(attacker, defender)
+    defender_effective_bp = _effective_battle_points(defender, attacker)
+    return (
+        attacker_effective_bp,
+        attacker_effective_bp - defender_effective_bp,
+        int(attacker.get('battle_points', 0) or 0),
+        int(attacker.get('master_points', 0) or 0),
+        str(attacker.get('name') or ''),
+    )
+
+
+def _effective_battle_points(attacker: dict, defender: dict | None = None) -> int:
+    battle_points = int(attacker.get('battle_points', 0) or 0)
+    if defender is None:
+        return battle_points
+    return battle_points + calculate_type_bonus(
+        [str(poke_type).title() for poke_type in attacker.get('types', [])],
+        [str(poke_type).title() for poke_type in defender.get('types', [])],
+    )
+
+
+def _pick_discard_item_key(player: dict) -> str | None:
+    items = [
+        item
+        for item in (player.get('items') or [])
+        if isinstance(item, dict) and int(item.get('quantity', 0) or 0) > 0 and item.get('key')
+    ]
+    if not items:
+        return None
+
+    category_priority = {
+        'unknown': 0,
+        'reward': 1,
+        'utility': 2,
+        'battle': 3,
+        'healing': 4,
+        'capture': 5,
+    }
+
+    def discard_rank(item: dict) -> tuple:
+        key = str(item.get('key') or '')
+        category = str(item.get('category') or '')
+        implemented = bool(item.get('implemented', False))
+        quantity = int(item.get('quantity', 0) or 0)
+        return (
+            0 if not implemented else 1,
+            category_priority.get(category, 6),
+            -quantity,
+            key,
+        )
+
+    return min(items, key=discard_rank).get('key')
 
 
 def _opt_id(opt: dict) -> str | None:
