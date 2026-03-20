@@ -512,6 +512,15 @@ def _get_active_players(state: dict) -> list:
     return [p for p in state.get('players', []) if p.get('is_active', True)]
 
 
+def _get_player_to_left(state: dict, player_id: str) -> dict | None:
+    """Retorna o jogador à esquerda (índice anterior) na ordem de turno."""
+    active = _get_active_players(state)
+    for idx, p in enumerate(active):
+        if p['id'] == player_id:
+            return active[(idx - 1) % len(active)] if len(active) > 1 else None
+    return None
+
+
 def _init_pokemon(pokemon: dict) -> dict:
     """Inicializa campos de rastreamento de habilidade em um Pokémon."""
     pokemon = copy.deepcopy(pokemon)
@@ -1183,6 +1192,75 @@ def _resolve_battle_reroll_decision(
     if battle.get('challenger_roll') is not None and battle.get('defender_roll') is not None:
         return _resolve_duel(state)
     return state, None
+
+
+def _resolve_abra_transfer_offer(
+    state: dict,
+    player_id: str,
+    pending_action: dict,
+    chosen: dict,
+) -> tuple[dict | None, str | dict]:
+    offer = pending_action.get('offer') or {}
+    from_player_id = offer.get('from_player_id')
+    loser_slot = offer.get('loser_slot')
+    abra_snapshot = offer.get('pokemon') or {}
+
+    _clear_pending_action(state)
+    # Remove this offer from the global list regardless of choice
+    state['abra_transfer_offers'] = [
+        o for o in (state.get('abra_transfer_offers') or [])
+        if not (o.get('from_player_id') == from_player_id and o.get('to_player_id') == player_id)
+    ]
+
+    to_player = _get_player(state, player_id)
+    if not to_player:
+        return None, 'Jogador não encontrado'
+
+    if chosen.get('id') == 'decline':
+        _log(state, to_player['name'], 'Recusou a oferta do Abra.')
+        return state, {'type': 'abra_transfer_offer', 'accepted': False}
+
+    from_player = _get_player(state, from_player_id)
+    if not from_player:
+        return None, 'Jogador de origem inválido'
+
+    # Remove Abra from loser's team
+    if loser_slot:
+        _remove_player_pokemon_slot(from_player, loser_slot)
+        sync_player_inventory(from_player)
+
+    # Add Abra to accepting player WITHOUT spending a pokéball
+    abra = copy.deepcopy(abra_snapshot)
+    abra['knocked_out'] = False
+    abra.pop('battle_slot_key', None)
+    to_player.setdefault('pokemon', []).append(abra)
+    sync_player_inventory(to_player)
+
+    _log(state, to_player['name'], 'Adicionou Abra ao time (sem gastar Pokébola)!')
+    _log(state, from_player['name'], f"Abra foi transferido para {to_player['name']}.")
+
+    return state, {'type': 'abra_transfer_offer', 'accepted': True, 'pokemon': 'Abra'}
+
+
+def _queue_abra_transfer_offer_if_pending(state: dict, player_id: str) -> bool:
+    """Se existe oferta de Abra pendente para este jogador, cria pending_action. Retorna True se enfileirou."""
+    abra_offers = state.get('abra_transfer_offers') or []
+    my_offer = next((o for o in abra_offers if o.get('to_player_id') == player_id), None)
+    if not my_offer:
+        return False
+    from_player = _get_player(state, my_offer.get('from_player_id'))
+    from_name = from_player['name'] if from_player else 'outro jogador'
+    state['turn']['pending_action'] = {
+        'type': 'abra_transfer_offer',
+        'player_id': player_id,
+        'offer': my_offer,
+        'prompt': f"Abra de {from_name} perdeu a batalha! Você quer adicioná-lo ao seu time (sem gastar Pokébola)?",
+        'options': [
+            {'id': 'accept', 'label': 'Aceitar Abra'},
+            {'id': 'decline', 'label': 'Recusar'},
+        ],
+    }
+    return True
 
 
 def _remove_player_pokemon_slot(player: dict, slot_key: str | None) -> dict | None:
@@ -3788,7 +3866,33 @@ def _handle_hurricane(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
 
 
 def _handle_extreme_speed(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
-    return _handle_movement_replace(state, player, pokemon, steps=4, **kw)
+    turn = state['turn']
+    if turn.get('phase') != 'action':
+        return None, 'Use Extreme Speed após cair em uma casa (fase de ação)'
+    board_data = state.get('board', {})
+    old_pos = player['position']
+    new_pos = calculate_new_position(old_pos, 1, board_data)
+    player['position'] = new_pos
+    tile = get_tile(board_data, new_pos)
+    effect = get_tile_effect(tile)
+    turn['pending_pokemon'] = None
+    turn['pending_action'] = None
+    turn['capture_context'] = None
+    turn['current_tile'] = tile
+    pokemon['ability_used'] = True
+    _log(state, player['name'],
+         f"Usou Extreme Speed! Avançou para a próxima casa: {tile['name']}")
+    if _handle_pokecenter_pass_through(
+        state,
+        player['id'],
+        start_position=old_pos,
+        end_position=new_pos,
+        final_tile=tile,
+        final_effect=effect,
+    ):
+        return state, {}
+    state = _resolve_tile_effect(state, player['id'], tile, effect)
+    return state, {}
 
 
 def _handle_teleport(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
@@ -3814,49 +3918,23 @@ def _handle_teleport(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
 
 
 def _handle_water_gun(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
+    """Wartortle: rerrola o dado de movimento (em vez do movimento +2 incorreto anterior)."""
     turn = state['turn']
-    if turn.get('phase') != 'action':
-        return None, 'Use Water Gun após rolar o dado (fase de ação)'
-    board_data = state.get('board', {})
-    old_pos = player['position']
-    new_pos = calculate_new_position(old_pos, 2, board_data)
-    player['position'] = new_pos
-    tile = get_tile(board_data, new_pos)
-    effect = get_tile_effect(tile)
-    turn['pending_pokemon'] = None
-    turn['pending_action'] = None
-    turn['capture_context'] = None
-    turn['current_tile'] = tile
-    pokemon['ability_used'] = True
-    _log(state, player['name'], f"Usou Water Gun! Avançou +2 casas para {tile['name']}")
-    if _handle_pokecenter_pass_through(
-        state,
-        player['id'],
-        start_position=old_pos,
-        end_position=new_pos,
-        final_tile=tile,
-        final_effect=effect,
-    ):
-        return state, {}
-    state = _resolve_tile_effect(state, player['id'], tile, effect)
-    return state, {}
+    if turn.get('phase') != 'roll':
+        return None, 'Use Water Gun na fase de rolagem (em vez de rolar o dado)'
+    from .mechanics import roll_movement_dice
+    new_roll = roll_movement_dice()
+    return _handle_movement_replace(state, player, pokemon, steps=new_roll, **kw)
 
 
 def _handle_hydro_pump(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
+    """Blastoise: rerrola o dado de movimento (em vez de empurrar oponente — comportamento incorreto anterior)."""
     turn = state['turn']
-    target_id = kw.get('target_id')
-    if turn.get('phase') not in ('roll', 'action'):
-        return None, 'Use Hydro Pump durante o seu turno (antes de rolar ou na fase de ação)'
-    if not target_id:
-        return None, 'Informe o jogador alvo para Hydro Pump (target_id)'
-    target = _get_player(state, target_id)
-    if not target or not target.get('is_active') or target_id == player['id']:
-        return None, 'Alvo inválido'
-    target['position'] = max(0, target['position'] - 3)
-    pokemon['ability_used'] = True
-    _log(state, player['name'],
-         f"Usou Hydro Pump! {target['name']} recuou 3 casas (posição {target['position']})")
-    return state, {'target_id': target_id, 'new_position': target['position']}
+    if turn.get('phase') != 'roll':
+        return None, 'Use Hydro Pump na fase de rolagem (em vez de rolar o dado)'
+    from .mechanics import roll_movement_dice
+    new_roll = roll_movement_dice()
+    return _handle_movement_replace(state, player, pokemon, steps=new_roll, **kw)
 
 
 def _handle_compound_eyes(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
@@ -3888,14 +3966,91 @@ def _handle_run_away(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
 
 
 def _handle_psychic(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
+    """Alakazam: teletransporta para a casa de outro jogador (em vez de rolar o dado)."""
     turn = state['turn']
-    if turn.get('phase') not in ('roll', 'action'):
-        return None, 'Use Psychic durante o seu turno'
-    event_deck = state.get('decks', {}).get('event_deck', [])
-    next_event = event_deck[0] if event_deck else None
+    target_id = kw.get('target_id')
+    if turn.get('phase') != 'roll':
+        return None, 'Use Psychic na fase de rolagem (em vez de rolar o dado)'
+    if not target_id:
+        return None, 'Informe o jogador alvo para Psychic (target_id)'
+    target = _get_player(state, target_id)
+    if not target or not target.get('is_active') or target_id == player['id']:
+        return None, 'Alvo inválido'
+    board_data = state.get('board', {})
+    old_pos = player['position']
+    target_pos = target['position']
+    player['position'] = target_pos
+    tile = get_tile(board_data, target_pos)
+    effect = get_tile_effect(tile)
+    turn['dice_result'] = target_pos
+    turn['current_tile'] = tile
     pokemon['ability_used'] = True
-    _log(state, player['name'], 'Usou Psychic! Espiou a próxima carta de evento')
-    return state, {'next_event': next_event}
+    _log(state, player['name'],
+         f"Usou Psychic! Teletransportou para a posição de {target['name']}: {tile['name']}")
+    if _handle_pokecenter_pass_through(
+        state,
+        player['id'],
+        start_position=old_pos,
+        end_position=target_pos,
+        final_tile=tile,
+        final_effect=effect,
+    ):
+        return state, {}
+    state = _resolve_tile_effect(state, player['id'], tile, effect)
+    return state, {'target_id': target_id, 'new_position': target_pos}
+
+
+def _handle_psybeam(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
+    """Kadabra: teletransporta para a casa de evento mais próxima atrás (em vez de rolar o dado)."""
+    turn = state['turn']
+    if turn.get('phase') != 'roll':
+        return None, 'Use Psybeam na fase de rolagem (em vez de rolar o dado)'
+    board_data = state.get('board', {})
+    current_pos = player['position']
+    target_pos = None
+    for pos in range(current_pos - 1, -1, -1):
+        candidate = get_tile(board_data, pos)
+        if candidate.get('type') == 'event':
+            target_pos = pos
+            break
+    if target_pos is None:
+        return None, 'Não há casa de evento atrás da sua posição atual'
+    old_pos = current_pos
+    player['position'] = target_pos
+    tile = get_tile(board_data, target_pos)
+    effect = get_tile_effect(tile)
+    turn['dice_result'] = target_pos
+    turn['current_tile'] = tile
+    pokemon['ability_used'] = True
+    _log(state, player['name'],
+         f"Usou Psybeam! Voltou para a casa de evento mais próxima: {tile['name']} (posição {target_pos})")
+    state = _resolve_tile_effect(state, player['id'], tile, effect)
+    return state, {'target_position': target_pos}
+
+
+def _handle_move_1(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
+    """Mew: move exatamente 1 casa em vez de rolar o dado."""
+    return _handle_movement_replace(state, player, pokemon, steps=1, **kw)
+
+
+def _handle_move_2(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
+    """Jolteon: move exatamente 2 casas em vez de rolar o dado."""
+    return _handle_movement_replace(state, player, pokemon, steps=2, **kw)
+
+
+def _handle_move_3(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
+    """Pichu / Pikachu / Raichu: move exatamente 3 casas em vez de rolar o dado."""
+    return _handle_movement_replace(state, player, pokemon, steps=3, **kw)
+
+
+def _handle_torrent(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
+    """Squirtle: rerrola o dado de movimento."""
+    turn = state['turn']
+    if turn.get('phase') != 'roll':
+        return None, 'Use Torrent na fase de rolagem (em vez de rolar o dado)'
+    from .mechanics import roll_movement_dice
+    new_roll = roll_movement_dice()
+    return _handle_movement_replace(state, player, pokemon, steps=new_roll, **kw)
 
 
 # ── Dispatch de habilidades ativas ────────────────────────────────────────────
@@ -3903,12 +4058,20 @@ def _handle_psychic(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
 _ACTIVE_ABILITY_HANDLERS: dict[str, callable] = {
     'hurricane':      _handle_hurricane,
     'extreme_speed':  _handle_extreme_speed,
+    'flash_fire':     _handle_extreme_speed,   # Growlithe: mesma lógica do Extreme Speed
     'teleport':       _handle_teleport,
     'water_gun':      _handle_water_gun,
     'hydro_pump':     _handle_hydro_pump,
     'compound_eyes':  _handle_compound_eyes,
     'run_away':       _handle_run_away,
     'psychic':        _handle_psychic,
+    'psybeam':        _handle_psybeam,
+    'static':         _handle_move_3,
+    'thunder':        _handle_move_3,
+    'move_3':         _handle_move_3,          # Pichu: ability slug 'Move 3'
+    'torrent':        _handle_torrent,
+    'volt_absorb':    _handle_move_2,          # Jolteon: mover 2 casas
+    'synchronize':    _handle_move_1,          # Mew: mover 1 casa
 }
 
 
@@ -4952,6 +5115,7 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
         'capture_reroll_decision',
         'battle_reroll_decision',
         'heal_other_choice',
+        'abra_transfer_offer',
     ):
         return None, 'Nenhuma escolha pendente'
     if pending_action.get('player_id') != player_id:
@@ -4978,6 +5142,9 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
 
     if pending_type == 'heal_other_choice':
         return _resolve_heal_other_choice(state, player_id, pending_action, chosen)
+
+    if pending_type == 'abra_transfer_offer':
+        return _resolve_abra_transfer_offer(state, player_id, pending_action, chosen)
 
     if pending_type == 'pokemart_roll':
         return _resolve_pokemart_roll_action(state, player_id, pending_action)
@@ -6614,6 +6781,19 @@ def _resolve_duel(state: dict) -> tuple[dict, dict]:
             source=f"perder o duelo contra {winner['name']}",
         )
 
+    # Abra passivo: se Abra foi o Pokémon derrotado, oferecer ao jogador à esquerda
+    if loser_pokemon.get('name') == 'Abra':
+        left_player = _get_player_to_left(state, loser['id'])
+        if left_player and left_player['id'] != loser['id']:
+            state.setdefault('abra_transfer_offers', []).append({
+                'from_player_id': loser['id'],
+                'to_player_id': left_player['id'],
+                'pokemon': copy.deepcopy(loser_pokemon),
+                'loser_slot': loser_slot,
+            })
+            _log(state, loser['name'],
+                 f"Abra perdeu a batalha! {left_player['name']} poderá adicionar Abra ao time no próximo turno.")
+
     reward_summary = 'comprou uma carta de vitória'
     _log(state, 'Duelo', f"{winner['name']} venceu a batalha e {reward_summary}")
 
@@ -7448,6 +7628,9 @@ def end_turn(state: dict) -> dict:
     current_player = _get_player(state, next_id)
     if current_player:
         if not _activate_deferred_pokecenter_heal_for_current_player(state):
-            _log(state, current_player['name'], 'Turno iniciado — role o dado!')
+            if not turn.get('pending_action'):
+                _queue_abra_transfer_offer_if_pending(state, next_id)
+            if not turn.get('pending_action'):
+                _log(state, current_player['name'], 'Turno iniciado — role o dado!')
 
     return state

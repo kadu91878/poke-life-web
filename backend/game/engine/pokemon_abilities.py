@@ -220,6 +220,7 @@ def _infer_effects_from_description(pokemon: dict[str, Any]) -> list[dict[str, A
         ('instead of throwing the move dice, you may move 4 tiles', 4),
         ('you may move two tiles instead of throwing the move dice', 2),
         ('you may move one tile instead of throwing the move dice', 1),
+        ('you may always move one tile forward', 1),  # Mew: "instead of throwing ... you may always move one tile forward"
     )
     for phrase, steps in fixed_distance_matchers:
         if phrase in normalized:
@@ -706,4 +707,26 @@ def annotate_state_ability_snapshots(state: dict[str, Any] | None) -> dict[str, 
                 current_player_id=current_player_id,
                 slot_key='starter',
             )
+
+        # pokemon_inventory é uma lista de deepcopies usadas pelo frontend.
+        # Propaga as anotações de habilidade dos originais para as cópias.
+        for inv_item in player.get('pokemon_inventory') or []:
+            slot_key = inv_item.get('slot_key')
+            if not slot_key:
+                continue
+            if slot_key == 'starter' and isinstance(starter, dict):
+                source = starter
+            elif slot_key.startswith('pokemon:'):
+                try:
+                    idx = int(slot_key.split(':', 1)[1])
+                    pokemon_list = player.get('pokemon') or []
+                    source = pokemon_list[idx] if 0 <= idx < len(pokemon_list) else None
+                except (ValueError, IndexError):
+                    source = None
+            else:
+                source = None
+            if isinstance(source, dict):
+                inv_item['abilities'] = copy.deepcopy(source.get('abilities') or [])
+                inv_item['ability_status'] = copy.deepcopy(source.get('ability_status'))
+
     return state
