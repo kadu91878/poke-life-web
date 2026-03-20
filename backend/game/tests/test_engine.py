@@ -73,7 +73,8 @@ def _init_two_player_game() -> tuple[dict, str, str]:
     p2 = _make_player('Misty')
     state = build_initial_state('TEST01')
     state['players'] = [p1, p2]
-    state = engine.initialize_game(state)
+    with patch('game.engine.state.random.shuffle', new=lambda ids: None):
+        state = engine.initialize_game(state)
     return state, p1['id'], p2['id']
 
 
@@ -176,6 +177,20 @@ class TestGameInitialization(TestCase):
         player = state['players'][0]
         self.assertEqual(player['pokeballs'], 6)
         self.assertEqual(player['full_restores'], 2)
+
+    def test_initialize_game_randomizes_turn_order_and_first_player(self):
+        p1 = _make_player('Ash', host=True)
+        p2 = _make_player('Misty')
+        p3 = _make_player('Brock')
+        state = build_initial_state('TEST01')
+        state['players'] = [p1, p2, p3]
+
+        with patch('game.engine.state.random.shuffle', side_effect=lambda ids: ids.reverse()):
+            state = engine.initialize_game(state)
+
+        expected_order = [p3['id'], p2['id'], p1['id']]
+        self.assertEqual(state['turn_order'], expected_order)
+        self.assertEqual(state['turn']['current_player_id'], p3['id'])
 
 
 # ── Testes de Seleção de Starter ─────────────────────────────────────────────
@@ -289,6 +304,26 @@ class TestStarterSelection(TestCase):
         state = engine.select_starter(state, p2_id, starters[1]['id'])
 
         self.assertNotIn('available_starters', state['turn'])
+
+    def test_select_starter_respects_randomized_turn_order(self):
+        p1 = _make_player('Ash', host=True)
+        p2 = _make_player('Misty')
+        state = build_initial_state('TEST01')
+        state['players'] = [p1, p2]
+
+        with patch('game.engine.state.random.shuffle', side_effect=lambda ids: ids.reverse()):
+            state = engine.initialize_game(state)
+
+        starters = self._get_starters(state)
+        self.assertEqual(state['turn']['current_player_id'], p2['id'])
+        self.assertIsNone(engine.select_starter(state, p1['id'], starters[0]['id']))
+
+        state = engine.select_starter(state, p2['id'], starters[0]['id'])
+        self.assertEqual(state['turn']['current_player_id'], p1['id'])
+
+        state = engine.select_starter(state, p1['id'], starters[1]['id'])
+        self.assertEqual(state['turn']['phase'], 'roll')
+        self.assertEqual(state['turn']['current_player_id'], p2['id'])
 
 
 class TestItems(TestCase):
@@ -2835,6 +2870,33 @@ class TestTurnControl(TestCase):
         state = engine.end_turn(state)  # P2 → P1 (new round)
         self.assertEqual(state['turn']['round'], initial_round + 1)
 
+    def test_end_turn_follows_randomized_turn_order(self):
+        p1 = _make_player('Ash', host=True)
+        p2 = _make_player('Misty')
+        p3 = _make_player('Brock')
+        state = build_initial_state('TEST01')
+        state['players'] = [p1, p2, p3]
+
+        with patch('game.engine.state.random.shuffle', side_effect=lambda ids: ids.insert(0, ids.pop())):
+            state = engine.initialize_game(state)
+
+        starters = state['turn']['available_starters']
+        for index, player_id in enumerate(state['turn_order']):
+            state = engine.select_starter(state, player_id, starters[index]['id'])
+
+        self.assertEqual(state['turn']['current_player_id'], p3['id'])
+
+        state = engine.end_turn(state)
+        self.assertEqual(state['turn']['current_player_id'], p1['id'])
+
+        state = engine.end_turn(state)
+        self.assertEqual(state['turn']['current_player_id'], p2['id'])
+
+        initial_round = state['turn']['round']
+        state = engine.end_turn(state)
+        self.assertEqual(state['turn']['current_player_id'], p3['id'])
+        self.assertEqual(state['turn']['round'], initial_round + 1)
+
 
 # ── Testes de Schema/Normalização ────────────────────────────────────────────
 
@@ -2892,6 +2954,24 @@ class TestStateSchema(TestCase):
         self.assertEqual(pending['player_id'], p1_id)
         self.assertEqual(pending['pokemon']['name'], state['turn']['pending_pokemon']['name'])
         self.assertTrue(any(option['slot_key'] == 'starter' for option in pending['options']))
+
+    def test_normalize_state_preserves_existing_turn_order_and_current_player(self):
+        raw = build_initial_state('TEST01')
+        p1 = _make_player('Ash', host=True)
+        p2 = _make_player('Misty')
+        raw['status'] = 'playing'
+        raw['players'] = [p1, p2]
+        raw['turn_order'] = [p2['id'], p1['id']]
+        raw['turn'] = {
+            'round': 3,
+            'current_player_id': p2['id'],
+            'phase': 'roll',
+        }
+
+        normalized = normalize_state('TEST01', raw)
+
+        self.assertEqual(normalized['turn_order'], [p2['id'], p1['id']])
+        self.assertEqual(normalized['turn']['current_player_id'], p2['id'])
 
 
 # ── Testes de Eventos ─────────────────────────────────────────────────────────
@@ -3034,6 +3114,30 @@ class TestEventCards(TestCase):
         self.assertEqual(state['turn']['phase'], 'event')
         self.assertEqual(state['turn']['pending_event']['title'], 'PokéMarket')
         self.assertEqual(state['revealed_card']['deck_type'], 'event')
+        self.assertEqual(len(state['revealed_card_history']), 1)
+        self.assertEqual(state['revealed_card_history'][0]['deck_type'], 'event')
+        self.assertEqual(state['revealed_card_history'][0]['card']['title'], 'PokéMarket')
+
+    def test_dismiss_revealed_card_keeps_history_available(self):
+        state, p1_id, p2_id = _init_two_player_game()
+        starters = state['turn']['available_starters']
+        state = engine.select_starter(state, p1_id, starters[0]['id'])
+        state = engine.select_starter(state, p2_id, starters[1]['id'])
+        state['decks']['event_deck'] = [{
+            'id': 44,
+            'title': 'PokéMarket',
+            'description': 'Throw the dice in order to receive any of these items! 2 = Pokéball, 3 = Bill.',
+            'category': 'market',
+        }]
+        state['decks']['event_discard'] = []
+
+        state = _land_on_tile(state, p1_id, 7)
+        new_state, result = engine.dismiss_revealed_card(state, p1_id)
+
+        self.assertEqual(result, 'ok')
+        self.assertIsNone(new_state['revealed_card'])
+        self.assertEqual(len(new_state['revealed_card_history']), 1)
+        self.assertEqual(new_state['revealed_card_history'][0]['card']['title'], 'PokéMarket')
 
     def test_gift_choice_card_enters_pending_choice_and_grants_selected_reward(self):
         card = {
@@ -3249,6 +3353,7 @@ class TestVictoryDeck(TestCase):
         self.assertEqual(result['winner_id'], p1_id)
         self.assertTrue(len(new_state['decks']['victory_discard']) >= 1)
         self.assertEqual(new_state['revealed_card']['deck_type'], 'victory')
+        self.assertEqual(new_state['revealed_card_history'][-1]['deck_type'], 'victory')
 
     def test_trainer_victory_card_starts_trainer_battle(self):
         state, p1_id, p2_id = _init_two_player_game()

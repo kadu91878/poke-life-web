@@ -162,7 +162,8 @@ class TestStarterIdentity(unittest.IsolatedAsyncioTestCase):
              'pokemon': [], 'items': {}, 'badges': [], 'master_points': 0,
              'has_reached_league': False, 'is_host': False, 'color': 'blue'},
         ]
-        return initialize_game(state)
+        with patch('game.engine.state.random.shuffle', new=lambda ids: None):
+            return initialize_game(state)
 
     async def test_p1_selects_then_p2_can_select(self):
         state = self._make_two_player_game_state()

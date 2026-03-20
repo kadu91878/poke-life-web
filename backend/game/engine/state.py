@@ -159,6 +159,30 @@ _POKEMART_PRIMARY_REWARDS = {
 }
 _POKEMART_REROLL_REWARD = {'key': 'pokeball', 'label': 'Poké Ball'}
 _POKEMART_JACKPOT_REWARD = {'key': 'master_ball', 'label': 'Master Ball'}
+_ROLL_CONTEXT_LABELS = {
+    'movement': 'movimento',
+    'grass': 'grama',
+    'safari': 'Safari Zone',
+    'mt_moon': 'Mt. Moon',
+    'power_plant': 'Usina Elétrica',
+    'victory_wild': 'Victory Card',
+    'victory_gift': 'Victory Card',
+    'duel': 'duelo',
+    'gym': 'ginásio',
+    'team_rocket_tile': 'tile Equipe Rocket',
+    'pokemart_tile': 'Poké-Mart',
+    'game_corner': 'Game Corner',
+}
+_CARD_EFFECT_LOG_LABELS = {
+    'trainer_battle': 'batalha de treinador',
+    'capture_attempt': 'tentativa de captura',
+    'gift_pokemon_choice': 'escolha de presente',
+}
+_FORCED_STOP_LOG_LABELS = {
+    'team_rocket': 'Equipe Rocket',
+    'teleporter': 'Teleporter',
+    'gym': 'ginásio',
+}
 
 
 # ── Helpers internos ────────────────────────────────────────────────────────
@@ -174,15 +198,95 @@ def _log(state: dict, player_name: str, message: str):
     state['log'] = state['log'][-100:]
 
 
-def _build_roll_log_message(roll_entry: dict) -> str:
+def _log_warning(state: dict, player_name: str, message: str) -> None:
+    _log(state, player_name, f'Aviso: {message}')
+
+
+def _format_roll_context(context: str | None) -> str | None:
+    if not context:
+        return None
+    return _ROLL_CONTEXT_LABELS.get(context, str(context).replace('_', ' '))
+
+
+def _format_rolls_for_log(rolls: list[int] | tuple[int, ...] | None) -> str:
+    values = [int(roll) for roll in (rolls or [])]
+    return f"[{', '.join(str(roll) for roll in values)}]" if values else '[]'
+
+
+def _describe_card_for_log(card: dict | None) -> str:
+    card = card or {}
+    title = card.get('title', 'Carta')
+    category = card.get('category')
+    return f'{title} [{category}]' if category else title
+
+
+def _describe_card_result_for_log(result: dict | None) -> str:
+    result = result or {}
+    effect = result.get('effect')
+    if effect in _CARD_EFFECT_LOG_LABELS:
+        return _CARD_EFFECT_LOG_LABELS[effect]
+    category = result.get('category')
+    if category == 'draw_event_cards':
+        count = int(result.get('draw_count', 0) or 0)
+        return f'comprar {count} carta(s) de evento'
+    if category == 'draw_victory_cards':
+        count = int(result.get('draw_count', 0) or 0)
+        return f'comprar {count} carta(s) de vitória'
+    return 'efeito imediato resolvido'
+
+
+def _describe_capture_cost_for_log(*, capture_cost: int, use_full_restore: bool, use_master_ball: bool) -> str:
+    if use_master_ball:
+        return 'Recurso usado: Master Ball'
+    if use_full_restore:
+        return 'Recurso usado: 1 Full Restore'
+    if capture_cost <= 0:
+        return 'Sem gasto de Pokébola'
+    return f'Custo: {capture_cost} Pokébola(s)'
+
+
+def _log_movement_resolution(
+    state: dict,
+    *,
+    player_name: str,
+    start_position: int,
+    dice_result: int,
+    natural_destination: int,
+    resolved_destination: int,
+    tile_name: str,
+    forced_stop_kind: str | None,
+) -> None:
+    if forced_stop_kind:
+        stop_label = _FORCED_STOP_LOG_LABELS.get(forced_stop_kind, forced_stop_kind)
+        _log(
+            state,
+            player_name,
+            f"Movimento: {start_position} -> {resolved_destination} com {dice_result}. "
+            f"Parada forçada em {stop_label} na casa {tile_name} "
+            f"(destino natural: {natural_destination}).",
+        )
+        return
+
+    _log(
+        state,
+        player_name,
+        f"Movimento: {start_position} -> {resolved_destination} com {dice_result}. Destino: {tile_name}.",
+    )
+
+
+def _build_roll_log_message(roll_entry: dict) -> tuple[str, str]:
     player_name = roll_entry.get('player_name') or 'Sistema'
     roll_type = roll_entry.get('roll_type', 'desconhecido')
     raw_result = roll_entry.get('raw_result')
     final_result = roll_entry.get('final_result')
     modifier = roll_entry.get('modifier')
     modifier_reason = roll_entry.get('modifier_reason')
+    context_label = _format_roll_context(roll_entry.get('context'))
 
-    message = f"Rolou dado de {roll_type}: {raw_result}"
+    message = f"Rolou dado de {roll_type}"
+    if context_label and context_label.lower() != str(roll_type).lower():
+        message += f" em {context_label}"
+    message += f": {raw_result}"
     if modifier and raw_result != final_result:
         if modifier_reason:
             message += f", modificado para {final_result} por {modifier_reason}"
@@ -2350,7 +2454,7 @@ def _log_unsupported_pokemon(state: dict, player_name: str, support: dict, sourc
     if not support.get('playable_exists'):
         reasons.append('sem carta jogável no dataset')
     reason_text = ', '.join(reasons) if reasons else 'não suportado'
-    _log(state, player_name, f"Aviso: {pokemon_name} foi ignorado ({source}) — {reason_text}")
+    _log_warning(state, player_name, f"{pokemon_name} foi ignorado ({source}) — {reason_text}")
 
 
 def _coerce_inventory_pokemon(
@@ -2600,7 +2704,11 @@ def _award_victory_cards(state: dict, player_id: str, count: int, source: str) -
         state.setdefault('consumed', {}).setdefault('victory', []).append(card.get('id'))
         state, result = apply_victory_effect(state, player_id, card)
         state['decks']['victory_discard'] = append_to_discard(state['decks']['victory_discard'], card)
-        _log(state, player['name'], f"Carta de vitória: {card.get('title', 'Victory Card')} ({source})")
+        _log(
+            state,
+            player['name'],
+            f"Carta de vitória revelada em {source}: {_describe_card_for_log(card)} -> {_describe_card_result_for_log(result)}.",
+        )
 
         if result.get('effect') == 'trainer_battle':
             trainer_context = result.get('trainer_battle_context') or {}
@@ -2652,7 +2760,7 @@ def _award_victory_cards(state: dict, player_id: str, count: int, source: str) -
             if result.get('unsupported_options'):
                 player = _get_player(state, player_id)
                 if player:
-                    _log(state, player['name'], f"Opções indisponíveis ignoradas: {', '.join(result['unsupported_options'])}")
+                    _log_warning(state, player['name'], f"opções indisponíveis ignoradas: {', '.join(result['unsupported_options'])}")
             if options:
                 return state
 
@@ -2687,7 +2795,11 @@ def _draw_event_cards(state: dict, player_id: str, count: int, source: str) -> d
         state.setdefault('consumed', {}).setdefault('events', []).append(card.get('id'))
         state, result = apply_event_effect(state, player_id, card)
         state['decks']['event_discard'] = append_to_discard(state['decks']['event_discard'], card)
-        _log(state, player['name'], f"Carta de evento: {card.get('title', 'Event Card')} ({source})")
+        _log(
+            state,
+            player['name'],
+            f"Carta de evento revelada em {source}: {_describe_card_for_log(card)} -> {_describe_card_result_for_log(result)}.",
+        )
 
         effect_type = event_card_effect_type(card)
         if state['turn'].get('pending_action') or state['turn'].get('pending_event') or state['turn'].get('pending_pokemon') or state['turn'].get('phase') == 'battle':
@@ -2975,12 +3087,21 @@ def _trigger_special_add_to_team_evolutions(
     return evolved
 
 
+def _ordered_active_player_ids(state: dict) -> list[str]:
+    active_ids = [p['id'] for p in _get_active_players(state)]
+    if not active_ids:
+        return []
+
+    ordered_ids = [pid for pid in (state.get('turn_order') or []) if pid in active_ids]
+    ordered_ids.extend(pid for pid in active_ids if pid not in ordered_ids)
+    return ordered_ids
+
+
 def _next_player_id(state: dict) -> str:
-    active = _get_active_players(state)
-    if not active:
+    ids = _ordered_active_player_ids(state)
+    if not ids:
         return ''
     current_id = state['turn']['current_player_id']
-    ids = [p['id'] for p in active]
     try:
         idx = ids.index(current_id)
         return ids[(idx + 1) % len(ids)]
@@ -3067,6 +3188,7 @@ def _build_debug_visual_session() -> tuple[dict | None, str | None]:
             'mr_fuji_first_player_id': None,
         },
         'revealed_card': None,
+        'revealed_card_history': [],
         'log': [],
         'turn': {
             'round': 1,
@@ -3157,6 +3279,7 @@ def _snapshot_debug_shared_battle_state(state: dict) -> dict:
         'decks': copy.deepcopy(state.get('decks', {})),
         'consumed': copy.deepcopy(state.get('consumed', {})),
         'revealed_card': copy.deepcopy(state.get('revealed_card')),
+        'revealed_card_history': copy.deepcopy(state.get('revealed_card_history', [])),
     }
 
 
@@ -3178,6 +3301,7 @@ def _restore_debug_shared_battle_state(state: dict) -> dict:
     state['decks'] = copy.deepcopy(snapshot.get('decks', {}))
     state['consumed'] = copy.deepcopy(snapshot.get('consumed', {}))
     state['revealed_card'] = copy.deepcopy(snapshot.get('revealed_card'))
+    state['revealed_card_history'] = copy.deepcopy(snapshot.get('revealed_card_history', []))
     return _set_debug_shared_battle_resume_state(state, None)
 
 
@@ -3204,11 +3328,14 @@ def initialize_game(state: dict) -> dict:
     }
     state['log'] = []
     state['revealed_card'] = None
+    state['revealed_card_history'] = []
     active_players = _get_active_players(state)
     state['turn_order'] = [p['id'] for p in active_players]
+    random.shuffle(state['turn_order'])
+    starting_player_id = state['turn_order'][0] if state['turn_order'] else None
     state['turn'] = {
         'round': 1,
-        'current_player_id': state['players'][0]['id'],
+        'current_player_id': starting_player_id,
         'phase': 'select_starter',
         'dice_result': None,
         'last_roll': None,
@@ -3229,7 +3356,20 @@ def initialize_game(state: dict) -> dict:
         'roll_item_modifier': None,
     }
 
-    _log(state, 'Sistema', 'Jogo iniciado! Cada jogador deve escolher seu Pokémon inicial.')
+    ordered_names = [
+        player.get('name', player_id)
+        for player_id in state['turn_order']
+        for player in [_get_player(state, player_id)]
+        if player
+    ]
+    if ordered_names:
+        _log(
+            state,
+            'Sistema',
+            f"Jogo iniciado! Ordem inicial: {', '.join(ordered_names)}. {ordered_names[0]} escolhe primeiro.",
+        )
+    else:
+        _log(state, 'Sistema', 'Jogo iniciado! Cada jogador deve escolher seu Pokémon inicial.')
     return state
 
 
@@ -3280,13 +3420,14 @@ def select_starter(state: dict, player_id: str, starter_id) -> dict | None:
     _log(state, player['name'], f"Escolheu {starter['name']} como Pokémon inicial!")
 
     # Todos escolheram?
-    active_ids = [p['id'] for p in _get_active_players(state)]
+    active_ids = _ordered_active_player_ids(state)
     if set(turn['starters_chosen']) >= set(active_ids):
         turn['phase'] = 'roll'
-        turn['current_player_id'] = state['players'][0]['id']
+        turn['current_player_id'] = active_ids[0] if active_ids else None
         turn.pop('available_starters', None)
-        first = state['players'][0]['name']
-        _log(state, 'Sistema', f"Todos escolheram seus iniciais. Turno de {first}!")
+        first_player = _get_player(state, turn['current_player_id']) if turn.get('current_player_id') else None
+        if first_player:
+            _log(state, 'Sistema', f"Todos escolheram seus iniciais. Turno de {first_player['name']}!")
     else:
         # Avança para o próximo jogador escolher
         turn['current_player_id'] = _next_player_id(state)
@@ -3360,15 +3501,16 @@ def process_move(state: dict, player_id: str, dice_result: int) -> dict:
         'forced_stop_kind': forced_stop_kind,
     }
 
-    if forced_tile and forced_tile.get('id') == new_pos:
-        if forced_stop_kind == 'team_rocket':
-            _log(state, player['name'], f"Moveu {dice_result} casa(s), mas foi obrigado a parar no tile da Equipe Rocket {tile['name']}")
-        elif forced_stop_kind == 'teleporter':
-            _log(state, player['name'], f"Moveu {dice_result} casa(s), mas o Teleporter em {tile['name']} interrompeu o movimento.")
-        else:
-            _log(state, player['name'], f"Moveu {dice_result} casa(s), mas foi obrigado a parar no ginásio {tile['name']}")
-    else:
-        _log(state, player['name'], f"Moveu {dice_result} casa(s) e foi para {tile['name']}")
+    _log_movement_resolution(
+        state,
+        player_name=player['name'],
+        start_position=int(old_pos),
+        dice_result=int(dice_result),
+        natural_destination=int(natural_destination),
+        resolved_destination=int(new_pos),
+        tile_name=tile.get('name', '?'),
+        forced_stop_kind=forced_stop_kind if forced_tile and forced_tile.get('id') == new_pos else None,
+    )
 
     if _handle_pokecenter_pass_through(
         state,
@@ -3420,7 +3562,11 @@ def _resolve_tile_effect(state: dict, player_id: str, tile: dict, effect: dict) 
             state['turn']['pending_event'] = card
             state['turn']['phase'] = 'event'
             reveal_card(state, player_id, card, 'event')
-            _log(state, player['name'], f"Carta de evento: {card.get('title', '?')} — confirme para aplicar")
+            _log(
+                state,
+                player['name'],
+                f"Carta de evento revelada no tile {tile.get('name', '?')}: {_describe_card_for_log(card)} — confirme para aplicar.",
+            )
         else:
             state['turn']['phase'] = 'end'
             state = end_turn(state)
@@ -4041,7 +4187,7 @@ def resolve_event(state: dict, player_id: str, use_run_away: bool = False) -> tu
                     prompt='Escolha um dos Pokémon disponíveis',
                 )
             if result.get('unsupported_options'):
-                _log(state, player['name'], f"Opções indisponíveis ignoradas: {', '.join(result['unsupported_options'])}")
+                _log_warning(state, player['name'], f"opções indisponíveis ignoradas: {', '.join(result['unsupported_options'])}")
         elif result.get('effect') == 'teleporter_choice':
             options = [
                 {'id': p['id'], 'label': p['name'], 'target_player_id': p['id']}
@@ -4865,7 +5011,13 @@ def _resolve_successful_capture(
             return None, 'Sem Master Ball disponível para concluir esta captura'
         master_ball_consumed = True
         _log(state, player['name'], 'A Master Ball foi consumida porque a captura foi concluída com sucesso.')
-    _log(state, player['name'], f"Capturou {pokemon['name']}! +{pokemon.get('master_points', 0)} MP")
+    _log(
+        state,
+        player['name'],
+        f"Capturou {pokemon['name']} com dados {_format_rolls_for_log(capture_roll.get('all_rolls'))}. "
+        f"{_describe_capture_cost_for_log(capture_cost=capture_cost, use_full_restore=use_full_restore, use_master_ball=use_master_ball)}. "
+        f"+{pokemon.get('master_points', 0)} MP.",
+    )
     _clear_pending_action(state)
 
     safari_reserve = state['turn'].get('pending_safari') or []
@@ -4926,13 +5078,14 @@ def _resolve_failed_capture(state: dict, player_id: str, capture_roll: dict, rea
     pokemon = state['turn'].get('pending_pokemon')
     pending_action = state['turn'].get('pending_action') or {}
     used_master_ball = bool(pending_action.get('master_ball_in_use'))
+    roll_summary = _format_rolls_for_log(capture_roll.get('all_rolls') or [capture_roll.get('raw_result')])
     if player:
         if pokemon:
-            _log(state, player['name'], f"Falhou ao capturar {pokemon['name']}: {reason}")
+            _log(state, player['name'], f"Falhou na captura de {pokemon['name']} com dados {roll_summary}: {reason}")
         elif pending_action.get('encounter_source'):
-            _log(state, player['name'], f"Falhou ao resolver o encontro em {pending_action['encounter_source']}: {reason}")
+            _log(state, player['name'], f"Falhou ao resolver o encontro em {pending_action['encounter_source']} com dados {roll_summary}: {reason}")
         else:
-            _log(state, player['name'], f"Falhou ao resolver a captura: {reason}")
+            _log(state, player['name'], f"Falhou ao resolver a captura com dados {roll_summary}: {reason}")
         if used_master_ball:
             _log(state, player['name'], 'A Master Ball não foi consumida porque a captura não foi concluída.')
 
@@ -5136,7 +5289,7 @@ def roll_capture_attempt(
             pokemon = load_pokemon_by_id(resolved_id)
         if resolution.get('unsupported_reward') or (success and not pokemon):
             unsupported = resolution.get('unsupported_reward') or resolved_name or resolved_id or 'Pokémon desconhecido'
-            _log(state, player['name'], f"Recompensa ignorada por falta de suporte jogável: {unsupported}")
+            _log_warning(state, player['name'], f"recompensa ignorada por falta de suporte jogável: {unsupported}")
             return _resolve_failed_capture(state, player_id, capture_roll_result, 'Pokémon sem suporte jogável')
 
     if resolution and not success and not allowed_rolls:
@@ -5244,12 +5397,24 @@ def discard_item(state: dict, player_id: str, item_key: str) -> tuple[dict | Non
     if not remove_item(player, item_key, 1):
         return None, 'Item inválido para descarte'
 
-    _log(state, player['name'], f'Descartou 1 {item_key}')
-    if total_item_count(player) > ITEM_CAPACITY:
-        overflow = total_item_count(player) - ITEM_CAPACITY
+    item_name = get_item_def(item_key).get('name', item_key)
+    remaining_items = total_item_count(player)
+    reason = choice.get('reason') or 'descarte obrigatório'
+    if remaining_items > ITEM_CAPACITY:
+        overflow = remaining_items - ITEM_CAPACITY
+        _log(
+            state,
+            player['name'],
+            f"Descartou 1 {item_name} ({reason}). Inventário: {remaining_items}/{ITEM_CAPACITY}; ainda faltam {overflow} descarte(s).",
+        )
         turn['pending_item_choice']['discard_count'] = overflow
         return state, 'ok'
 
+    _log(
+        state,
+        player['name'],
+        f"Descartou 1 {item_name} ({reason}). Inventário: {remaining_items}/{ITEM_CAPACITY}.",
+    )
     turn['pending_item_choice'] = None
     lass_queue = turn.get('lass_discard_queue') or []
     if lass_queue:
@@ -5763,7 +5928,7 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
     if 'pokemon_name' in chosen:
         pokemon, support = resolve_supported_pokemon_reward(chosen['pokemon_name'])
         if not support['supported'] or not pokemon:
-            _log(state, player['name'], f"Recompensa ignorada por falta de suporte jogável: {chosen['pokemon_name']}")
+            _log_warning(state, player['name'], f"recompensa ignorada por falta de suporte jogável: {chosen['pokemon_name']}")
             state = end_turn(state)
             return state, {'success': False, 'unsupported_pokemon': chosen['pokemon_name']}
         result_state, result = _grant_reward_pokemon(state, player_id, pokemon, source=source)
@@ -8004,11 +8169,11 @@ def end_turn(state: dict) -> dict:
                 state = _queue_teleporter_manual_roll_action(state, player_id, source_tile=tile)
         return state
 
-    active = _get_active_players(state)
+    active_ids = _ordered_active_player_ids(state)
     current_id = turn.get('current_player_id')
     next_id = _next_player_id(state)
     visited = 0
-    while next_id and visited < max(1, len(active)):
+    while next_id and visited < max(1, len(active_ids)):
         next_player = _get_player(state, next_id)
         if not next_player or int(next_player.get('skip_turns', 0) or 0) <= 0:
             break
@@ -8018,11 +8183,11 @@ def end_turn(state: dict) -> dict:
         visited += 1
         next_id = _next_player_id(state)
 
-    if not next_id and active:
-        next_id = active[0]['id']
+    if not next_id and active_ids:
+        next_id = active_ids[0]
 
     # Incrementa round ao voltar ao primeiro jogador
-    if active and current_id and next_id == active[0]['id']:
+    if active_ids and current_id and next_id == active_ids[0]:
         turn['round'] = turn.get('round', 1) + 1
 
     turn['current_player_id'] = next_id

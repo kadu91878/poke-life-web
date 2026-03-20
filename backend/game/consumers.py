@@ -17,6 +17,39 @@ from .socket_contract import SOCKET_HANDLER_NAMES
 from .state_schema import mark_saved, normalize_state
 
 
+def _format_debug_fields(**fields) -> str:
+    parts = []
+    for key, value in fields.items():
+        if value is None:
+            continue
+        parts.append(f'{key}={value!r}')
+    return ' '.join(parts)
+
+
+def _cpu_state_snapshot(state: dict | None) -> str:
+    turn = (state or {}).get('turn') or {}
+    battle = turn.get('battle') or {}
+    return _format_debug_fields(
+        phase=turn.get('phase'),
+        current_player=turn.get('current_player_id'),
+        pending_action=(turn.get('pending_action') or {}).get('type'),
+        pending_item=(turn.get('pending_item_choice') or {}).get('player_id'),
+        battle_mode=battle.get('mode'),
+        battle_phase=battle.get('sub_phase'),
+    )
+
+
+def _cpu_debug(level: str, message: str, *, state: dict | None = None, **fields) -> None:
+    parts = [f'[CPU][{level}]', message]
+    field_text = _format_debug_fields(**fields)
+    if field_text:
+        parts.append(field_text)
+    state_text = _cpu_state_snapshot(state)
+    if state_text:
+        parts.append(state_text)
+    print(' '.join(parts))
+
+
 class GameConsumer(AsyncWebsocketConsumer):
     _room_locks: ClassVar[dict[str, asyncio.Lock]] = {}
 
@@ -949,7 +982,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 state = await self.get_game_state()
                 await self._execute_cpu_action(state, cpu_player_id)
         except Exception as exc:
-            print(f'[CPU] erro ao executar ação para cpu_player={cpu_player_id!r}: {exc}')
+            _cpu_debug('ERROR', 'erro ao executar ação', cpu_player_id=cpu_player_id, error=str(exc))
 
     async def _execute_cpu_action(self, state: dict, cpu_player_id: str) -> None:
         """Execute one CPU decision step, save, and broadcast."""
@@ -960,7 +993,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         if action_name == 'wait':
             return
 
-        print(f'[CPU] player={cpu_player_id!r} action={action_name!r} kwargs={kwargs}')
+        _cpu_debug('ACTION', 'executando ação', state=state, cpu_player_id=cpu_player_id, action=action_name, kwargs=kwargs)
         result = await self._apply_cpu_action(state, cpu_player_id, action_name, kwargs)
         if result is None:
             return
@@ -1002,7 +1035,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             target_id = kwargs.get('target_player_id')
             new_state = game_state.start_duel(state, cpu_player_id, target_id)
             if new_state is None:
-                print(f'[CPU] challenge_player falhou: target={target_id!r}')
+                _cpu_debug('ERROR', 'challenge_player falhou', state=state, cpu_player_id=cpu_player_id, target_id=target_id)
                 return None
             return new_state, {
                 'type': 'duel_started',
@@ -1014,7 +1047,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             item_key = (kwargs.get('item_key') or '').strip()
             new_state, result = game_state.discard_item(state, cpu_player_id, item_key)
             if new_state is None:
-                print(f'[CPU] discard_item falhou: item={item_key!r} error={result}')
+                _cpu_debug('ERROR', 'discard_item falhou', state=state, cpu_player_id=cpu_player_id, item_key=item_key, error=result)
                 return None
             return new_state, {
                 'type': 'item_discarded',
@@ -1031,7 +1064,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             new_state, err = game_state.resolve_event(state, cpu_player_id,
                                                       use_run_away=use_run_away)
             if new_state is None:
-                print(f'[CPU] resolve_event falhou: {err}')
+                _cpu_debug('ERROR', 'resolve_event falhou', state=state, cpu_player_id=cpu_player_id, use_run_away=use_run_away, error=err)
                 return None
             return new_state, {'type': 'event_resolved', 'player_id': cpu_player_id}
 
@@ -1042,7 +1075,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 use_master_ball=kwargs.get('use_master_ball', False),
             )
             if new_state is None:
-                print(f'[CPU] roll_capture_attempt falhou: {result}')
+                _cpu_debug('ERROR', 'roll_capture_attempt falhou', state=state, cpu_player_id=cpu_player_id, error=result)
                 return None
             ev_type = ('pokemon_captured'
                        if isinstance(result, dict) and result.get('pokemon')
@@ -1060,7 +1093,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 pokemon_slot_key=kwargs.get('pokemon_slot_key'),
             )
             if result and result.get('error'):
-                print(f'[CPU] battle_choice falhou: {result["error"]}')
+                _cpu_debug('ERROR', 'battle_choice falhou', state=state, cpu_player_id=cpu_player_id, error=result['error'])
                 return None
             if result and result.get('ignored'):
                 return None
@@ -1069,7 +1102,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         if action_name == 'roll_battle_dice':
             new_state, result = game_state.register_battle_roll(state, cpu_player_id)
             if result and result.get('error'):
-                print(f'[CPU] roll_battle_dice falhou: {result["error"]}')
+                _cpu_debug('ERROR', 'roll_battle_dice falhou', state=state, cpu_player_id=cpu_player_id, error=result['error'])
                 return None
             if result and result.get('ignored'):
                 return None
@@ -1086,7 +1119,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             new_state, result = game_state.resolve_pending_action(
                 state, cpu_player_id, kwargs.get('option_id'))
             if new_state is None:
-                print(f'[CPU] resolve_pending_action falhou: {result}')
+                _cpu_debug('ERROR', 'resolve_pending_action falhou', state=state, cpu_player_id=cpu_player_id, option_id=kwargs.get('option_id'), error=result)
                 return None
             return new_state, {'type': 'pending_action_resolved',
                                'player_id': cpu_player_id, 'result': result}
@@ -1094,7 +1127,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         if action_name == 'confirm_league_intermission':
             new_state, result = game_state.confirm_league_intermission(state, cpu_player_id)
             if new_state is None:
-                print(f'[CPU] confirm_league_intermission falhou: {result}')
+                _cpu_debug('ERROR', 'confirm_league_intermission falhou', state=state, cpu_player_id=cpu_player_id, error=result)
                 return None
             return new_state, {'type': 'league_intermission_confirmed',
                                'player_id': cpu_player_id, 'result': result}
@@ -1105,7 +1138,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 pokemon_slot_key=kwargs.get('pokemon_slot_key'),
             )
             if new_state is None:
-                print(f'[CPU] release_pokemon falhou: {result}')
+                _cpu_debug('ERROR', 'release_pokemon falhou', state=state, cpu_player_id=cpu_player_id, pokemon_slot_key=kwargs.get('pokemon_slot_key'), error=result)
                 return None
             return new_state, {'type': 'pokemon_released',
                                'player_id': cpu_player_id, 'result': result}
@@ -1113,11 +1146,11 @@ class GameConsumer(AsyncWebsocketConsumer):
         if action_name == 'dismiss_revealed_card':
             new_state, result = game_state.dismiss_revealed_card(state, cpu_player_id)
             if new_state is None:
-                print(f'[CPU] dismiss_revealed_card falhou: {result}')
+                _cpu_debug('ERROR', 'dismiss_revealed_card falhou', state=state, cpu_player_id=cpu_player_id, error=result)
                 return None
             return new_state, {'type': 'revealed_card_dismissed', 'player_id': cpu_player_id}
 
-        print(f'[CPU] ação desconhecida: {action_name!r}')
+        _cpu_debug('ERROR', 'ação desconhecida', state=state, cpu_player_id=cpu_player_id, action=action_name)
         return None
 
     async def send_state_update(self, message):
