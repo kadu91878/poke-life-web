@@ -21,7 +21,7 @@
       "engine_types": [
         "psychic"
       ],
-      "engine_ability_name": "Teleport",
+      "engine_ability_name": null,
       "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
