@@ -38,7 +38,14 @@ _NEGATIVE_EVENT_EFFECTS = frozenset({
     'move_backward', 'teleport_start',
 })
 
+# Itens identificados por ícone visual nas cartas físicas (não legíveis como texto):
+#   "wind item icon" → Gust of Wind (ícone de vento)
+#   "boy icon item"  → Prof. Oak (ícone do personagem)
 _AMBIGUOUS_MARKET_REWARDS = frozenset({'wind item icon', 'boy icon item'})
+_ICON_ITEM_MAP = {
+    'wind item icon': 'gust_of_wind',
+    'boy icon item': 'prof_oak',
+}
 _FOSSIL_ALIASES = frozenset({'m. fossil', 'm fossil', 'mysterious fossil'})
 
 
@@ -395,6 +402,8 @@ def _wild_pokemon_title_name(card: dict) -> str:
         title = title[len('Wild Pokémon '):]
     elif title.lower().startswith('wild pokemon '):
         title = title[len('Wild Pokemon '):]
+    elif title.lower().startswith('victory card '):
+        title = title[len('Victory Card '):]
     return title.strip()
 
 
@@ -601,8 +610,8 @@ def parse_market_reward(card: dict) -> dict:
         return {'type': 'gain_item', 'item_key': 'miracle_stone', 'amount': 1, 'rolls': [roll]}
     if normalized.lower() == 'defender':
         return {'type': 'gain_item', 'item_key': 'defender', 'amount': 1, 'rolls': [roll]}
-    if normalized.lower() in _AMBIGUOUS_MARKET_REWARDS:
-        return {'type': 'unsupported_reward', 'reward_name': normalized, 'rolls': [roll]}
+    if normalized.lower() in _ICON_ITEM_MAP:
+        return {'type': 'gain_item', 'item_key': _ICON_ITEM_MAP[normalized.lower()], 'amount': 1, 'rolls': [roll]}
     return {'type': 'unsupported_reward', 'reward_name': normalized or 'unknown', 'rolls': [roll]}
 
 
@@ -869,11 +878,13 @@ def apply_victory_effect(state: dict, player_id: str, card: dict) -> tuple[dict,
         return state, result
 
     if category == 'gift_pokemon':
-        name_match = re.search(r'receive(?:\s+as many\s+)?\s+a?\s*([A-Za-z .\'-]+)!', description, re.IGNORECASE)
+        name_match = re.search(
+            r'receive\s+(?:as many\s+)?(?:a\s+)?([A-Za-z][A-Za-z .\'-]*?)(?:\s+as you want)?!',
+            description,
+            re.IGNORECASE,
+        )
         if name_match:
             pokemon_name = name_match.group(1).strip()
-            if pokemon_name.lower() == 'many magikarp as you want':
-                pokemon_name = 'Magikarp'
             pokemon, support = resolve_supported_pokemon_reward(pokemon_name)
             result.update(support)
             if support['supported']:
@@ -947,8 +958,33 @@ def apply_victory_effect(state: dict, player_id: str, card: dict) -> tuple[dict,
         return state, result
 
     if category == 'special_reward':
-        result['status'] = 'partial'
-        result['effect'] = 'special_reward_not_implemented'
+        # "Jynx foresees luck in your future" — recompensa aleatória baseada em dado.
+        roll = random.randint(1, 6)
+        result['rolls'] = [roll]
+        result['effect'] = 'special_reward'
+        if roll == 1:
+            player['bonus_points'] = player.get('bonus_points', 0) + 10
+            player['bonus_master_points'] = player.get('bonus_master_points', 0) + 10
+            result['reward'] = {'type': 'gain_master_points', 'amount': 10}
+        elif roll == 2:
+            player['pokeballs'] = player.get('pokeballs', 0) + 1
+            result['reward'] = {'type': 'gain_pokeball', 'amount': 1}
+        elif roll == 3:
+            add_item(player, 'full_restore', 1)
+            result['reward'] = {'type': 'gain_item', 'item_key': 'full_restore'}
+        elif roll == 4:
+            player['bonus_points'] = player.get('bonus_points', 0) + 20
+            player['bonus_master_points'] = player.get('bonus_master_points', 0) + 20
+            result['reward'] = {'type': 'gain_master_points', 'amount': 20}
+        elif roll == 5:
+            add_item(player, 'pluspower', 1)
+            result['reward'] = {'type': 'gain_item', 'item_key': 'pluspower'}
+        else:  # roll == 6
+            player['bonus_points'] = player.get('bonus_points', 0) + 30
+            player['bonus_master_points'] = player.get('bonus_master_points', 0) + 30
+            player['pokeballs'] = player.get('pokeballs', 0) + 1
+            result['reward'] = {'type': 'jackpot', 'master_points': 30, 'pokeballs': 1}
+        sync_player_inventory(player)
         return state, result
 
     return state, result
