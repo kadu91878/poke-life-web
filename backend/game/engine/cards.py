@@ -46,9 +46,6 @@ _ICON_ITEM_MAP = {
     'wind item icon': 'gust_of_wind',
     'boy icon item': 'prof_oak',
 }
-_FOSSIL_ALIASES = frozenset({'m. fossil', 'm fossil', 'mysterious fossil'})
-
-
 def _public_card_image(pile: str, reference_image: str | None) -> str | None:
     if not reference_image:
         return None
@@ -458,24 +455,29 @@ def parse_single_wild_capture_card(card: dict, rolls: list[int]) -> dict:
     }
 
 
+def _iter_choice_pack_branches(description: str):
+    pattern = re.compile(
+        r'If the first roll is\s+([0-9])\,\s*roll again:\s*(.*?)(?=\s*If the first roll is\s+[0-9]\,\s*roll again:|$)',
+        re.IGNORECASE | re.DOTALL,
+    )
+    for match in pattern.finditer(description):
+        yield int(match.group(1)), match.group(2).strip().rstrip('.')
+
+
 def _resolve_choice_pack_card(card: dict) -> dict:
     description = card.get('description', '')
     first_roll = random.randint(1, 6)
     rolls = [first_roll]
 
-    for match in re.finditer(r'If the first roll is\s+([0-9])\,\s*roll again:\s*([^.]*)\.', description, re.IGNORECASE):
-        trigger = int(match.group(1))
+    for trigger, branch in _iter_choice_pack_branches(description):
         if first_roll != trigger:
             continue
 
         second_roll = random.randint(1, 6)
         rolls.append(second_roll)
-        branch = match.group(2)
         for option in re.finditer(r'([0-9,/]+)\s*=\s*([^;]+)', branch):
             if second_roll in _parse_rolls(option.group(1)):
                 pokemon_name = option.group(2).strip()
-                if pokemon_name.lower() in _FOSSIL_ALIASES:
-                    return {'success': False, 'unsupported_reward': pokemon_name, 'rolls': rolls}
                 return {'success': True, 'pokemon_name': pokemon_name, 'rolls': rolls}
         return {'success': False, 'rolls': rolls}
 
@@ -490,8 +492,7 @@ def parse_choice_pack_card(card: dict, rolls: list[int]) -> dict:
     first_roll = int(rolls[0])
     used_rolls = [first_roll]
 
-    for match in re.finditer(r'If the first roll is\s+([0-9])\,\s*roll again:\s*([^.]*)\.', description, re.IGNORECASE):
-        trigger = int(match.group(1))
+    for trigger, branch in _iter_choice_pack_branches(description):
         if first_roll != trigger:
             continue
 
@@ -500,12 +501,9 @@ def parse_choice_pack_card(card: dict, rolls: list[int]) -> dict:
 
         second_roll = int(rolls[1])
         used_rolls.append(second_roll)
-        branch = match.group(2)
         for option in re.finditer(r'([0-9,/]+)\s*=\s*([^;]+)', branch):
             if second_roll in _parse_rolls(option.group(1)):
                 pokemon_name = option.group(2).strip()
-                if pokemon_name.lower() in _FOSSIL_ALIASES:
-                    return {'success': False, 'unsupported_reward': pokemon_name, 'rolls': used_rolls}
                 return {'success': True, 'pokemon_name': pokemon_name, 'rolls': used_rolls}
         return {'success': False, 'rolls': used_rolls}
 
@@ -575,7 +573,7 @@ def build_trainer_battle_context(card: dict) -> dict:
 
     return {
         'trainer_name': trainer_name,
-        'trainer_bp': 3,
+        'trainer_bp': int(card.get('bp') or 5),
         'reward_plan': reward_plan,
         'card_title': card.get('title', 'Trainer Battle'),
         'card_category': card.get('category'),
@@ -778,16 +776,24 @@ def apply_event_effect(state: dict, player_id: str, card: dict) -> tuple[dict, d
             result['spaces'] = 3
             return state, result
         if effect_type == 'all_discard_item':
-            players = [p for p in state['players'] if p.get('is_active', True)]
-            affected = []
-            for target in players:
-                items = target.get('items', [])
-                if not items:
-                    continue
-                item = sorted(items, key=lambda x: x.get('key', ''))[0]
-                remove_item(target, item.get('key', ''), 1)
-                affected.append(target['id'])
-            result['affected_players'] = affected
+            players_with_items = [
+                p for p in state['players']
+                if p.get('is_active', True) and p.get('items')
+            ]
+            affected_ids = [p['id'] for p in players_with_items]
+            result['affected_players'] = affected_ids
+            if not affected_ids:
+                return state, result
+            queue = affected_ids[:]
+            first = queue.pop(0)
+            state['turn']['lass_discard_queue'] = queue
+            state['turn']['phase'] = 'item_choice'
+            state['turn']['pending_item_choice'] = {
+                'player_id': first,
+                'reason': 'Event Lass: descarte obrigatório',
+                'discard_count': 1,
+                'is_lass': True,
+            }
             return state, result
         if effect_type == 'lose_ability_charge':
             all_pokemon = list(player.get('pokemon', []))
@@ -883,6 +889,7 @@ def apply_victory_effect(state: dict, player_id: str, card: dict) -> tuple[dict,
             description,
             re.IGNORECASE,
         )
+        loop_capture = bool(re.search(r'as many.*as you want', description, re.IGNORECASE))
         if name_match:
             pokemon_name = name_match.group(1).strip()
             pokemon, support = resolve_supported_pokemon_reward(pokemon_name)
@@ -897,6 +904,7 @@ def apply_victory_effect(state: dict, player_id: str, card: dict) -> tuple[dict,
                     'allowed_rolls': [],
                     'source_card_id': card.get('id'),
                     'source_card_title': card.get('title'),
+                    'loop_capture': loop_capture,
                 }
             else:
                 result['status'] = 'partial'

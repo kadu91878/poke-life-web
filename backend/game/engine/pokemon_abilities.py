@@ -80,6 +80,8 @@ def _effect_label(effect_kind: str, params: dict[str, Any] | None = None) -> str
         return 'Escolher resultado do dado'
     if effect_kind == 'capture_choice':
         return 'Modificar captura'
+    if effect_kind == 'battle_bp_swap':
+        return 'Trocar Battle Points'
     if effect_kind == 'text_rule':
         return 'Regra textual'
     return effect_kind.replace('_', ' ').title()
@@ -259,12 +261,21 @@ def _infer_effects_from_description(pokemon: dict[str, Any]) -> list[dict[str, A
             'bonus_mp_per_ally': 10,
             'ally_name': ally_name,
         })
-    if 'instead of throwing the move dice, you may teleport' in normalized or 'move forward to a player on another tile within 5 tiles' in normalized or 'move forward to a tile no further than five ahead' in normalized:
+    if 'move forward to a tile no further than five ahead' in normalized:
+        add(
+            'targeted_move',
+            activation_mode='manual_before_roll',
+            implemented=True,
+            params={'mode': 'choose_forward_steps', 'max_steps': 5},
+        )
+    elif 'instead of throwing the move dice, you may teleport' in normalized or 'move forward to a player on another tile within 5 tiles' in normalized:
         add('targeted_move', activation_mode='manual_before_roll', implemented=False)
     if 'you may decide the outcome of the move dice' in normalized:
         add('move_roll_choice', activation_mode='prompt_after_move_roll', implemented=True)
     if 'you may decide the outcome of the capture dice' in normalized or 'throw 2 dice at once, and choose the outcome you desire' in normalized:
         add('capture_choice', activation_mode='capture_prompt', implemented=True)
+    if 'switch battle points with the opponent' in normalized:
+        add('battle_bp_swap', activation_mode='battle_prompt_before_roll', implemented=True, limit_scope='battle')
 
     if description and not effects:
         add('text_rule', activation_mode='descriptive_only', implemented=False, params={'summary': description})
@@ -391,43 +402,59 @@ def _attach_ability_snapshots(pokemon: dict[str, Any], *, turn: dict[str, Any] |
             if activation_mode != 'manual_before_roll' and activation_mode != 'manual_action':
                 continue
 
-            action = {
-                'action_id': _slug(f"{effect['effect_kind']}"),
-                'effect_kind': effect['effect_kind'],
-                'label': effect['label'],
-                'params': copy.deepcopy(effect.get('params') or {}),
-                'supported': True,
-                'can_activate_now': False,
-                'disabled_reason': None,
-            }
+            action_variants: list[dict[str, Any]] = []
+            params = copy.deepcopy(effect.get('params') or {})
+            if effect.get('effect_kind') == 'targeted_move' and params.get('mode') == 'choose_forward_steps':
+                max_steps = max(1, int(params.get('max_steps', 1) or 1))
+                for steps in range(1, max_steps + 1):
+                    action_variants.append({
+                        'action_id': _slug(f'fixed_move_{steps}'),
+                        'effect_kind': 'fixed_move',
+                        'label': f'Mover {steps} casa{"s" if steps != 1 else ""}',
+                        'params': {'steps': steps},
+                        'supported': True,
+                        'can_activate_now': False,
+                        'disabled_reason': None,
+                    })
+            else:
+                action_variants.append({
+                    'action_id': _slug(f"{effect['effect_kind']}"),
+                    'effect_kind': effect['effect_kind'],
+                    'label': effect['label'],
+                    'params': params,
+                    'supported': True,
+                    'can_activate_now': False,
+                    'disabled_reason': None,
+                })
 
-            if no_charges_left:
-                action['disabled_reason'] = 'Sem cargas restantes'
-            elif runtime_entry.get('used_this_turn'):
-                action['disabled_reason'] = 'Já usada neste turno'
-            elif not is_owner_turn:
-                action['disabled_reason'] = 'Aguardando sua vez'
-            elif activation_mode == 'manual_before_roll':
-                if not can_interact or current_phase != 'roll':
-                    action['disabled_reason'] = 'Use antes de rolar o dado'
-                else:
-                    action['can_activate_now'] = True
-            elif activation_mode == 'manual_action':
-                has_capture_flow = current_phase == 'action' and (
-                    (turn or {}).get('pending_pokemon') is not None
-                    or ((turn or {}).get('pending_action') or {}).get('type') == 'capture_attempt'
-                )
-                if effect['effect_kind'] == 'capture_free_next' and has_capture_flow and is_owner_turn:
-                    action['can_activate_now'] = True
-                elif effect['effect_kind'] == 'heal_other' and is_owner_turn and current_phase in ('roll', 'action') and can_interact:
-                    action['can_activate_now'] = True
-                else:
-                    action['disabled_reason'] = 'Use na fase de ação apropriada'
+            for action in action_variants:
+                if no_charges_left:
+                    action['disabled_reason'] = 'Sem cargas restantes'
+                elif runtime_entry.get('used_this_turn'):
+                    action['disabled_reason'] = 'Já usada neste turno'
+                elif not is_owner_turn:
+                    action['disabled_reason'] = 'Aguardando sua vez'
+                elif activation_mode == 'manual_before_roll':
+                    if not can_interact or current_phase != 'roll':
+                        action['disabled_reason'] = 'Use antes de rolar o dado'
+                    else:
+                        action['can_activate_now'] = True
+                elif activation_mode == 'manual_action':
+                    has_capture_flow = current_phase == 'action' and (
+                        (turn or {}).get('pending_pokemon') is not None
+                        or ((turn or {}).get('pending_action') or {}).get('type') == 'capture_attempt'
+                    )
+                    if effect['effect_kind'] == 'capture_free_next' and has_capture_flow and is_owner_turn:
+                        action['can_activate_now'] = True
+                    elif effect['effect_kind'] == 'heal_other' and is_owner_turn and current_phase in ('roll', 'action') and can_interact:
+                        action['can_activate_now'] = True
+                    else:
+                        action['disabled_reason'] = 'Use na fase de ação apropriada'
 
-            if action['can_activate_now']:
-                can_activate_now = True
-                disabled_reason = None
-            manual_actions.append(action)
+                if action['can_activate_now']:
+                    can_activate_now = True
+                    disabled_reason = None
+                manual_actions.append(action)
 
         snapshots.append({
             **copy.deepcopy(definition),
