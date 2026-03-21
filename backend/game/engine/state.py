@@ -5276,16 +5276,38 @@ def _resolve_safari_zone_tile(state: dict, player_id: str, tile: dict) -> dict:
         return state
 
     tile_data = tile.get('data') or {}
+
+    # Tile de entrada: sem captura, apenas passa pelo tile
+    if tile_data.get('is_entrance'):
+        _log(state, player['name'], f"Entrou na {tile.get('name', 'Safari Zone')}.")
+        state['turn']['phase'] = 'end'
+        return end_turn(state)
+
+    pokemon_name = tile_data.get('displayed_pokemon_name')
+    pokemon = load_pokemon_by_name(pokemon_name) if pokemon_name else None
+    allowed_rolls = tile_data.get('allowed_rolls') or []
+
+    # Tile de saída: se houver Pokémon, oferecer captura antes de sair;
+    # caso contrário, saída imediata (comportamento original)
     if tile_data.get('is_exit'):
         return_to_tile_id = int(tile_data.get('return_to_tile_id', tile.get('id', 0)) or tile.get('id', 0))
+        if pokemon:
+            state['turn']['safari_exit_return_to'] = return_to_tile_id
+            _log(state, player['name'],
+                 f"Chegou ao fim da Safari Zone e pode tentar capturar {pokemon['name']} antes de sair.")
+            return _queue_capture_attempt(
+                state, player_id,
+                pokemon=pokemon,
+                capture_context='safari',
+                source='safari_zone_tile',
+                allowed_rolls=allowed_rolls,
+            )
         player['position'] = return_to_tile_id
         state['turn']['current_tile'] = get_tile(state.get('board', {}), return_to_tile_id)
         _log(state, player['name'], f"Chegou ao fim da Safari Zone e voltou para {state['turn']['current_tile'].get('name', 'a House')}.")
         state['turn']['phase'] = 'end'
         return end_turn(state)
 
-    pokemon_name = tile_data.get('displayed_pokemon_name')
-    pokemon = load_pokemon_by_name(pokemon_name) if pokemon_name else None
     if not pokemon:
         _log(state, player['name'], f"A Safari Zone mostrou {pokemon_name or 'um Pokémon desconhecido'}, mas ele não possui suporte jogável no estado atual.")
         state['turn']['phase'] = 'end'
@@ -5298,6 +5320,7 @@ def _resolve_safari_zone_tile(state: dict, player_id: str, tile: dict) -> dict:
         pokemon=pokemon,
         capture_context='safari',
         source='safari_zone_tile',
+        allowed_rolls=allowed_rolls,
     )
 
 
@@ -6609,6 +6632,18 @@ def _resolve_successful_capture(
             'master_ball_consumed': master_ball_consumed,
         }
 
+    safari_exit_return_to = state['turn'].pop('safari_exit_return_to', None)
+    if safari_exit_return_to is not None and capture_context == 'safari':
+        player['position'] = safari_exit_return_to
+        state['turn']['current_tile'] = get_tile(state.get('board', {}), safari_exit_return_to)
+        _log(state, player['name'], f"Saiu da Safari Zone e voltou para {state['turn']['current_tile'].get('name', 'a House')}.")
+        state['turn']['pending_safari'] = None
+        state['turn']['capture_context'] = None
+        state['turn']['phase'] = 'end'
+        state = end_turn(state)
+        return state, {**result, 'capture_roll': capture_roll, 'safari_exit': True,
+                       'used_master_ball': use_master_ball, 'master_ball_consumed': master_ball_consumed}
+
     loop_pokemon_name = state['turn'].get('loop_capture_pokemon_name')
     if loop_pokemon_name:
         loop_player = _get_player(state, player_id)
@@ -6682,6 +6717,19 @@ def _resolve_failed_capture(state: dict, player_id: str, capture_roll: dict, rea
             'used_master_ball': used_master_ball,
             'master_ball_preserved': used_master_ball,
         }
+
+    safari_exit_return_to = state['turn'].pop('safari_exit_return_to', None)
+    if safari_exit_return_to is not None and state['turn'].get('capture_context') == 'safari':
+        failed_player = _get_player(state, player_id)
+        if failed_player:
+            failed_player['position'] = safari_exit_return_to
+            state['turn']['current_tile'] = get_tile(state.get('board', {}), safari_exit_return_to)
+            _log(state, failed_player['name'], f"Saiu da Safari Zone e voltou para {state['turn']['current_tile'].get('name', 'a House')}.")
+        state['turn']['pending_safari'] = None
+        state['turn']['capture_context'] = None
+        state = end_turn(state)
+        return state, {'success': False, 'capture_roll': capture_roll, 'safari_exit': True,
+                       'used_master_ball': used_master_ball, 'master_ball_preserved': used_master_ball}
 
     state['turn']['pending_safari'] = None
     state['turn']['capture_context'] = None
@@ -7175,6 +7223,17 @@ def skip_action(state: dict, player_id: str) -> dict:
         )
         # Mantém fase de ação para próxima captura opcional
         return state
+
+    safari_exit_return_to = turn.pop('safari_exit_return_to', None)
+    if safari_exit_return_to is not None and capture_context == 'safari':
+        skip_player = _get_player(state, player_id)
+        if skip_player:
+            skip_player['position'] = safari_exit_return_to
+            state['turn']['current_tile'] = get_tile(state.get('board', {}), safari_exit_return_to)
+            _log(state, skip_player['name'], f"Pulou a captura e saiu da Safari Zone, voltando para {state['turn']['current_tile'].get('name', 'a House')}.")
+        turn['pending_safari'] = None
+        turn['capture_context'] = None
+        return end_turn(state)
 
     # Limpa estados e encerra turno
     turn['pending_safari'] = None
