@@ -36,6 +36,7 @@ SOCKET_HANDLER_NAMES = {
     GAME_ACTIONS['passTurn']: 'handle_pass_turn',
     GAME_ACTIONS['skipAction']: 'handle_skip_action',
     GAME_ACTIONS['challengePlayer']: 'handle_challenge_player',
+    GAME_ACTIONS['proposeTrade']: 'handle_propose_trade',
     GAME_ACTIONS['battleChoice']: 'handle_battle_choice',
     GAME_ACTIONS['rollBattleDice']: 'handle_roll_battle_dice',
     GAME_ACTIONS['removePlayer']: 'handle_remove_player',

@@ -56,6 +56,11 @@ def needs_cpu_action(state: dict) -> list[str]:
     if pending_item_player_id in cpu_ids and pending_item_player_id not in active:
         active.append(pending_item_player_id)
 
+    pending_action = turn.get('pending_action') or {}
+    pending_action_player_id = pending_action.get('player_id')
+    if pending_action_player_id in cpu_ids and pending_action_player_id not in active:
+        active.append(pending_action_player_id)
+
     # Battle: both participants may need to act independently
     battle = turn.get('battle')
     if battle and phase == 'battle':
@@ -122,12 +127,15 @@ def decide_action(state: dict, cpu_player_id: str) -> list[tuple[str, dict]]:
     if pending_item_choice and pending_item_choice.get('player_id') == cpu_player_id:
         return _decide_item_discard(player)
 
+    pending_action = turn.get('pending_action')
+    if pending_action and pending_action.get('player_id') == cpu_player_id:
+        return _decide_pending(cpu_player_id, player, pending_action, turn)
+
     # ── Only act on own turn for non-battle phases ────────────────────────
     if current_player_id != cpu_player_id:
         return [('wait', {})]
 
     # ── Pending action ────────────────────────────────────────────────────
-    pending_action = turn.get('pending_action')
     if pending_action:
         return _decide_pending(cpu_player_id, player, pending_action, turn)
 
@@ -238,6 +246,15 @@ def _decide_pending(
 
     if pa_type == 'league_intermission':
         return [('confirm_league_intermission', {})]
+
+    if pa_type == 'trade_proposal':
+        decline_opt = next((opt for opt in options if (_opt_id(opt) or '').lower() == 'decline'), None)
+        target_opt = _pick_trade_option(pending_action, options)
+        if target_opt is None:
+            target_opt = decline_opt or (options[0] if options else None)
+        if target_opt:
+            return [('resolve_pending_action', {'option_id': _opt_id(target_opt)})]
+        return [('wait', {})]
 
     if pa_type in ('ability_decision', 'capture_reroll_decision',
                    'battle_reroll_decision', 'capture_choice_decision'):
@@ -514,6 +531,36 @@ def _pick_discard_item_key(player: dict) -> str | None:
         )
 
     return min(items, key=discard_rank).get('key')
+
+
+def _pick_trade_option(pending_action: dict, options: list[dict]) -> dict | None:
+    incoming = pending_action.get('offered_pokemon') or {}
+    best_option: dict | None = None
+    best_margin: int | None = None
+    for option in options:
+        option_id = (_opt_id(option) or '').lower()
+        if option_id == 'decline':
+            continue
+        outgoing = option.get('pokemon') or {}
+        incoming_value = _trade_value(incoming)
+        outgoing_value = _trade_value(outgoing)
+        margin = incoming_value - outgoing_value
+        if incoming_value + 3 < outgoing_value:
+            continue
+        if best_margin is None or margin > best_margin:
+            best_margin = margin
+            best_option = option
+    return best_option
+
+
+def _trade_value(pokemon: dict | None) -> int:
+    if not isinstance(pokemon, dict):
+        return -999
+    battle_points = int(pokemon.get('battle_points', 0) or 0)
+    master_points = int(pokemon.get('master_points', 0) or 0)
+    type_count = len(pokemon.get('types') or [])
+    knocked_out_penalty = 12 if pokemon.get('knocked_out') else 0
+    return (battle_points * 10) + master_points + (type_count * 2) - knocked_out_penalty
 
 
 def _opt_id(opt: dict) -> str | None:

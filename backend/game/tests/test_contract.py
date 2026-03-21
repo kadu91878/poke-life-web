@@ -22,6 +22,7 @@ class TestSocketActionContract(TestCase):
 
     def test_capture_and_debug_actions_are_mapped_in_backend(self):
         self.assertEqual(SOCKET_HANDLER_NAMES[GAME_ACTIONS['rollCaptureDice']], 'handle_roll_capture_dice')
+        self.assertEqual(SOCKET_HANDLER_NAMES[GAME_ACTIONS['proposeTrade']], 'handle_propose_trade')
         self.assertEqual(SOCKET_HANDLER_NAMES[GAME_ACTIONS['debugToggleHostTools']], 'handle_debug_toggle_host_tools')
         self.assertEqual(SOCKET_HANDLER_NAMES[GAME_ACTIONS['debugMoveHost']], 'handle_debug_move_host')
         self.assertEqual(SOCKET_HANDLER_NAMES[GAME_ACTIONS['debugAddPokemonToHost']], 'handle_debug_add_pokemon_to_host')
@@ -46,6 +47,7 @@ class TestSocketActionContract(TestCase):
         self.assertIn("import gameActions from './gameActions.json'", constants_source)
         self.assertIn("import gameActions from '@/constants/gameActions'", store_source)
         self.assertIn("send(gameActions.rollCaptureDice", store_source)
+        self.assertIn("send(gameActions.proposeTrade", store_source)
         self.assertIn("send(gameActions.debugToggleHostTools", store_source)
         self.assertIn("send(gameActions.debugMoveHost", store_source)
         self.assertIn("send(gameActions.debugAddPokemonToHost", store_source)

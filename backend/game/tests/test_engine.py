@@ -5115,3 +5115,78 @@ class TestPokemonLeague(TestCase):
         results = calculate_final_scores([player])
         self.assertEqual(results[0]['badge_mp'], 40)
         self.assertEqual(results[0]['total'], 40)
+
+
+class TestPlayerTrades(TestCase):
+
+    def _trade_ready_state(self) -> tuple[dict, str, str]:
+        p1 = _make_player('Ash', host=True, position=5, pokemon=[_make_pokemon(name='Pidgey', bp=3)])
+        p2 = _make_player('Misty', position=5, pokemon=[_make_pokemon(name='Staryu', bp=4)])
+        sync_player_inventory(p1)
+        sync_player_inventory(p2)
+        state = build_initial_state('TRADE1')
+        state['status'] = 'playing'
+        state['players'] = [p1, p2]
+        state['turn']['current_player_id'] = p1['id']
+        state['turn']['phase'] = 'action'
+        state['turn']['pending_action'] = None
+        state['turn']['pending_event'] = None
+        state['turn']['pending_pokemon'] = None
+        state['turn']['pending_item_choice'] = None
+        state['turn']['pending_release_choice'] = None
+        state['turn']['battle'] = None
+        state['turn']['movement_context'] = {
+            'start_position': 3,
+            'resolved_destination': 5,
+        }
+        return state, p1['id'], p2['id']
+
+    def test_propose_trade_creates_pending_action_for_target(self):
+        state, p1_id, p2_id = self._trade_ready_state()
+
+        new_state, result = engine.propose_trade(state, p1_id, p2_id, 'pokemon:0', 'pokemon:0')
+
+        self.assertIsNotNone(new_state)
+        self.assertEqual(result['type'], 'trade_proposal')
+        pending = new_state['turn']['pending_action']
+        self.assertEqual(pending['type'], 'trade_proposal')
+        self.assertEqual(pending['player_id'], p2_id)
+        self.assertEqual(pending['proposer_id'], p1_id)
+        self.assertEqual(pending['offered_pokemon']['name'], 'Pidgey')
+        self.assertTrue(any(option.get('id') == 'pokemon:0' for option in pending['options']))
+
+    def test_accept_trade_swaps_pokemon_between_players(self):
+        state, p1_id, p2_id = self._trade_ready_state()
+        state, _ = engine.propose_trade(state, p1_id, p2_id, 'pokemon:0', 'pokemon:0')
+
+        resolved_state, result = engine.resolve_pending_action(state, p2_id, 'pokemon:0')
+
+        self.assertTrue(result['accepted'])
+        ash = next(player for player in resolved_state['players'] if player['id'] == p1_id)
+        misty = next(player for player in resolved_state['players'] if player['id'] == p2_id)
+        self.assertEqual(ash['pokemon'][0]['name'], 'Staryu')
+        self.assertEqual(misty['pokemon'][0]['name'], 'Pidgey')
+        self.assertIsNone(resolved_state['turn']['pending_action'])
+
+    def test_decline_trade_keeps_rosters_unchanged(self):
+        state, p1_id, p2_id = self._trade_ready_state()
+        state, _ = engine.propose_trade(state, p1_id, p2_id, 'pokemon:0', 'pokemon:0')
+
+        resolved_state, result = engine.resolve_pending_action(state, p2_id, 'decline')
+
+        self.assertFalse(result['accepted'])
+        ash = next(player for player in resolved_state['players'] if player['id'] == p1_id)
+        misty = next(player for player in resolved_state['players'] if player['id'] == p2_id)
+        self.assertEqual(ash['pokemon'][0]['name'], 'Pidgey')
+        self.assertEqual(misty['pokemon'][0]['name'], 'Staryu')
+        self.assertIsNone(resolved_state['turn']['pending_action'])
+
+    def test_trade_can_target_player_encountered_on_path(self):
+        state, p1_id, p2_id = self._trade_ready_state()
+        player_two = next(player for player in state['players'] if player['id'] == p2_id)
+        player_two['position'] = 4
+
+        new_state, result = engine.propose_trade(state, p1_id, p2_id, 'pokemon:0', 'pokemon:0')
+
+        self.assertIsNotNone(new_state)
+        self.assertEqual(result['type'], 'trade_proposal')

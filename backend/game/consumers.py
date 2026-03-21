@@ -389,6 +389,30 @@ class GameConsumer(AsyncWebsocketConsumer):
         saved_state = await self.save_game_state(new_state)
         await self.broadcast_state(saved_state, {'type': 'duel_started', 'challenger_id': self.player_id, 'defender_id': target_id})
 
+    async def handle_propose_trade(self, data):
+        target_id = data.get('target_player_id')
+        offered_slot_key = data.get('offered_slot_key')
+        requested_slot_key = data.get('requested_slot_key')
+        state = await self.get_game_state()
+
+        new_state, result = game_state.propose_trade(
+            state,
+            self.player_id,
+            target_id,
+            offered_slot_key,
+            requested_slot_key,
+        )
+        if new_state is None:
+            await self.send_error(result)
+            return
+
+        saved_state = await self.save_game_state(new_state)
+        await self.broadcast_state(saved_state, {
+            'type': 'trade_proposed',
+            'player_id': self.player_id,
+            'result': result,
+        })
+
     async def handle_battle_choice(self, data):
         pokemon_slot_key = (data.get('pokemon_slot_key') or '').strip() or None
         try:
