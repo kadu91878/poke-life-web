@@ -23,9 +23,18 @@ export const useGameStore = defineStore('game', () => {
     gameState.value?.players?.find(p => p.id === playerId.value) ?? null
   )
 
-  const players = computed(() =>
-    gameState.value?.players?.filter(p => p.is_active) ?? []
-  )
+  const players = computed(() => {
+    const activePlayers = gameState.value?.players?.filter(p => p.is_active) ?? []
+    const turnOrder = gameState.value?.turn_order ?? []
+    if (!turnOrder.length) return activePlayers
+
+    const byId = new Map(activePlayers.map(player => [player.id, player]))
+    const orderedPlayers = turnOrder
+      .map(playerId => byId.get(playerId))
+      .filter(Boolean)
+    const missingPlayers = activePlayers.filter(player => !turnOrder.includes(player.id))
+    return [...orderedPlayers, ...missingPlayers]
+  })
 
   const status = computed(() => gameState.value?.status ?? 'waiting')
 
@@ -80,6 +89,7 @@ export const useGameStore = defineStore('game', () => {
   const finalScores = computed(() => gameState.value?.final_scores ?? null)
 
   const board = computed(() => gameState.value?.board ?? null)
+  const revealedCardHistory = computed(() => gameState.value?.revealed_card_history ?? [])
 
   // ── API REST ─────────────────────────────────────────────────────────────
   async function createRoom() {
@@ -96,6 +106,12 @@ export const useGameStore = defineStore('game', () => {
 
   async function deleteRoom(code) {
     await axios.delete(`/api/rooms/${code}/`)
+  }
+
+  async function addCpuPlayer() {
+    const { data } = await axios.post(`/api/rooms/${roomCode.value}/add-cpu/`)
+    if (data.state) gameState.value = data.state
+    return data
   }
 
   // ── WebSocket ─────────────────────────────────────────────────────────────
@@ -283,6 +299,14 @@ export const useGameStore = defineStore('game', () => {
       battle_choice_registered: (e) => `${e.player_id === playerId.value ? 'Você escolheu' : 'Oponente escolheu'} um Pokémon!`,
       battle_roll_registered:   (e) => `${e.player_id === playerId.value ? 'Você rolou' : 'Oponente rolou'} o dado de batalha!`,
       duel_started:        () => 'Duelo iniciado!',
+      trade_proposed:      (e) => {
+        const proposer = e.result?.proposer_id === playerId.value
+          ? 'Você'
+          : (e.result?.proposer_name ?? 'Outro jogador')
+        const offered = e.result?.offered_pokemon ?? 'um Pokémon'
+        const target = e.result?.target_name ?? 'outro jogador'
+        return `${proposer} propôs uma troca oferecendo ${offered} para ${target}`
+      },
       action_skipped:      () => 'Ação pulada',
       event_resolved:      () => 'Evento resolvido!',
       ability_used:        (e) => {
@@ -340,6 +364,12 @@ export const useGameStore = defineStore('game', () => {
           }
           return `Sem habilidade. Movimento: ${e.result?.final_roll ?? '?'}`
         }
+        if (e.result?.type === 'trade_proposal') {
+          if (e.result?.accepted) {
+            return `Troca concluída: ${e.result.offered_pokemon} por ${e.result.requested_pokemon}`
+          }
+          return 'Proposta de troca recusada'
+        }
         return 'Escolha resolvida'
       },
       debug_item_added:    () => 'Item de debug adicionado',
@@ -390,6 +420,11 @@ export const useGameStore = defineStore('game', () => {
     skipAction:       ()                          => send(gameActions.skipAction),
     passTurn:         ()                          => send(gameActions.passTurn),
     challengePlayer:  (targetId)                  => send(gameActions.challengePlayer, { target_player_id: targetId }),
+    proposeTrade:     ({ targetPlayerId, offeredSlotKey, requestedSlotKey }) => send(gameActions.proposeTrade, {
+      target_player_id: targetPlayerId,
+      offered_slot_key: offeredSlotKey,
+      requested_slot_key: requestedSlotKey,
+    }),
     skipChallenge:    ()                          => send(gameActions.skipChallenge),
     battleChoice:     (selection = 0)             => send(gameActions.battleChoice, typeof selection === 'object' && selection !== null ? selection : { pokemon_index: selection }),
     rollBattleDice:   ()                          => send(gameActions.rollBattleDice),
@@ -462,9 +497,9 @@ export const useGameStore = defineStore('game', () => {
     wsStatus, lastEvent, errorMsg, notification, chatMessages,
     // computed
     me, players, allPlayers, status, turn, isMyTurn, isHost, currentPlayer, phase,
-    finalScores, board, debugVisual, debugSession, debugTestPlayer, debugTurn, debugLog, debugRevealedCard, hostTools, hostToolsEnabled,
+    finalScores, board, revealedCardHistory, debugVisual, debugSession, debugTestPlayer, debugTurn, debugLog, debugRevealedCard, hostTools, hostToolsEnabled,
     // methods
-    createRoom, fetchRoom, deleteRoom,
+    createRoom, fetchRoom, deleteRoom, addCpuPlayer,
     connect, disconnect, send, handleMessage,
     actions,
     $reset,

@@ -6,6 +6,7 @@
       <div class="dot" :style="{ background: player.color }"></div>
       <span class="name">{{ player.name }}</span>
       <span v-if="player.is_host"    class="badge host">H</span>
+      <span v-if="player.is_cpu"    class="badge cpu">CPU</span>
       <span v-if="isMe"             class="badge me">Você</span>
       <span v-if="isCurrentTurn"    class="badge turn">Vez</span>
       <span v-if="knockedOutCount"  class="badge ko">KO {{ knockedOutCount }}</span>
@@ -180,6 +181,7 @@ function primaryAbilityStatus(pokemon) {
   font-weight: 700;
 }
 .badge.host { background: var(--color-accent); color: #333; }
+.badge.cpu  { background: #7c3aed; color: #fff; }
 .badge.me   { background: var(--color-secondary); color: #fff; }
 .badge.turn { background: var(--color-primary); color: #fff; }
 .badge.ko   { background: rgba(162, 36, 36, 0.3); color: #ffb3b3; }

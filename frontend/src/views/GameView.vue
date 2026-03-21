@@ -6,6 +6,7 @@
       <span class="room-label">Sala: <strong>{{ roomCode }}</strong></span>
       <span class="round-label">Round {{ turn.round }}</span>
       <span v-if="notification" class="notification">{{ notification }}</span>
+      <button class="btn-ghost header-btn" @click="cardHistoryOpen = true">Cartas reveladas</button>
       <button class="btn-ghost leave-btn" @click="handleLeave">Sair</button>
     </header>
 
@@ -37,6 +38,11 @@
     <BattleModal v-if="phase === 'battle'" />
 
     <RevealedCardOverlay />
+
+    <CardHistoryModal
+      v-if="cardHistoryOpen"
+      @close="cardHistoryOpen = false"
+    />
 
     <!-- Modal de inventário -->
     <InventoryModal
@@ -95,6 +101,7 @@ import BattleModal  from '@/components/ui/BattleModal.vue'
 import EventLog     from '@/components/ui/EventLog.vue'
 import InventoryModal from '@/components/ui/InventoryModal.vue'
 import RevealedCardOverlay from '@/components/ui/RevealedCardOverlay.vue'
+import CardHistoryModal from '@/components/ui/CardHistoryModal.vue'
 
 const route  = useRoute()
 const router = useRouter()
@@ -109,6 +116,7 @@ const notification= computed(() => store.notification)
 const status      = computed(() => store.status)
 const finalScores = computed(() => store.finalScores)
 const selectedInventoryPlayerId = ref(null)
+const cardHistoryOpen = ref(false)
 const selectedInventoryPlayer = computed(() =>
   players.value.find(player => player.id === selectedInventoryPlayerId.value) ?? null
 )
@@ -174,6 +182,7 @@ onBeforeUnmount(() => {
 @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 
 .leave-btn { margin-left: auto; }
+.header-btn { white-space: nowrap; }
 
 .error-banner {
   background: rgba(230,57,70,0.15);

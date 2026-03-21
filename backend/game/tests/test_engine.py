@@ -20,6 +20,7 @@ from game.engine.mechanics import (
 from game.engine.models import PokemonCard, EventCard, ALL_BATTLE_EFFECTS
 from game.state_schema import build_initial_state, normalize_state
 from game.engine.inventory import get_starting_resource_defaults, pokemon_slot_cost, sync_player_inventory
+from game.engine.pokemon_abilities import adjust_primary_ability_charges
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -72,7 +73,8 @@ def _init_two_player_game() -> tuple[dict, str, str]:
     p2 = _make_player('Misty')
     state = build_initial_state('TEST01')
     state['players'] = [p1, p2]
-    state = engine.initialize_game(state)
+    with patch('game.engine.state.random.shuffle', new=lambda ids: None):
+        state = engine.initialize_game(state)
     return state, p1['id'], p2['id']
 
 
@@ -175,6 +177,20 @@ class TestGameInitialization(TestCase):
         player = state['players'][0]
         self.assertEqual(player['pokeballs'], 6)
         self.assertEqual(player['full_restores'], 2)
+
+    def test_initialize_game_randomizes_turn_order_and_first_player(self):
+        p1 = _make_player('Ash', host=True)
+        p2 = _make_player('Misty')
+        p3 = _make_player('Brock')
+        state = build_initial_state('TEST01')
+        state['players'] = [p1, p2, p3]
+
+        with patch('game.engine.state.random.shuffle', side_effect=lambda ids: ids.reverse()):
+            state = engine.initialize_game(state)
+
+        expected_order = [p3['id'], p2['id'], p1['id']]
+        self.assertEqual(state['turn_order'], expected_order)
+        self.assertEqual(state['turn']['current_player_id'], p3['id'])
 
 
 # ── Testes de Seleção de Starter ─────────────────────────────────────────────
@@ -288,6 +304,26 @@ class TestStarterSelection(TestCase):
         state = engine.select_starter(state, p2_id, starters[1]['id'])
 
         self.assertNotIn('available_starters', state['turn'])
+
+    def test_select_starter_respects_randomized_turn_order(self):
+        p1 = _make_player('Ash', host=True)
+        p2 = _make_player('Misty')
+        state = build_initial_state('TEST01')
+        state['players'] = [p1, p2]
+
+        with patch('game.engine.state.random.shuffle', side_effect=lambda ids: ids.reverse()):
+            state = engine.initialize_game(state)
+
+        starters = self._get_starters(state)
+        self.assertEqual(state['turn']['current_player_id'], p2['id'])
+        self.assertIsNone(engine.select_starter(state, p1['id'], starters[0]['id']))
+
+        state = engine.select_starter(state, p2['id'], starters[0]['id'])
+        self.assertEqual(state['turn']['current_player_id'], p1['id'])
+
+        state = engine.select_starter(state, p1['id'], starters[1]['id'])
+        self.assertEqual(state['turn']['phase'], 'roll')
+        self.assertEqual(state['turn']['current_player_id'], p2['id'])
 
 
 class TestItems(TestCase):
@@ -478,19 +514,41 @@ class TestTeamRocketTile(TestCase):
         sync_player_inventory(player)
         return player
 
+    def _move_to_team_rocket(self, state: dict, player_id: str, steps: int = 1) -> dict:
+        triggered_state = engine.process_move(state, player_id, steps)
+        pending = triggered_state['turn'].get('pending_action') or {}
+        self.assertEqual(pending.get('type'), 'team_rocket_roll')
+        self.assertEqual(pending.get('player_id'), player_id)
+        return triggered_state
+
+    def _resolve_team_rocket_roll(self, state: dict, player_id: str) -> tuple[dict, dict]:
+        resolved_state, result = engine.resolve_pending_action(state, player_id, 'roll')
+        self.assertIsNotNone(resolved_state)
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result.get('type'), 'team_rocket_roll')
+        return resolved_state, result
+
     def test_team_rocket_forces_stop_and_rolls_separately_from_movement(self):
         state, p1_id, p2_id = self._ready_state()
         player = next(p for p in state['players'] if p['id'] == p1_id)
         player['position'] = 36
 
-        with patch('game.engine.state.roll_movement_dice', return_value=4), \
-             patch('game.engine.state.roll_team_rocket_dice', return_value=6):
+        with patch('game.engine.state.roll_movement_dice', return_value=4):
             rolled_state, roll_entry = engine.perform_movement_roll(state, p1_id)
-            new_state = engine.process_move(rolled_state, p1_id, int(roll_entry['final_result']))
+            triggered_state = engine.process_move(rolled_state, p1_id, int(roll_entry['final_result']))
+
+        pending = triggered_state['turn'].get('pending_action') or {}
+        self.assertEqual(triggered_state['turn']['phase'], 'action')
+        self.assertEqual(pending.get('type'), 'team_rocket_roll')
+        self.assertEqual((pending.get('options') or [{}])[0].get('id'), 'roll')
+
+        with patch('game.engine.state.roll_team_rocket_dice', return_value=6):
+            new_state, result = self._resolve_team_rocket_roll(triggered_state, p1_id)
 
         player_after = next(p for p in new_state['players'] if p['id'] == p1_id)
         self.assertEqual(player_after['position'], 38)
         self.assertEqual(new_state['turn']['current_player_id'], p2_id)
+        self.assertEqual(result.get('rocket_roll'), 6)
         recent_rolls = new_state['turn']['roll_history'][-2:]
         self.assertEqual([entry['roll_type'] for entry in recent_rolls], ['movimento', 'Equipe Rocket'])
         self.assertEqual(recent_rolls[1]['context'], 'team_rocket_tile')
@@ -501,10 +559,13 @@ class TestTeamRocketTile(TestCase):
         player['position'] = 37
         starter_name = player['starter_pokemon']['name']
 
+        triggered_state = self._move_to_team_rocket(state, p1_id)
         with patch('game.engine.state.roll_team_rocket_dice', return_value=1):
-            state = engine.process_move(state, p1_id, 1)
+            state, result = self._resolve_team_rocket_roll(triggered_state, p1_id)
 
         player_after = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertTrue(result.get('stolen'))
+        self.assertEqual(result.get('stolen_pokemon'), 'Caterpie')
         self.assertEqual(player_after['position'], 38)
         self.assertEqual(player_after['starter_pokemon']['name'], starter_name)
         self.assertEqual(player_after['pokemon'], [])
@@ -520,11 +581,14 @@ class TestTeamRocketTile(TestCase):
         ])
         player['position'] = 37
 
+        triggered_state = self._move_to_team_rocket(state, p1_id)
         with patch('game.engine.state.roll_team_rocket_dice', return_value=2):
-            state = engine.process_move(state, p1_id, 1)
+            state, result = self._resolve_team_rocket_roll(triggered_state, p1_id)
 
         player_after = next(p for p in state['players'] if p['id'] == p1_id)
         remaining_names = [pokemon['name'] for pokemon in player_after['pokemon']]
+        self.assertTrue(result.get('stolen'))
+        self.assertEqual(result.get('stolen_pokemon'), 'Squirtle')
         self.assertEqual(remaining_names, ['Pidgey', 'Lapras', 'Bulbasaur'])
         self.assertNotIn('Squirtle', remaining_names)
         self.assertIn('Lapras', remaining_names)
@@ -535,10 +599,12 @@ class TestTeamRocketTile(TestCase):
         player['position'] = 37
         starter_name = player['starter_pokemon']['name']
 
+        triggered_state = self._move_to_team_rocket(state, p1_id)
         with patch('game.engine.state.roll_team_rocket_dice', return_value=3):
-            state = engine.process_move(state, p1_id, 1)
+            state, result = self._resolve_team_rocket_roll(triggered_state, p1_id)
 
         player_after = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertFalse(result.get('stolen'))
         self.assertEqual(player_after['starter_pokemon']['name'], starter_name)
         self.assertEqual(len(player_after['pokemon']), 0)
         self.assertEqual(state['turn']['current_player_id'], p2_id)
@@ -554,10 +620,12 @@ class TestTeamRocketTile(TestCase):
                 ])
                 player['position'] = 37
 
+                triggered_state = self._move_to_team_rocket(state, p1_id)
                 with patch('game.engine.state.roll_team_rocket_dice', return_value=rocket_roll):
-                    state = engine.process_move(state, p1_id, 1)
+                    state, result = self._resolve_team_rocket_roll(triggered_state, p1_id)
 
                 player_after = next(p for p in state['players'] if p['id'] == p1_id)
+                self.assertFalse(result.get('stolen'))
                 self.assertEqual([pokemon['name'] for pokemon in player_after['pokemon']], ['Oddish', 'Psyduck'])
 
     def test_team_rocket_steals_evolved_last_captured_pokemon_by_capture_sequence(self):
@@ -576,10 +644,13 @@ class TestTeamRocketTile(TestCase):
         self.assertEqual(evolved['name'], 'Ivysaur')
         self.assertEqual(player['pokemon'][1]['capture_sequence'], 2)
 
+        triggered_state = self._move_to_team_rocket(state, p1_id)
         with patch('game.engine.state.roll_team_rocket_dice', return_value=1):
-            state = engine.process_move(state, p1_id, 1)
+            state, result = self._resolve_team_rocket_roll(triggered_state, p1_id)
 
         player_after = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertTrue(result.get('stolen'))
+        self.assertEqual(result.get('stolen_pokemon'), 'Ivysaur')
         self.assertEqual([pokemon['name'] for pokemon in player_after['pokemon']], ['Pidgey'])
 
     def test_team_rocket_can_steal_last_captured_pokemon_even_when_knocked_out(self):
@@ -590,11 +661,45 @@ class TestTeamRocketTile(TestCase):
         ])
         player['position'] = 37
 
+        triggered_state = self._move_to_team_rocket(state, p1_id)
         with patch('game.engine.state.roll_team_rocket_dice', return_value=1):
-            state = engine.process_move(state, p1_id, 1)
+            state, result = self._resolve_team_rocket_roll(triggered_state, p1_id)
 
         player_after = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertTrue(result.get('stolen'))
+        self.assertEqual(result.get('stolen_pokemon'), 'Gastly')
         self.assertEqual([pokemon['name'] for pokemon in player_after['pokemon']], ['Geodude'])
+
+    def test_team_rocket_does_not_count_evolved_starter_as_captured(self):
+        state, p1_id, _ = self._ready_state()
+        player = next(p for p in state['players'] if p['id'] == p1_id)
+        player['starter_pokemon'] = {
+            **_make_pokemon(name='Bulbasaur', bp=4, evolves_to=2),
+            'acquisition_origin': 'starter',
+            'capture_sequence': None,
+            'capture_context': None,
+        }
+        sync_player_inventory(player)
+        player = self._set_team(state, p1_id, [self._captured_pokemon('Caterpie', sequence=1, bp=2)])
+        player['position'] = 37
+
+        evolved = engine._try_evolve(
+            state,
+            p1_id,
+            {**player['starter_pokemon'], 'battle_slot_key': 'starter'},
+        )
+        self.assertEqual(player['starter_pokemon']['acquisition_origin'], 'starter')
+
+        triggered_state = self._move_to_team_rocket(state, p1_id)
+        with patch('game.engine.state.roll_team_rocket_dice', return_value=1):
+            state, result = self._resolve_team_rocket_roll(triggered_state, p1_id)
+
+        player_after = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertEqual(evolved['name'], player_after['starter_pokemon']['name'])
+        self.assertEqual(player_after['starter_pokemon']['acquisition_origin'], 'starter')
+        self.assertTrue(result.get('stolen'))
+        self.assertEqual(result.get('stolen_pokemon'), 'Caterpie')
+        self.assertEqual(player_after['pokemon'], [])
 
 
 # ── Testes de Ginásio ────────────────────────────────────────────────────────
@@ -1711,6 +1816,37 @@ class TestCapture(TestCase):
         self.assertEqual(player_after['pokemon'][0]['name'], 'Growlithe')
         self.assertEqual(final_result['capture_roll']['all_rolls'], [1, 2])
 
+    def test_victory_choice_pack_captures_mysterious_fossil_on_six_then_five(self):
+        state, p1_id, p2_id = _init_two_player_game()
+        starters = state['turn']['available_starters']
+        state = engine.select_starter(state, p1_id, starters[0]['id'])
+        state = engine.select_starter(state, p2_id, starters[1]['id'])
+        card = next(card for card in load_victory_cards() if card.get('category') == 'wild_pokemon_choice')
+        state = engine._queue_capture_attempt(  # noqa: SLF001 - cobre a fila autoritativa da carta
+            state,
+            p1_id,
+            pokemon=None,
+            capture_context='victory_wild',
+            source='victory_card',
+            resolver_card=card,
+            source_card=card,
+        )
+
+        with patch('game.engine.state.roll_capture_dice', return_value=6):
+            mid_state, result = engine.roll_capture_attempt(state, p1_id)
+
+        self.assertTrue(result['requires_additional_roll'])
+        self.assertEqual(mid_state['turn']['pending_action']['capture_rolls'], [6])
+        self.assertIsNone(mid_state['turn']['pending_pokemon'])
+
+        with patch('game.engine.state.roll_capture_dice', return_value=5):
+            new_state, final_result = engine.roll_capture_attempt(mid_state, p1_id)
+
+        player_after = next(p for p in new_state['players'] if p['id'] == p1_id)
+        self.assertEqual(player_after['pokemon'][0]['name'], 'Mysterious Fossil')
+        self.assertEqual(final_result['pokemon']['name'], 'Mysterious Fossil')
+        self.assertEqual(final_result['capture_roll']['all_rolls'], [6, 5])
+
     def test_capture_attempt_rejects_other_player(self):
         state, p1_id, p2_id = _init_two_player_game()
         starters = state['turn']['available_starters']
@@ -2734,6 +2870,33 @@ class TestTurnControl(TestCase):
         state = engine.end_turn(state)  # P2 → P1 (new round)
         self.assertEqual(state['turn']['round'], initial_round + 1)
 
+    def test_end_turn_follows_randomized_turn_order(self):
+        p1 = _make_player('Ash', host=True)
+        p2 = _make_player('Misty')
+        p3 = _make_player('Brock')
+        state = build_initial_state('TEST01')
+        state['players'] = [p1, p2, p3]
+
+        with patch('game.engine.state.random.shuffle', side_effect=lambda ids: ids.insert(0, ids.pop())):
+            state = engine.initialize_game(state)
+
+        starters = state['turn']['available_starters']
+        for index, player_id in enumerate(state['turn_order']):
+            state = engine.select_starter(state, player_id, starters[index]['id'])
+
+        self.assertEqual(state['turn']['current_player_id'], p3['id'])
+
+        state = engine.end_turn(state)
+        self.assertEqual(state['turn']['current_player_id'], p1['id'])
+
+        state = engine.end_turn(state)
+        self.assertEqual(state['turn']['current_player_id'], p2['id'])
+
+        initial_round = state['turn']['round']
+        state = engine.end_turn(state)
+        self.assertEqual(state['turn']['current_player_id'], p3['id'])
+        self.assertEqual(state['turn']['round'], initial_round + 1)
+
 
 # ── Testes de Schema/Normalização ────────────────────────────────────────────
 
@@ -2791,6 +2954,24 @@ class TestStateSchema(TestCase):
         self.assertEqual(pending['player_id'], p1_id)
         self.assertEqual(pending['pokemon']['name'], state['turn']['pending_pokemon']['name'])
         self.assertTrue(any(option['slot_key'] == 'starter' for option in pending['options']))
+
+    def test_normalize_state_preserves_existing_turn_order_and_current_player(self):
+        raw = build_initial_state('TEST01')
+        p1 = _make_player('Ash', host=True)
+        p2 = _make_player('Misty')
+        raw['status'] = 'playing'
+        raw['players'] = [p1, p2]
+        raw['turn_order'] = [p2['id'], p1['id']]
+        raw['turn'] = {
+            'round': 3,
+            'current_player_id': p2['id'],
+            'phase': 'roll',
+        }
+
+        normalized = normalize_state('TEST01', raw)
+
+        self.assertEqual(normalized['turn_order'], [p2['id'], p1['id']])
+        self.assertEqual(normalized['turn']['current_player_id'], p2['id'])
 
 
 # ── Testes de Eventos ─────────────────────────────────────────────────────────
@@ -2933,6 +3114,30 @@ class TestEventCards(TestCase):
         self.assertEqual(state['turn']['phase'], 'event')
         self.assertEqual(state['turn']['pending_event']['title'], 'PokéMarket')
         self.assertEqual(state['revealed_card']['deck_type'], 'event')
+        self.assertEqual(len(state['revealed_card_history']), 1)
+        self.assertEqual(state['revealed_card_history'][0]['deck_type'], 'event')
+        self.assertEqual(state['revealed_card_history'][0]['card']['title'], 'PokéMarket')
+
+    def test_dismiss_revealed_card_keeps_history_available(self):
+        state, p1_id, p2_id = _init_two_player_game()
+        starters = state['turn']['available_starters']
+        state = engine.select_starter(state, p1_id, starters[0]['id'])
+        state = engine.select_starter(state, p2_id, starters[1]['id'])
+        state['decks']['event_deck'] = [{
+            'id': 44,
+            'title': 'PokéMarket',
+            'description': 'Throw the dice in order to receive any of these items! 2 = Pokéball, 3 = Bill.',
+            'category': 'market',
+        }]
+        state['decks']['event_discard'] = []
+
+        state = _land_on_tile(state, p1_id, 7)
+        new_state, result = engine.dismiss_revealed_card(state, p1_id)
+
+        self.assertEqual(result, 'ok')
+        self.assertIsNone(new_state['revealed_card'])
+        self.assertEqual(len(new_state['revealed_card_history']), 1)
+        self.assertEqual(new_state['revealed_card_history'][0]['card']['title'], 'PokéMarket')
 
     def test_gift_choice_card_enters_pending_choice_and_grants_selected_reward(self):
         card = {
@@ -3148,6 +3353,7 @@ class TestVictoryDeck(TestCase):
         self.assertEqual(result['winner_id'], p1_id)
         self.assertTrue(len(new_state['decks']['victory_discard']) >= 1)
         self.assertEqual(new_state['revealed_card']['deck_type'], 'victory')
+        self.assertEqual(new_state['revealed_card_history'][-1]['deck_type'], 'victory')
 
     def test_trainer_victory_card_starts_trainer_battle(self):
         state, p1_id, p2_id = _init_two_player_game()
@@ -4448,6 +4654,147 @@ class TestPokemonAbilityRuntime(TestCase):
         self.assertTrue(new_state['turn']['compound_eyes_active'])
         self.assertTrue(player['pokemon'][0]['ability_runtime']['abilities']['primary']['used_this_turn'])
 
+    def test_golbat_can_choose_any_forward_move_up_to_five_tiles(self):
+        state, p1_id, _ = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Golbat')
+
+        player_before = next(player for player in state['players'] if player['id'] == p1_id)
+        actions = player_before['pokemon'][0]['abilities'][0]['actions']
+        self.assertTrue(any(action['action_id'] == 'fixed_move_5' for action in actions))
+
+        new_state, result = engine.use_pokemon_ability(
+            state,
+            p1_id,
+            slot_key='pokemon:0',
+            ability_id='primary',
+            action_id='fixed_move_5',
+        )
+        player_after = next(player for player in new_state['players'] if player['id'] == p1_id)
+
+        self.assertEqual(result['effect_kind'], 'fixed_move')
+        self.assertEqual(result['steps'], 5)
+        self.assertEqual(player_after['position'], 5)
+        self.assertEqual(player_after['pokemon'][0]['ability_charges'], 0)
+
+    def test_weedle_evolves_when_another_pokemon_is_added_to_the_team(self):
+        state, p1_id, _ = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Weedle')
+
+        new_state, _ = engine._finalize_capture(  # noqa: SLF001 - valida o gatilho real de aquisição
+            state,
+            p1_id,
+            load_playable_pokemon_by_name('Pidgey'),
+            capture_cost=1,
+            capture_context='grass',
+        )
+        player = next(player for player in new_state['players'] if player['id'] == p1_id)
+
+        self.assertEqual(player['pokemon'][0]['name'], 'Kakuna')
+        self.assertEqual(player['pokemon'][1]['name'], 'Pidgey')
+
+    def test_tangela_prompts_capture_reroll_after_first_capture_roll(self):
+        state, p1_id, _ = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Tangela')
+        state = _land_on_tile(state, p1_id, 85)
+
+        with patch('game.engine.state.roll_capture_dice', return_value=2):
+            mid_state, result = engine.roll_capture_attempt(state, p1_id)
+
+        self.assertTrue(result['requires_ability_decision'])
+        self.assertEqual(result['decision_type'], 'capture_reroll')
+        self.assertEqual(mid_state['turn']['pending_action']['type'], 'capture_reroll_decision')
+        self.assertEqual(mid_state['turn']['pending_action']['current_roll'], 2)
+
+    def test_venomoth_can_swap_battle_points_before_the_battle_roll(self):
+        state, p1_id, _ = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Venomoth')
+
+        state = engine._start_trainer_battle(  # noqa: SLF001 - valida o fluxo real da habilidade em batalha
+            state,
+            p1_id,
+            {'trainer_name': 'Annemei', 'trainer_bp': 7, 'reward_plan': {}},
+            source='event_card',
+        )
+        state, result_choice = engine.register_battle_choice(state, p1_id, pokemon_slot_key='pokemon:0')
+
+        self.assertIsNone(result_choice)
+        self.assertEqual(state['turn']['pending_action']['type'], 'battle_bp_swap_decision')
+
+        state, decision_result = engine.resolve_pending_action(state, p1_id, 'swap')
+
+        self.assertTrue(decision_result['used'])
+        self.assertEqual(state['turn']['battle']['challenger_choice']['battle_points'], 7)
+        self.assertEqual(state['turn']['battle']['defender_choice']['battle_points'], 4)
+
+        with patch('game.engine.state.roll_battle_dice', side_effect=[2, 2]):
+            state, battle_result = engine.register_battle_roll(state, p1_id)
+
+        self.assertEqual(battle_result['winner_name'], 'Ash')
+        self.assertEqual(battle_result['winner_pokemon'], 'Venomoth')
+
+    def test_trainer_annemei_recharges_the_first_pokemon_that_is_actually_missing_a_charge(self):
+        state, p1_id, _ = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Fearow', sequence=1)
+        state = self._give_runtime_pokemon(state, p1_id, 'Doduo', sequence=2)
+
+        player = next(player for player in state['players'] if player['id'] == p1_id)
+        fearow = player['pokemon'][0]
+        doduo = player['pokemon'][1]
+        adjust_primary_ability_charges(doduo, -1)
+        self.assertEqual(fearow['ability_charges'], 3)
+        self.assertEqual(doduo['ability_charges'], 0)
+
+        state = engine._start_trainer_battle(  # noqa: SLF001 - valida a recompensa real da batalha de treinador
+            state,
+            p1_id,
+            {'trainer_name': 'Annemei', 'trainer_bp': 1, 'reward_plan': {'recharge_ability_charge': True}},
+            source='event_card',
+        )
+        state, _ = engine.register_battle_choice(state, p1_id, pokemon_slot_key='pokemon:0')
+        with patch('game.engine.state.roll_battle_dice', side_effect=[6, 1]):
+            state, battle_result = engine.register_battle_roll(state, p1_id)
+
+        player_after = next(player for player in state['players'] if player['id'] == p1_id)
+        self.assertEqual(battle_result['winner_name'], 'Ash')
+        self.assertEqual(player_after['pokemon'][0]['ability_charges'], 3)
+        self.assertEqual(player_after['pokemon'][1]['ability_charges'], 1)
+
+    def test_trainer_annemei_can_offer_a_choice_of_which_pokemon_recovers_a_charge(self):
+        state, p1_id, _ = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Doduo', sequence=1)
+        state = self._give_runtime_pokemon(state, p1_id, 'Tangela', sequence=2)
+
+        player = next(player for player in state['players'] if player['id'] == p1_id)
+        adjust_primary_ability_charges(player['pokemon'][0], -1)
+        adjust_primary_ability_charges(player['pokemon'][1], -1)
+
+        state = engine._start_trainer_battle(  # noqa: SLF001 - valida a escolha da recompensa de recarga
+            state,
+            p1_id,
+            {'trainer_name': 'Annemei', 'trainer_bp': 1, 'reward_plan': {'recharge_ability_charge': True}},
+            source='event_card',
+        )
+        state, _ = engine.register_battle_choice(state, p1_id, pokemon_slot_key='starter')
+        with patch('game.engine.state.roll_battle_dice', side_effect=[6, 1]):
+            state, battle_result = engine.register_battle_roll(state, p1_id)
+
+        self.assertEqual(battle_result['winner_name'], 'Ash')
+        pending = state['turn']['pending_action']
+        self.assertEqual(pending['type'], 'reward_choice')
+        self.assertCountEqual(
+            [option['recharge_slot_key'] for option in pending['options']],
+            ['pokemon:0', 'pokemon:1'],
+        )
+
+        chosen_option = next(option for option in pending['options'] if option['recharge_slot_key'] == 'pokemon:1')
+        state, reward_result = engine.resolve_pending_action(state, p1_id, chosen_option['id'])
+        player_after = next(player for player in state['players'] if player['id'] == p1_id)
+
+        self.assertTrue(reward_result['success'])
+        self.assertEqual(reward_result['reward'], 'ability_charge')
+        self.assertEqual(player_after['pokemon'][0]['ability_charges'], 0)
+        self.assertEqual(player_after['pokemon'][1]['ability_charges'], 2)
+
     def test_normalize_state_is_idempotent_for_ability_runtime(self):
         state, p1_id, _ = self._ready_to_roll()
         state = self._give_runtime_pokemon(state, p1_id, 'Doduo')
@@ -4768,3 +5115,78 @@ class TestPokemonLeague(TestCase):
         results = calculate_final_scores([player])
         self.assertEqual(results[0]['badge_mp'], 40)
         self.assertEqual(results[0]['total'], 40)
+
+
+class TestPlayerTrades(TestCase):
+
+    def _trade_ready_state(self) -> tuple[dict, str, str]:
+        p1 = _make_player('Ash', host=True, position=5, pokemon=[_make_pokemon(name='Pidgey', bp=3)])
+        p2 = _make_player('Misty', position=5, pokemon=[_make_pokemon(name='Staryu', bp=4)])
+        sync_player_inventory(p1)
+        sync_player_inventory(p2)
+        state = build_initial_state('TRADE1')
+        state['status'] = 'playing'
+        state['players'] = [p1, p2]
+        state['turn']['current_player_id'] = p1['id']
+        state['turn']['phase'] = 'action'
+        state['turn']['pending_action'] = None
+        state['turn']['pending_event'] = None
+        state['turn']['pending_pokemon'] = None
+        state['turn']['pending_item_choice'] = None
+        state['turn']['pending_release_choice'] = None
+        state['turn']['battle'] = None
+        state['turn']['movement_context'] = {
+            'start_position': 3,
+            'resolved_destination': 5,
+        }
+        return state, p1['id'], p2['id']
+
+    def test_propose_trade_creates_pending_action_for_target(self):
+        state, p1_id, p2_id = self._trade_ready_state()
+
+        new_state, result = engine.propose_trade(state, p1_id, p2_id, 'pokemon:0', 'pokemon:0')
+
+        self.assertIsNotNone(new_state)
+        self.assertEqual(result['type'], 'trade_proposal')
+        pending = new_state['turn']['pending_action']
+        self.assertEqual(pending['type'], 'trade_proposal')
+        self.assertEqual(pending['player_id'], p2_id)
+        self.assertEqual(pending['proposer_id'], p1_id)
+        self.assertEqual(pending['offered_pokemon']['name'], 'Pidgey')
+        self.assertTrue(any(option.get('id') == 'pokemon:0' for option in pending['options']))
+
+    def test_accept_trade_swaps_pokemon_between_players(self):
+        state, p1_id, p2_id = self._trade_ready_state()
+        state, _ = engine.propose_trade(state, p1_id, p2_id, 'pokemon:0', 'pokemon:0')
+
+        resolved_state, result = engine.resolve_pending_action(state, p2_id, 'pokemon:0')
+
+        self.assertTrue(result['accepted'])
+        ash = next(player for player in resolved_state['players'] if player['id'] == p1_id)
+        misty = next(player for player in resolved_state['players'] if player['id'] == p2_id)
+        self.assertEqual(ash['pokemon'][0]['name'], 'Staryu')
+        self.assertEqual(misty['pokemon'][0]['name'], 'Pidgey')
+        self.assertIsNone(resolved_state['turn']['pending_action'])
+
+    def test_decline_trade_keeps_rosters_unchanged(self):
+        state, p1_id, p2_id = self._trade_ready_state()
+        state, _ = engine.propose_trade(state, p1_id, p2_id, 'pokemon:0', 'pokemon:0')
+
+        resolved_state, result = engine.resolve_pending_action(state, p2_id, 'decline')
+
+        self.assertFalse(result['accepted'])
+        ash = next(player for player in resolved_state['players'] if player['id'] == p1_id)
+        misty = next(player for player in resolved_state['players'] if player['id'] == p2_id)
+        self.assertEqual(ash['pokemon'][0]['name'], 'Pidgey')
+        self.assertEqual(misty['pokemon'][0]['name'], 'Staryu')
+        self.assertIsNone(resolved_state['turn']['pending_action'])
+
+    def test_trade_can_target_player_encountered_on_path(self):
+        state, p1_id, p2_id = self._trade_ready_state()
+        player_two = next(player for player in state['players'] if player['id'] == p2_id)
+        player_two['position'] = 4
+
+        new_state, result = engine.propose_trade(state, p1_id, p2_id, 'pokemon:0', 'pokemon:0')
+
+        self.assertIsNotNone(new_state)
+        self.assertEqual(result['type'], 'trade_proposal')
