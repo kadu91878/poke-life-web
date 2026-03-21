@@ -14,6 +14,7 @@ from .engine import state as game_state
 from .engine import cpu as cpu_engine
 from .engine.inventory import get_starting_resource_defaults
 from .models import GameRoom
+from . import redis_client
 from .session_expiration import get_room_if_active, prune_expired_sessions
 from .socket_contract import SOCKET_HANDLER_NAMES
 from .state_schema import mark_saved, normalize_state
@@ -68,10 +69,9 @@ def _battle_roll_event(player_id: str, result: dict | None) -> dict:
 class GameConsumer(AsyncWebsocketConsumer):
     _room_locks: ClassVar[dict[str, asyncio.Lock]] = {}
 
-    def _room_lock(self) -> asyncio.Lock:
-        if self.room_code not in GameConsumer._room_locks:
-            GameConsumer._room_locks[self.room_code] = asyncio.Lock()
-        return GameConsumer._room_locks[self.room_code]
+    def _room_lock(self):
+        """Retorna context manager de lock por sala (Redis ou asyncio.Lock como fallback)."""
+        return redis_client.room_lock(self.room_code, fallback_locks=GameConsumer._room_locks)
 
     async def connect(self):
         self.room_code = self.scope['url_route']['kwargs']['room_code']
@@ -1292,8 +1292,14 @@ class GameConsumer(AsyncWebsocketConsumer):
             return normalize_state(room.room_code, room.game_state)
         return {}
 
+    async def save_game_state(self, state):
+        """Persiste estado no banco e atualiza atividade de sessão no Redis."""
+        saved = await self._db_save_game_state(state)
+        await redis_client.touch_session_activity(self.room_code)
+        return saved
+
     @database_sync_to_async
-    def save_game_state(self, state):
+    def _db_save_game_state(self, state):
         normalized = normalize_state(self.room_code, state)
         normalized = mark_saved(normalized)
         GameRoom.objects.filter(room_code=self.room_code).update(

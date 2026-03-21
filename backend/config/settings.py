@@ -95,6 +95,11 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# ── Redis ────────────────────────────────────────────────────────────────────
+# URL de conexão ao Redis. Deixe vazio ('') para desabilitar Redis completamente.
+# Em produção: redis://user:password@host:6379/0
+REDIS_URL: str = config('REDIS_URL', default='')
+
 # ── Channel Layers ──────────────────────────────────────────────────────────
 CHANNEL_LAYERS_BACKEND = config('CHANNEL_LAYERS_BACKEND', default='memory')
 
@@ -103,7 +108,7 @@ if CHANNEL_LAYERS_BACKEND == 'redis':
         'default': {
             'BACKEND': 'channels_redis.core.RedisChannelLayer',
             'CONFIG': {
-                'hosts': [config('REDIS_URL', default='redis://localhost:6379/0')],
+                'hosts': [REDIS_URL or 'redis://localhost:6379/0'],
             },
         },
     }

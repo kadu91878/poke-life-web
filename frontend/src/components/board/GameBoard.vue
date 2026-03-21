@@ -8,12 +8,8 @@
     <div class="board-header">
       <div>
         <h3 class="board-title">Tabuleiro Kanto</h3>
-        <p class="board-subtitle">
-          O tabuleiro agora usa o JSON de `spaces` calibrados. A resolucao logica atual e generica para teste:
-          `tileId -> spaceId` na ordem do arquivo.
-        </p>
       </div>
-      <div class="board-legend">
+      <div v-if="isDev" class="board-legend">
         <span v-for="item in legendItems" :key="item.type" class="legend-chip">
           {{ item.icon }} {{ item.label }}
         </span>
@@ -86,7 +82,18 @@
           </div>
         </div>
 
-        <div class="route-card">
+        <div class="log-card">
+          <h4 class="log-card-title">Log da partida</h4>
+          <div class="log-entries">
+            <div v-if="recentLog.length === 0" class="log-empty">Nenhum evento registrado ainda.</div>
+            <div v-for="(entry, i) in recentLog" :key="i" class="log-entry">
+              <span class="log-player">{{ entry.player }}</span>
+              <span class="log-message">{{ entry.message }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="isDev" class="route-card">
           <h4>Host Tools</h4>
           <template v-if="hostCanUseToolsPanel">
             <label class="test-toggle">
@@ -218,7 +225,7 @@
           </p>
         </div>
 
-        <div class="players-card">
+        <div v-if="isDev" class="players-card">
           <h4>Posicao dos jogadores</h4>
           <p class="test-meta">Posicoes atuais dos jogadores reais na partida.</p>
           <div
@@ -236,7 +243,7 @@
           </div>
         </div>
 
-        <div class="route-card">
+        <div v-if="isDev" class="route-card">
           <h4>Estado do mapeamento</h4>
           <p>{{ visibleSpaces.length }} spaces calibrados carregados do JSON.</p>
           <p>{{ positionedPlayers.length }}/{{ players.length }} pinos de jogadores conseguiram ser resolvidos pelo mapeamento generico.</p>
@@ -265,7 +272,7 @@ import {
 
 const store = useGameStore()
 const selectedTileId = ref(null)
-const showDebugOverlay = ref(true)
+const showDebugOverlay = ref(false)
 const isDev = import.meta.env.DEV || import.meta.env.VITE_DEBUG === 'True'
 const hostMoveValue = ref('1')
 const hostMoveError = ref('')
@@ -346,6 +353,8 @@ const filteredItemCatalog = computed(() => {
     item.name.toLowerCase().includes(q) || item.key.toLowerCase().includes(q)
   )
 })
+
+const recentLog = computed(() => (store.gameState?.log ?? []).slice(-20).reverse())
 
 const hostCanUseToolsPanel = computed(() => isDev && isHost.value && !!me.value)
 const hostHasBlockingInteraction = computed(() => {
@@ -860,7 +869,8 @@ function typeLabel(type, tile = null) {
 
 .info-card,
 .players-card,
-.route-card {
+.route-card,
+.log-card {
   background: linear-gradient(180deg, rgba(10, 24, 45, 0.98), rgba(5, 13, 27, 0.98));
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 18px;
@@ -913,6 +923,54 @@ function typeLabel(type, tile = null) {
 .route-card h4 {
   margin: 0 0 0.75rem;
   color: #eef4ff;
+}
+
+.log-card {
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.log-card-title {
+  margin: 0 0 0.5rem;
+  color: #eef4ff;
+  font-size: 0.9rem;
+}
+
+.log-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  overflow-y: auto;
+  max-height: 340px;
+}
+
+.log-empty {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.log-entry {
+  display: flex;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--color-text-muted);
+}
+
+.log-player {
+  color: var(--color-accent);
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.log-message {
+  color: #c8d8f0;
 }
 
 .player-row {
