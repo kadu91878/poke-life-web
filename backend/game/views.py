@@ -13,6 +13,7 @@ from .engine import mechanics
 from .engine import state as game_state
 from .engine.inventory import get_starting_resource_defaults
 from .models import GameRoom
+from .session_expiration import get_room_if_active, prune_expired_sessions
 from .serializers import GameRoomDetailSerializer, GameRoomSerializer
 from .state_schema import build_initial_state, mark_saved, normalize_state
 
@@ -91,21 +92,25 @@ class HealthcheckView(APIView):
 
 class RoomListView(APIView):
     def get(self, request):
+        prune_expired_sessions()
         rooms = GameRoom.objects.filter(status__in=['waiting', 'playing'])
         return Response(GameRoomSerializer(rooms, many=True).data)
 
 
 class RoomDetailView(APIView):
     def _get_room(self, room_code):
-        try:
-            return GameRoom.objects.get(room_code=room_code)
-        except GameRoom.DoesNotExist:
-            return None
+        room, expired = get_room_if_active(room_code)
+        self._room_expired = expired
+        return room
+
+    def _missing_room_response(self):
+        message = 'Sala expirada por inatividade' if getattr(self, '_room_expired', False) else 'Sala não encontrada'
+        return Response({'error': message}, status=status.HTTP_404_NOT_FOUND)
 
     def get(self, request, room_code):
         room = self._get_room(room_code)
         if not room:
-            return Response({'error': 'Sala não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+            return self._missing_room_response()
         room.game_state = normalize_state(room_code, room.game_state)
         room.save(update_fields=['game_state'])
         return Response(GameRoomDetailSerializer(room).data)
@@ -113,17 +118,20 @@ class RoomDetailView(APIView):
     def delete(self, request, room_code):
         room = self._get_room(room_code)
         if not room:
-            return Response({'error': 'Sala não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+            return self._missing_room_response()
         room.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class RoomActionBase(APIView):
     def get_room(self, room_code: str):
-        try:
-            return GameRoom.objects.get(room_code=room_code)
-        except GameRoom.DoesNotExist:
-            return None
+        room, expired = get_room_if_active(room_code)
+        self._room_expired = expired
+        return room
+
+    def missing_room_response(self):
+        message = 'Sala expirada por inatividade' if getattr(self, '_room_expired', False) else 'Sala não encontrada'
+        return Response({'error': message}, status=status.HTTP_404_NOT_FOUND)
 
     def get_state(self, room: GameRoom) -> dict:
         return normalize_state(room.room_code, room.game_state)
@@ -141,7 +149,7 @@ class JoinRoomView(RoomActionBase):
     def post(self, request, room_code):
         room = self.get_room(room_code)
         if not room:
-            return Response({'error': 'Sala não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+            return self.missing_room_response()
 
         state = self.get_state(room)
         player_name = (request.data.get('player_name') or 'Trainer').strip()[:20]
@@ -174,7 +182,7 @@ class StartGameView(RoomActionBase):
     def post(self, request, room_code):
         room = self.get_room(room_code)
         if not room:
-            return Response({'error': 'Sala não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+            return self.missing_room_response()
 
         player_id = request.data.get('player_id')
         state = self.get_state(room)
@@ -203,7 +211,7 @@ class AddCpuPlayerView(RoomActionBase):
     def post(self, request, room_code):
         room = self.get_room(room_code)
         if not room:
-            return Response({'error': 'Sala não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+            return self.missing_room_response()
 
         state = self.get_state(room)
 
@@ -239,7 +247,7 @@ class SelectStarterView(RoomActionBase):
     def post(self, request, room_code):
         room = self.get_room(room_code)
         if not room:
-            return Response({'error': 'Sala não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+            return self.missing_room_response()
 
         player_id = request.data.get('player_id')
         starter_id = request.data.get('starter_id')
@@ -256,7 +264,7 @@ class RollDiceView(RoomActionBase):
     def post(self, request, room_code):
         room = self.get_room(room_code)
         if not room:
-            return Response({'error': 'Sala não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+            return self.missing_room_response()
 
         player_id = request.data.get('player_id')
         state = self.get_state(room)
@@ -284,7 +292,7 @@ class MovePlayerView(RoomActionBase):
     def post(self, request, room_code):
         room = self.get_room(room_code)
         if not room:
-            return Response({'error': 'Sala não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+            return self.missing_room_response()
 
         player_id = request.data.get('player_id')
         dice_result = int(request.data.get('dice_result', 0))
@@ -304,7 +312,7 @@ class ResolveTileView(RoomActionBase):
     def post(self, request, room_code):
         room = self.get_room(room_code)
         if not room:
-            return Response({'error': 'Sala não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+            return self.missing_room_response()
 
         player_id = request.data.get('player_id')
         action = request.data.get('resolution', 'auto')
@@ -329,7 +337,7 @@ class PassTurnView(RoomActionBase):
     def post(self, request, room_code):
         room = self.get_room(room_code)
         if not room:
-            return Response({'error': 'Sala não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+            return self.missing_room_response()
 
         player_id = request.data.get('player_id')
         state = self.get_state(room)
@@ -347,7 +355,7 @@ class LeaveRoomView(RoomActionBase):
     def post(self, request, room_code):
         room = self.get_room(room_code)
         if not room:
-            return Response({'error': 'Sala não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+            return self.missing_room_response()
 
         player_id = request.data.get('player_id')
         state = self.get_state(room)
@@ -360,7 +368,7 @@ class RemovePlayerView(RoomActionBase):
     def post(self, request, room_code):
         room = self.get_room(room_code)
         if not room:
-            return Response({'error': 'Sala não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+            return self.missing_room_response()
 
         actor_id = request.data.get('actor_id')
         target_id = request.data.get('player_id')
@@ -379,7 +387,7 @@ class SaveStateView(RoomActionBase):
     def post(self, request, room_code):
         room = self.get_room(room_code)
         if not room:
-            return Response({'error': 'Sala não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+            return self.missing_room_response()
 
         provided_state = request.data.get('state')
         current = self.get_state(room)
@@ -392,7 +400,7 @@ class RestoreStateView(RoomActionBase):
     def post(self, request, room_code):
         room = self.get_room(room_code)
         if not room:
-            return Response({'error': 'Sala não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+            return self.missing_room_response()
 
         payload = request.data.get('state')
         if not isinstance(payload, dict):

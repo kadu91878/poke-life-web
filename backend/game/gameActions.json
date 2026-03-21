@@ -10,6 +10,7 @@
   "passTurn": "pass_turn",
   "skipAction": "skip_action",
   "challengePlayer": "challenge_player",
+  "proposeTrade": "propose_trade",
   "skipChallenge": "skip_action",
   "battleChoice": "battle_choice",
   "rollBattleDice": "roll_battle_dice",

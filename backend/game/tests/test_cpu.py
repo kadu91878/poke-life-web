@@ -35,13 +35,13 @@ def _make_player(name: str, *, is_cpu: bool = False, **kwargs) -> dict:
     return player
 
 
-def _make_pokemon(name: str, *, bp: int, types: list[str], knocked_out: bool = False) -> dict:
+def _make_pokemon(name: str, *, bp: int, types: list[str], knocked_out: bool = False, mp: int = 10) -> dict:
     return {
         'id': str(uuid.uuid4()),
         'name': name,
         'types': types,
         'battle_points': bp,
-        'master_points': 10,
+        'master_points': mp,
         'knocked_out': knocked_out,
     }
 
@@ -244,3 +244,55 @@ class TestCpuInventoryOverflow(TestCase):
         self.assertEqual(event['type'], 'item_discarded')
         self.assertEqual(event['item_key'], 'bill')
         self.assertEqual(next(item['quantity'] for item in updated_cpu['items'] if item['key'] == 'bill'), 6)
+
+
+class TestCpuTradeDecisions(TestCase):
+
+    def test_needs_cpu_action_handles_trade_proposal_owned_by_cpu(self):
+        human = _make_player('Ash', position=5, pokemon=[_make_pokemon('Bulbasaur', bp=4, types=['Grass'])])
+        cpu_player = _make_player('CPU', is_cpu=True, position=5, pokemon=[_make_pokemon('Charmander', bp=5, types=['Fire'])])
+        _sync_player_items(human)
+        _sync_player_items(cpu_player)
+        state = _base_state([human, cpu_player])
+        state['turn']['phase'] = 'action'
+        state['turn']['current_player_id'] = human['id']
+        state['turn']['pending_action'] = {
+            'type': 'trade_proposal',
+            'player_id': cpu_player['id'],
+            'proposer_id': human['id'],
+            'offered_pokemon': {'name': 'Bulbasaur', 'battle_points': 5, 'master_points': 18, 'types': ['Grass', 'Poison']},
+            'options': [
+                {'id': 'pokemon:0', 'slot_key': 'pokemon:0', 'label': 'Trocar Charmander', 'pokemon': {'name': 'Charmander', 'battle_points': 5, 'master_points': 10, 'types': ['Fire']}},
+                {'id': 'decline', 'label': 'Recusar'},
+            ],
+        }
+
+        self.assertEqual(cpu_engine.needs_cpu_action(state), [cpu_player['id']])
+        self.assertEqual(
+            cpu_engine.decide_action(state, cpu_player['id']),
+            [('resolve_pending_action', {'option_id': 'pokemon:0'})],
+        )
+
+    def test_cpu_rejects_absurd_trade(self):
+        human = _make_player('Ash', position=5, pokemon=[_make_pokemon('Rattata', bp=1, types=['Normal'], mp=2)])
+        cpu_player = _make_player('CPU', is_cpu=True, position=5, pokemon=[_make_pokemon('Mewtwo', bp=10, types=['Psychic'], mp=60)])
+        _sync_player_items(human)
+        _sync_player_items(cpu_player)
+        state = _base_state([human, cpu_player])
+        state['turn']['phase'] = 'action'
+        state['turn']['current_player_id'] = human['id']
+        state['turn']['pending_action'] = {
+            'type': 'trade_proposal',
+            'player_id': cpu_player['id'],
+            'proposer_id': human['id'],
+            'offered_pokemon': {'name': 'Rattata', 'battle_points': 1, 'master_points': 2, 'types': ['Normal']},
+            'options': [
+                {'id': 'pokemon:0', 'slot_key': 'pokemon:0', 'label': 'Trocar Mewtwo', 'pokemon': {'name': 'Mewtwo', 'battle_points': 10, 'master_points': 60, 'types': ['Psychic']}},
+                {'id': 'decline', 'label': 'Recusar'},
+            ],
+        }
+
+        self.assertEqual(
+            cpu_engine.decide_action(state, cpu_player['id']),
+            [('resolve_pending_action', {'option_id': 'decline'})],
+        )
