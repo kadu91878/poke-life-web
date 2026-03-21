@@ -299,6 +299,14 @@ export const useGameStore = defineStore('game', () => {
       battle_choice_registered: (e) => `${e.player_id === playerId.value ? 'Você escolheu' : 'Oponente escolheu'} um Pokémon!`,
       battle_roll_registered:   (e) => `${e.player_id === playerId.value ? 'Você rolou' : 'Oponente rolou'} o dado de batalha!`,
       duel_started:        () => 'Duelo iniciado!',
+      trade_proposed:      (e) => {
+        const proposer = e.result?.proposer_id === playerId.value
+          ? 'Você'
+          : (e.result?.proposer_name ?? 'Outro jogador')
+        const offered = e.result?.offered_pokemon ?? 'um Pokémon'
+        const target = e.result?.target_name ?? 'outro jogador'
+        return `${proposer} propôs uma troca oferecendo ${offered} para ${target}`
+      },
       action_skipped:      () => 'Ação pulada',
       event_resolved:      () => 'Evento resolvido!',
       ability_used:        (e) => {
@@ -356,6 +364,12 @@ export const useGameStore = defineStore('game', () => {
           }
           return `Sem habilidade. Movimento: ${e.result?.final_roll ?? '?'}`
         }
+        if (e.result?.type === 'trade_proposal') {
+          if (e.result?.accepted) {
+            return `Troca concluída: ${e.result.offered_pokemon} por ${e.result.requested_pokemon}`
+          }
+          return 'Proposta de troca recusada'
+        }
         return 'Escolha resolvida'
       },
       debug_item_added:    () => 'Item de debug adicionado',
@@ -406,6 +420,11 @@ export const useGameStore = defineStore('game', () => {
     skipAction:       ()                          => send(gameActions.skipAction),
     passTurn:         ()                          => send(gameActions.passTurn),
     challengePlayer:  (targetId)                  => send(gameActions.challengePlayer, { target_player_id: targetId }),
+    proposeTrade:     ({ targetPlayerId, offeredSlotKey, requestedSlotKey }) => send(gameActions.proposeTrade, {
+      target_player_id: targetPlayerId,
+      offered_slot_key: offeredSlotKey,
+      requested_slot_key: requestedSlotKey,
+    }),
     skipChallenge:    ()                          => send(gameActions.skipChallenge),
     battleChoice:     (selection = 0)             => send(gameActions.battleChoice, typeof selection === 'object' && selection !== null ? selection : { pokemon_index: selection }),
     rollBattleDice:   ()                          => send(gameActions.rollBattleDice),

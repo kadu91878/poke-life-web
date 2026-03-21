@@ -9,6 +9,12 @@
           Dados do Poké-Mart: {{ (pendingAction?.rolls ?? []).join(' → ') }}
         </div>
       </div>
+      <div v-if="pendingChoiceCards.length" class="pending-card-grid">
+        <div v-for="entry in pendingChoiceCards" :key="entry.id" class="event-card pending-card-preview">
+          <div class="event-title">{{ entry.label }}: {{ entry.card?.title }}</div>
+          <div class="event-description">{{ entry.card?.description }}</div>
+        </div>
+      </div>
       <button
         v-for="option in pendingAction.options ?? []"
         :key="option.id"
@@ -26,6 +32,12 @@
           <div class="event-description">{{ pendingAction.prompt }}</div>
           <div v-if="pendingAction?.type === 'pokemart_roll' && (pendingAction?.rolls?.length ?? 0)" class="safari-info">
             Dados do Poké-Mart: {{ (pendingAction?.rolls ?? []).join(' → ') }}
+          </div>
+        </div>
+        <div v-if="pendingChoiceCards.length" class="pending-card-grid">
+          <div v-for="entry in pendingChoiceCards" :key="entry.id" class="event-card pending-card-preview">
+            <div class="event-title">{{ entry.label }}: {{ entry.card?.title }}</div>
+            <div class="event-description">{{ entry.card?.description }}</div>
           </div>
         </div>
         <button
@@ -147,6 +159,52 @@
         <button class="btn-primary roll-btn" @click="store.actions.rollDice()">🎲 Rolar Dado</button>
       </template>
       <template v-else-if="phase === 'action' && !pendingAction">
+        <template v-if="eligibleTradePlayers.length && !pendingPokemon">
+          <div class="event-card trade-card">
+            <div class="event-title">🤝 Trocas disponíveis</div>
+            <div class="event-description">
+              Você passou pelo espaço de outro jogador. Se quiser, monte uma troca 1:1 antes de encerrar a ação.
+            </div>
+          </div>
+          <button
+            v-for="player in eligibleTradePlayers"
+            :key="`trade-target-${player.id}`"
+            class="btn-secondary duel-btn"
+            @click="openTradeDraft(player.id)"
+          >
+            🤝 Trocar com {{ player.name }}
+            <span class="duel-stats">{{ tradeableCount(player) }} Pokémon</span>
+          </button>
+          <div v-if="activeTradeTarget" class="trade-builder">
+            <div class="hint">Escolha o Pokémon que você oferece. {{ activeTradeTarget.name }} decide qual Pokémon dele entra na troca.</div>
+            <div class="trade-column">
+              <div class="hint trade-column-title">Seu Pokémon</div>
+              <button
+                v-for="pokemon in myTradeOptions"
+                :key="`my-trade-${pokemon.slotKey}`"
+                class="btn-secondary duel-btn"
+                @click="tradeDraft.offeredSlotKey = pokemon.slotKey"
+              >
+                {{ pokemon.label }}
+                <span class="duel-stats" v-if="tradeDraft.offeredSlotKey === pokemon.slotKey">selecionado</span>
+              </button>
+            </div>
+            <div class="trade-column">
+              <div class="hint trade-column-title">Time visível de {{ activeTradeTarget.name }}</div>
+              <div
+                v-for="pokemon in targetTradeOptions"
+                :key="`target-trade-${pokemon.slotKey}`"
+                class="trade-preview"
+              >
+                {{ pokemon.label }}
+              </div>
+            </div>
+            <button class="btn-primary" :disabled="!canSubmitTrade" @click="submitTrade">
+              Enviar proposta para {{ activeTradeTarget.name }}
+            </button>
+            <button class="btn-ghost" @click="resetTradeDraft()">Cancelar troca</button>
+          </div>
+        </template>
         <template v-if="pendingPokemon">
           <div class="pokemon-offer" :class="captureContextClass">
             <div class="context-badge" v-if="captureContextLabel">{{ captureContextLabel }}</div>
@@ -248,11 +306,13 @@
         <button class="btn-primary" @click="store.actions.resolveEvent(false)">✓ Confirmar Evento</button>
         <button v-if="canUseRunAway && isNegativeEvent" class="btn-secondary" @click="store.actions.resolveEvent(true)">🐭 Fugir (Run Away)</button>
       </template>
-      <template v-if="phase === 'item_choice' && pendingItemChoice">
+      <template v-if="phase === 'item_choice' && pendingItemChoice && pendingItemChoice.player_id === me?.id">
         <div class="event-card">
-          <div class="event-title">🎒 Inventário cheio</div>
+          <div class="event-title">{{ pendingItemChoice.is_lass ? '🧝 Event Lass' : '🎒 Inventário cheio' }}</div>
           <div class="event-description">
-            Você só pode manter {{ me?.item_capacity ?? 8 }} itens. Escolha um item para descartar.
+            {{ pendingItemChoice.is_lass
+              ? 'A Event Lass obriga todos os jogadores a descartar um item. Escolha qual descartar.'
+              : `Você só pode manter ${me?.item_capacity ?? 8} itens. Escolha um item para descartar.` }}
           </div>
         </div>
         <button
@@ -362,7 +422,16 @@
         <button :class="['tab-btn', logChatTab === 'log' ? 'tab-active' : '']" @click="logChatTab = 'log'">Log</button>
         <button :class="['tab-btn', logChatTab === 'chat' ? 'tab-active' : '']" @click="logChatTab = 'chat'">Chat</button>
       </div>
+      <button v-if="hasTaurosMoo" class="btn-secondary moo-btn" @click="spamTaurosMoo">
+        MOO!
+      </button>
       <div v-if="logChatTab === 'log'" class="mini-log">
+        <div v-if="highlightLogs.length" class="log-highlight-panel">
+          <div class="log-highlight-title">Últimos ganhos</div>
+          <div v-for="(entry, i) in highlightLogs" :key="`highlight-${i}`" class="log-highlight-entry">
+            <span class="log-player">{{ entry.player }}</span>: {{ entry.message }}
+          </div>
+        </div>
         <div v-for="(entry, i) in lastLogs" :key="i" class="log-entry">
           <span class="log-player">{{ entry.player }}</span>: {{ entry.message }}
         </div>
@@ -419,6 +488,7 @@ const ownsPendingReleaseChoice = computed(() => !!me.value && pendingReleaseChoi
 const hasForeignPendingAction = computed(() => !!pendingAction.value && !ownsPendingAction.value)
 const canHandlePendingChoice = computed(() => isPendingChoiceAction.value && ownsPendingAction.value)
 const canResolvePendingChoice = computed(() => pendingAllowedActions.value.has(gameActions.resolvePendingAction))
+const pendingChoiceCards = computed(() => Array.isArray(pendingAction.value?.cards) ? pendingAction.value.cards : [])
 const canRollPendingCapture = computed(() => pendingAllowedActions.value.has(gameActions.rollCaptureDice))
 const canSkipPendingCapture = computed(() => pendingAllowedActions.value.has(gameActions.skipAction))
 const hasBlockingTurnInteraction = computed(() =>
@@ -436,6 +506,10 @@ const isDuelTile         = computed(() => currentTile.value?.type === 'duel')
 const safariRemaining    = computed(() => (turn.value?.pending_safari ?? []).length)
 const otherActivePlayers = computed(() => players.value.filter(p => p.id !== store.playerId && p.is_active))
 const inventoryItems = computed(() => me.value?.items ?? [])
+const tradeDraft = ref({
+  targetPlayerId: null,
+  offeredSlotKey: null,
+})
 const pokemonAbilityActions = computed(() =>
   (me.value?.pokemon_inventory ?? []).flatMap((pokemon) =>
     (pokemon.abilities ?? []).flatMap((ability) =>
@@ -534,10 +608,19 @@ const canUseRunAway = computed(() => {
   return all.some(p => p.ability?.toLowerCase().replace(/\s+/g, '_') === 'run_away' && !p.ability_used)
 })
 
+function pokemonCanBattle(pokemon) {
+  if (!pokemon || pokemon.knocked_out) return false
+  if (pokemon.can_battle === false) return false
+  if ((pokemon.ability_description || '').toLowerCase().includes('cannot battle')) return false
+  return !(pokemon.abilities || []).some((ability) =>
+    (ability.effects || []).some((effect) => effect.effect_kind === 'cannot_battle' && effect.implemented),
+  )
+}
+
 function bestBP(player) {
-  const pool = [...(player.pokemon ?? [])].filter(pokemon => !pokemon?.knocked_out)
-  if (player.starter_pokemon) pool.push(player.starter_pokemon)
-  const usable = pool.filter(pokemon => !pokemon?.knocked_out)
+  const pool = [...(player.pokemon ?? [])].filter(pokemonCanBattle)
+  if (pokemonCanBattle(player.starter_pokemon)) pool.push(player.starter_pokemon)
+  const usable = pool.filter(pokemonCanBattle)
   if (!usable.length) return 'KO'
   return Math.max(...usable.map(p => p.battle_points ?? 0))
 }
@@ -585,7 +668,14 @@ const eventEffectClass = computed(() => {
   return 'effect--neutral'
 })
 
-const lastLogs = computed(() => (store.gameState?.log ?? []).slice(-5).reverse())
+const gameLogs = computed(() => store.gameState?.log ?? [])
+const lastLogs = computed(() => gameLogs.value.slice(-18).reverse())
+const highlightLogs = computed(() =>
+  gameLogs.value
+    .filter(entry => isHighlightLog(entry?.message))
+    .slice(-3)
+    .reverse()
+)
 
 const logChatTab  = ref('log')
 const chatInput   = ref('')
@@ -604,6 +694,49 @@ function sendChat() {
   store.actions.sendChat(text)
   chatInput.value = ''
 }
+
+function spamTaurosMoo() {
+  for (let index = 0; index < 3; index += 1) {
+    window.setTimeout(() => {
+      store.actions.sendChat('Moo, MOOO!')
+    }, index * 120)
+  }
+}
+
+function tradePokemonLabel(pokemon) {
+  if (!pokemon) return 'Pokémon'
+  const parts = [pokemon.name ?? 'Pokémon']
+  if (pokemon.is_starter_slot) parts.push('(Starter)')
+  if (pokemon.knocked_out) parts.push('[KO]')
+  return parts.join(' ')
+}
+
+function tradeableCount(player) {
+  return Array.isArray(player?.pokemon_inventory) ? player.pokemon_inventory.length : 0
+}
+
+function openTradeDraft(targetPlayerId) {
+  tradeDraft.value = {
+    targetPlayerId,
+    offeredSlotKey: myTradeOptions.value[0]?.slotKey ?? null,
+  }
+}
+
+function resetTradeDraft() {
+  tradeDraft.value = {
+    targetPlayerId: null,
+    offeredSlotKey: null,
+  }
+}
+
+function submitTrade() {
+  if (!canSubmitTrade.value) return
+  store.actions.proposeTrade({
+    targetPlayerId: tradeDraft.value.targetPlayerId,
+    offeredSlotKey: tradeDraft.value.offeredSlotKey,
+  })
+  resetTradeDraft()
+}
 const PHASE_LABELS = {
   select_starter:'🌟 Escolha seu Pokémon inicial', roll:'🎲 Role o dado', action:'🎯 Escolha uma ação',
   battle:'⚔️ Batalha em andamento', event:'📋 Carta de Evento', item_choice:'🎒 Inventário cheio',
@@ -614,9 +747,14 @@ const phaseLabel = computed(() => PHASE_LABELS[phase.value] ?? phase.value)
 const pendingChoiceTitle = computed(() => {
   if (pendingAction.value?.type === 'ability_decision') return '✨ Habilidade de Pokémon'
   if (pendingAction.value?.type === 'heal_other_choice') return '💊 Curar Pokémon'
+  if (pendingAction.value?.type === 'mewtwo_clone_choice') return '🧬 Clonar Pokémon'
+  if (pendingAction.value?.type === 'trade_proposal') return '🤝 Proposta de troca'
   if (pendingAction.value?.type === 'capture_choice_decision') return '✨ Habilidade de Captura'
   if (pendingAction.value?.type === 'capture_reroll_decision') return '✨ Rerrolar Captura'
   if (pendingAction.value?.type === 'battle_reroll_decision') return '✨ Rerrolar Batalha'
+  if (pendingAction.value?.type === 'event_copy_decision') return '🦊 Copiar Carta de Evento'
+  if (pendingAction.value?.type === 'knockout_redirect_decision') return '👻 Redirecionar Nocaute'
+  if (pendingAction.value?.type === 'wobbuffet_counter_decision') return '🛡️ Contra-Ataque do Wobbuffet'
   if (pendingAction.value?.type === 'gym_heal') return '🏆 Cura pós-ginásio'
   if (pendingAction.value?.type === 'pokecenter_heal') {
     if (pendingAction.value?.center_tile_name === 'Pallet Town') return '🏡 Cura em Pallet Town'
@@ -624,6 +762,7 @@ const pendingChoiceTitle = computed(() => {
     return '🏥 Cura de PokéCenter'
   }
   if (pendingAction.value?.type === 'pokemart_roll') return '🛒 Poké-Mart'
+  if (pendingAction.value?.type === 'articuno_event_choice') return '❄️ Escolha do Articuno'
   if (pendingAction.value?.type === 'miracle_stone_tile') return '💎 Miracle Stone'
   if (pendingAction.value?.type === 'bill_teleport') return "🧾 It's Bill!"
   if (pendingAction.value?.type === 'game_corner') return '🎰 Game Corner'
@@ -655,6 +794,9 @@ const waitingActionDescription = computed(() => {
       return `Aguardando ${owner} concluir o reroll do Poké-Mart em ${place}.`
     }
     return `Aguardando ${owner} rolar o dado do Poké-Mart em ${place}.`
+  }
+  if (pendingAction.value.type === 'trade_proposal') {
+    return `Aguardando ${owner} responder à proposta de troca.`
   }
   if (pendingAction.value.type === 'capture_attempt') {
     return `Aguardando ${owner} resolver a captura pendente.`
@@ -713,11 +855,67 @@ const fullRestoreTargets = computed(() => {
   }
   return targets
 })
+const hasTaurosMoo = computed(() =>
+  (me.value?.pokemon_inventory ?? []).some((pokemon) => pokemon?.name === 'Tauros')
+)
+const eligibleTradePlayers = computed(() => {
+  if (phase.value !== 'action' || !isMyTurn.value || pendingAction.value || pendingPokemon.value) return []
+  const myPosition = Number(me.value?.position ?? 0)
+  const positions = new Set([myPosition])
+  const startPosition = Number(turn.value?.movement_context?.start_position)
+  const endPosition = Number(turn.value?.movement_context?.resolved_destination)
+  if (Number.isInteger(startPosition) && Number.isInteger(endPosition) && startPosition !== endPosition) {
+    const step = startPosition < endPosition ? 1 : -1
+    for (let position = startPosition + step; step > 0 ? position <= endPosition : position >= endPosition; position += step) {
+      positions.add(position)
+    }
+  }
+  return players.value.filter((player) => {
+    if (!player || player.id === store.playerId || !player.is_active) return false
+    if (!player.is_connected && !player.is_cpu) return false
+    if (!Array.isArray(player.pokemon_inventory) || player.pokemon_inventory.length === 0) return false
+    return positions.has(Number(player.position ?? -1))
+  })
+})
+const activeTradeTarget = computed(() =>
+  eligibleTradePlayers.value.find((player) => player.id === tradeDraft.value.targetPlayerId) ?? null
+)
+const myTradeOptions = computed(() =>
+  (me.value?.pokemon_inventory ?? []).map((pokemon) => ({
+    slotKey: pokemon.slot_key,
+    label: tradePokemonLabel(pokemon),
+  }))
+)
+const targetTradeOptions = computed(() =>
+  (activeTradeTarget.value?.pokemon_inventory ?? []).map((pokemon) => ({
+    slotKey: pokemon.slot_key,
+    label: tradePokemonLabel(pokemon),
+  }))
+)
+const canSubmitTrade = computed(() =>
+  !!tradeDraft.value.targetPlayerId
+  && !!tradeDraft.value.offeredSlotKey
+)
+
+function isHighlightLog(message) {
+  const normalized = String(message || '').toLowerCase()
+  return [
+    ' ganhou ',
+    'ganhou ',
+    ' recebeu ',
+    'recebeu ',
+    'capturou ',
+    'carta de evento revelada',
+    'carta de vitória revelada',
+    'carta de vitoria revelada',
+    'recuperou 1 carga',
+  ].some(fragment => normalized.includes(fragment))
+}
 
 function playerHasAvailablePokemon(player) {
   if (!player) return false
-  const team = [...(player.pokemon ?? [])].filter(pokemon => !pokemon?.knocked_out)
-  if (player.starter_pokemon && !player.starter_pokemon.knocked_out) {
+  const team = [...(player.pokemon ?? [])].filter(pokemonCanBattle)
+  if (pokemonCanBattle(player.starter_pokemon)) {
     team.push(player.starter_pokemon)
   }
   return team.length > 0
@@ -767,6 +965,21 @@ watch(
     }
   },
 )
+
+watch(
+  () => ({
+    isMyTurn: isMyTurn.value,
+    phase: phase.value,
+    pendingType: pendingAction.value?.type ?? null,
+    eligibleIds: eligibleTradePlayers.value.map((player) => player.id).join(','),
+  }),
+  () => {
+    const targetStillEligible = eligibleTradePlayers.value.some((player) => player.id === tradeDraft.value.targetPlayerId)
+    if (!isMyTurn.value || phase.value !== 'action' || pendingAction.value || !targetStillEligible) {
+      resetTradeDraft()
+    }
+  },
+)
 </script>
 
 <style scoped>
@@ -788,6 +1001,8 @@ button { width:100%; }
 .duel-btn { display:flex; justify-content:space-between; align-items:center; padding:.5rem .8rem; }
 .duel-stats { font-size:.72rem; opacity:.75; }
 .event-card { background:var(--color-bg-card); border:1px solid var(--color-secondary); border-radius:var(--radius); padding:.65rem; }
+.pending-card-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:.55rem; }
+.pending-card-preview { align-self:stretch; }
 .event-title { font-weight:700; color:var(--color-accent); margin-bottom:.25rem; font-size:.9rem; }
 .event-description { font-size:.75rem; color:#aaa; margin-bottom:.3rem; }
 .event-effect { font-size:.8rem; font-weight:600; padding:.15rem .4rem; border-radius:4px; display:inline-block; }
@@ -802,6 +1017,25 @@ button { width:100%; }
 .hint { font-size:.78rem; color:var(--color-text-muted); text-align:center; }
 .battle-hint { color:var(--color-primary); }
 .item-shortcuts { display:flex; flex-direction:column; gap:.4rem; }
+.trade-card { border-color: rgba(120, 200, 255, .22); }
+.trade-builder {
+  display:flex;
+  flex-direction:column;
+  gap:.55rem;
+  padding:.55rem;
+  border-radius:12px;
+  border:1px solid rgba(120, 200, 255, .18);
+  background:rgba(120, 200, 255, .05);
+}
+.trade-column { display:flex; flex-direction:column; gap:.35rem; }
+.trade-column-title { text-align:left; }
+.trade-preview {
+  padding:.5rem .7rem;
+  border-radius:10px;
+  background:rgba(255,255,255,.05);
+  color:var(--color-text-muted);
+  font-size:.78rem;
+}
 .ability-shortcuts {
   padding: .45rem;
   border: 1px solid rgba(255, 224, 102, .16);
@@ -813,11 +1047,29 @@ button { width:100%; }
 .log-chat-tabs { display:flex; gap:2px; padding:.25rem 0 0; }
 .tab-btn { flex:1; font-size:.7rem; padding:.2rem; background:transparent; border:1px solid rgba(255,255,255,.1); border-radius:4px 4px 0 0; color:var(--color-text-muted); cursor:pointer; }
 .tab-btn.tab-active { background:rgba(255,255,255,.08); color:var(--color-accent); border-color:var(--color-accent); }
-.mini-log { padding-top:.35rem; display:flex; flex-direction:column; gap:.18rem; max-height:100px; overflow-y:auto; }
-.log-entry { font-size:.68rem; color:var(--color-text-muted); line-height:1.3; }
+.mini-log { padding-top:.35rem; display:flex; flex-direction:column; gap:.3rem; max-height:240px; overflow-y:auto; }
+.log-highlight-panel {
+  display:flex;
+  flex-direction:column;
+  gap:.2rem;
+  padding:.45rem;
+  border-radius:10px;
+  background:rgba(255,224,102,.08);
+  border:1px solid rgba(255,224,102,.18);
+}
+.log-highlight-title {
+  font-size:.66rem;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  color:#fff3bf;
+  font-weight:700;
+}
+.log-highlight-entry,
+.log-entry { font-size:.7rem; color:var(--color-text-muted); line-height:1.35; }
 .log-player { color:var(--color-accent); font-weight:600; }
 .chat-panel { display:flex; flex-direction:column; gap:.3rem; padding-top:.3rem; }
 .chat-list { display:flex; flex-direction:column; gap:.15rem; max-height:90px; overflow-y:auto; }
+.moo-btn { font-weight:700; letter-spacing:.04em; }
 .chat-msg { font-size:.68rem; color:var(--color-text-muted); line-height:1.3; word-break:break-word; }
 .chat-msg--mine .chat-author { color:var(--color-secondary); }
 .chat-author { color:var(--color-accent); font-weight:600; }

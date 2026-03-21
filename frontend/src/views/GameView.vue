@@ -6,7 +6,14 @@
       <span class="room-label">Sala: <strong>{{ roomCode }}</strong></span>
       <span class="round-label">Round {{ turn.round }}</span>
       <span v-if="notification" class="notification">{{ notification }}</span>
-      <button class="btn-ghost header-btn" @click="cardHistoryOpen = true">Cartas reveladas</button>
+      <button
+        v-if="canResumeBattleAction"
+        class="btn-primary header-btn"
+        @click="battleActionMinimized = false"
+      >
+        {{ resumeBattleLabel }}
+      </button>
+      <button class="btn-ghost header-btn" @click="cardHistoryOpen = true">Histórico de cartas</button>
       <button class="btn-ghost leave-btn" @click="handleLeave">Sair</button>
     </header>
 
@@ -35,7 +42,11 @@
     <StarterModal v-if="phase === 'select_starter'" />
 
     <!-- Modal de batalha -->
-    <BattleModal v-if="phase === 'battle'" />
+    <BattleModal
+      v-if="phase === 'battle'"
+      v-show="!battleActionMinimized"
+      @minimize="battleActionMinimized = true"
+    />
 
     <RevealedCardOverlay />
 
@@ -89,7 +100,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGameStore } from '@/stores/gameStore'
 
@@ -110,6 +121,7 @@ const store  = useGameStore()
 const roomCode    = computed(() => route.params.roomCode)
 const players     = computed(() => store.players)
 const turn        = computed(() => store.turn)
+const battle      = computed(() => store.turn?.battle ?? null)
 const phase       = computed(() => store.phase)
 const errorMsg    = computed(() => store.errorMsg)
 const notification= computed(() => store.notification)
@@ -117,9 +129,34 @@ const status      = computed(() => store.status)
 const finalScores = computed(() => store.finalScores)
 const selectedInventoryPlayerId = ref(null)
 const cardHistoryOpen = ref(false)
+const battleActionMinimized = ref(false)
 const selectedInventoryPlayer = computed(() =>
   players.value.find(player => player.id === selectedInventoryPlayerId.value) ?? null
 )
+const battleSessionKey = computed(() => {
+  if (phase.value !== 'battle' || !battle.value) return null
+  const currentBattle = battle.value
+  return [
+    currentBattle.mode ?? 'player',
+    currentBattle.source ?? '',
+    currentBattle.challenger_id ?? '',
+    currentBattle.defender_id ?? '',
+    currentBattle.defender_name ?? '',
+    currentBattle.gym_id ?? '',
+    currentBattle.gym_name ?? '',
+    currentBattle.badge_name ?? '',
+  ].join('|')
+})
+const canResumeBattleAction = computed(() =>
+  phase.value === 'battle' && battleActionMinimized.value
+)
+const resumeBattleLabel = computed(() => {
+  const mode = battle.value?.mode ?? 'player'
+  if (mode === 'gym') return 'Voltar ao ginásio'
+  if (mode === 'league') return 'Voltar à liga'
+  if (mode === 'trainer') return 'Voltar à batalha'
+  return 'Voltar ao duelo'
+})
 
 function rankEmoji(index) {
   return ['🥇','🥈','🥉'][index] ?? `#${index + 1}`
@@ -136,6 +173,18 @@ function handleLeave() {
 function openInventory(playerId) {
   selectedInventoryPlayerId.value = playerId
 }
+
+watch(phase, (nextPhase, previousPhase) => {
+  if (nextPhase !== 'battle' || previousPhase !== 'battle') {
+    battleActionMinimized.value = false
+  }
+})
+
+watch(battleSessionKey, (nextKey, previousKey) => {
+  if (nextKey && previousKey && nextKey !== previousKey) {
+    battleActionMinimized.value = false
+  }
+})
 
 onMounted(() => {
   const name = sessionStorage.getItem('playerName') || 'Trainer'

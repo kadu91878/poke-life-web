@@ -4,7 +4,7 @@
       <div class="modal-header">
         <div>
           <p class="eyebrow">Cartas reveladas na partida</p>
-          <h2>Historico de cartas</h2>
+          <h2>Histórico de cartas</h2>
         </div>
         <button class="btn-ghost close-btn" @click="$emit('close')">Fechar</button>
       </div>
@@ -19,7 +19,7 @@
           <strong>{{ victoryEntries.length }}</strong>
         </div>
         <div class="summary-card summary-card--latest">
-          <span class="summary-label">Ultima revelada</span>
+          <span class="summary-label">Última revelada</span>
           <strong>{{ latestEntry?.card?.title ?? 'Nenhuma carta' }}</strong>
           <span v-if="latestEntry" class="summary-meta">{{ deckLabel(latestEntry.deck_type) }} · rodada {{ latestEntry.round ?? '?' }}</span>
         </div>
@@ -44,6 +44,13 @@
       </div>
 
       <div class="tab-row">
+        <button
+          class="tab-btn"
+          :class="{ 'tab-btn--active': activeTab === 'recent' }"
+          @click="activeTab = 'recent'"
+        >
+          Recentes ({{ history.length }})
+        </button>
         <button
           class="tab-btn"
           :class="{ 'tab-btn--active': activeTab === 'event' }"
@@ -76,7 +83,7 @@
             <strong>{{ entry.card?.title ?? 'Carta sem titulo' }}</strong>
             <span class="history-entry-meta">{{ entry.player_name || 'Sistema' }} · {{ entry.card?.category || 'card' }}</span>
           </button>
-          <p v-if="!visibleEntries.length" class="empty-copy">Nenhuma carta desse tipo saiu na partida ainda.</p>
+          <p v-if="!visibleEntries.length" class="empty-copy">{{ emptyStateMessage }}</p>
         </section>
 
         <section class="history-detail">
@@ -114,7 +121,7 @@ import { useGameStore } from '@/stores/gameStore'
 const props = defineProps({
   initialTab: {
     type: String,
-    default: 'event',
+    default: 'recent',
   },
 })
 
@@ -122,7 +129,7 @@ defineEmits(['close'])
 
 const store = useGameStore()
 
-const activeTab = ref(props.initialTab === 'victory' ? 'victory' : 'event')
+const activeTab = ref(['recent', 'event', 'victory'].includes(props.initialTab) ? props.initialTab : 'recent')
 const selectedEntryKey = ref(null)
 
 const history = computed(() =>
@@ -132,7 +139,15 @@ const history = computed(() =>
 const latestEntry = computed(() => store.gameState?.revealed_card ?? history.value[0] ?? null)
 const eventEntries = computed(() => history.value.filter(entry => entry.deck_type === 'event'))
 const victoryEntries = computed(() => history.value.filter(entry => entry.deck_type === 'victory'))
-const visibleEntries = computed(() => (activeTab.value === 'victory' ? victoryEntries.value : eventEntries.value))
+const visibleEntries = computed(() => {
+  if (activeTab.value === 'victory') return victoryEntries.value
+  if (activeTab.value === 'event') return eventEntries.value
+  return history.value
+})
+const emptyStateMessage = computed(() => {
+  if (activeTab.value === 'recent') return 'Nenhuma carta foi revelada na partida ainda.'
+  return 'Nenhuma carta desse tipo saiu na partida ainda.'
+})
 const selectedEntry = computed(() =>
   visibleEntries.value.find(entry => entryKey(entry) === selectedEntryKey.value) ?? visibleEntries.value[0] ?? null
 )
@@ -140,7 +155,7 @@ const selectedEntry = computed(() =>
 watch(
   () => props.initialTab,
   (value) => {
-    activeTab.value = value === 'victory' ? 'victory' : 'event'
+    activeTab.value = ['recent', 'event', 'victory'].includes(value) ? value : 'recent'
   },
 )
 

@@ -132,7 +132,7 @@
                   </div>
                 </div>
                 <img
-                  v-else
+                  v-else-if="group.kind === 'free'"
                   :src="POKEBALL_SLOT_IMAGE"
                   alt="Slot de Pokebola"
                   class="pokeball-icon"
@@ -494,7 +494,7 @@ h3 {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 36px !important;
+  width: 36px;
   height: 36px;
   transform: translate(-50%, -50%);
   z-index: 2;
@@ -759,7 +759,7 @@ h3 {
 .item-section-title { font-size: 0.78rem; color: #aac4ff; margin: 0 0 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
 .item-card--capture { border-color: #7c6bff; }
 
-.badge-list { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.5rem 0; }
-.badge-entry { display: flex; align-items: center; gap: 0.6rem; font-size: 0.92rem; padding: 0.4rem 0.6rem; background: rgba(255,255,255,0.05); border-radius: 8px; }
-.badge-icon-lg { font-size: 1.4rem; }
+.badge-list { display: flex; flex-direction: row; flex-wrap: wrap; gap: 0.35rem; padding: 0.4rem 0; }
+.badge-entry { display: flex; align-items: center; gap: 0.3rem; font-size: 0.72rem; padding: 0.25rem 0.45rem; background: rgba(255,255,255,0.05); border-radius: 6px; }
+.badge-icon-lg { font-size: 1rem; }
 </style>

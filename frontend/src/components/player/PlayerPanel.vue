@@ -41,34 +41,6 @@
     <button class="inventory-btn" @click="$emit('open-inventory', player.id)">
       Abrir inventário
     </button>
-
-    <div class="inventory-block" v-if="player.items?.length">
-      <div class="inventory-title">Itens</div>
-      <div class="inventory-list">
-        <span v-for="item in player.items" :key="item.key" class="inventory-chip">
-          {{ item.name }} x{{ item.quantity }}
-        </span>
-      </div>
-    </div>
-
-    <div class="inventory-block" v-if="battleRoster.length">
-      <div class="inventory-title">Time</div>
-      <div class="inventory-list">
-        <span
-          v-for="pokemon in battleRoster"
-          :key="`${pokemon.id}-${pokemon.is_starter_slot ? 'starter' : 'team'}`"
-          class="inventory-chip"
-          :class="{ 'inventory-chip--ko': pokemon.knocked_out }"
-        >
-          {{ pokemon.name }} · {{ pokemon.slot_cost ?? pokemon.pokeball_slots ?? 1 }} slot(s)
-          <span v-if="primaryAbilityStatus(pokemon)?.charges_total != null">
-            · {{ primaryAbilityStatus(pokemon).charges_remaining }}/{{ primaryAbilityStatus(pokemon).charges_total }} carga(s)
-          </span>
-          <strong v-if="pokemon.knocked_out"> · Nocauteado</strong>
-        </span>
-      </div>
-    </div>
-
   </div>
 </template>
 
@@ -125,10 +97,6 @@ const tileName = computed(() => {
   return tiles[pos]?.name ?? `Casa ${pos}`
 })
 const lastPokemonCenterLabel = computed(() => props.player.last_pokemon_center?.tile_name ?? null)
-
-function primaryAbilityStatus(pokemon) {
-  return pokemon?.abilities?.[0] ?? pokemon?.ability_status ?? null
-}
 </script>
 
 <style scoped>
@@ -141,6 +109,10 @@ function primaryAbilityStatus(pokemon) {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+  min-height: 11rem;
+  max-height: 11rem;
+  overflow: hidden;
+  box-sizing: border-box;
   transition: background 0.2s;
 }
 
@@ -234,44 +206,11 @@ function primaryAbilityStatus(pokemon) {
 }
 
 .inventory-btn {
-  margin-top: 0.15rem;
+  margin-top: auto;
   background: rgba(255, 224, 102, 0.12);
   border: 1px solid rgba(255, 224, 102, 0.22);
   color: #fff3bf;
   font-size: 0.72rem;
   padding: 0.38rem 0.55rem;
-}
-
-.inventory-block {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.inventory-title {
-  font-size: 0.68rem;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-}
-
-.inventory-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-}
-
-.inventory-chip {
-  font-size: 0.66rem;
-  color: #dfe9ff;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
-  padding: 0.12rem 0.4rem;
-}
-.inventory-chip--ko {
-  color: #ffd7d7;
-  background: rgba(128, 24, 24, 0.22);
-  border-color: rgba(255, 120, 120, 0.24);
-  text-decoration: line-through;
 }
 </style>
