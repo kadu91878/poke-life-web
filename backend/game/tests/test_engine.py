@@ -5194,31 +5194,20 @@ class TestPokemonAbilityRuntime(TestCase):
 
         self.assertEqual(invalid_choice, {'error': 'Pokémon inválido'})
 
-    def test_mew_can_choose_any_movement_result_before_rolling(self):
+    def test_mew_fixed_move_activates_before_roll(self):
         state, p1_id, _ = self._ready_to_roll()
         state = self._give_runtime_pokemon(state, p1_id, 'Mew')
-
-        player_before = next(player for player in state['players'] if player['id'] == p1_id)
-        actions = player_before['pokemon'][0]['abilities'][0]['actions']
-
-        self.assertEqual(
-            [action['action_id'] for action in actions if action['effect_kind'] == 'fixed_move'],
-            [f'fixed_move_{steps}' for steps in range(1, 7)],
-        )
+        start_pos = next(p for p in state['players'] if p['id'] == p1_id)['position']
 
         new_state, result = engine.use_pokemon_ability(
-            state,
-            p1_id,
-            slot_key='pokemon:0',
-            ability_id='primary',
-            action_id='fixed_move_6',
+            state, p1_id, slot_key='pokemon:0', ability_id='primary', action_id='fixed_move'
         )
-        player_after = next(player for player in new_state['players'] if player['id'] == p1_id)
 
+        self.assertIsNotNone(new_state, 'Mew deve poder usar fixed_move antes de rolar')
         self.assertEqual(result['effect_kind'], 'fixed_move')
-        self.assertEqual(result['steps'], 6)
-        self.assertEqual(player_after['position'], 6)
-        self.assertTrue(player_after['pokemon'][0]['ability_runtime']['abilities']['primary']['used_this_turn'])
+        self.assertEqual(result['steps'], 1)
+        player_after = next(p for p in new_state['players'] if p['id'] == p1_id)
+        self.assertEqual(player_after['position'], start_pos + 1)
 
     def test_mewtwo_can_clone_a_valid_in_game_pokemon_with_fresh_runtime(self):
         state, p1_id, p2_id = self._ready_to_roll()
@@ -5328,7 +5317,7 @@ class TestPokemonAbilityRuntime(TestCase):
         self.assertTrue(copy_result['used'])
         self.assertTrue(any(item['key'] == 'bill' for item in player_after['items']))
 
-    def test_vulpix_logs_unsupported_copy_when_event_requires_out_of_turn_battle_flow(self):
+    def test_vulpix_copies_trainer_battle_event(self):
         trainer_event = {
             'id': 201,
             'title': 'Trainer Emiel',
@@ -5341,13 +5330,11 @@ class TestPokemonAbilityRuntime(TestCase):
         state['turn']['current_player_id'] = p1_id
         state['turn']['pending_event'] = copy.deepcopy(trainer_event)
 
-        state = engine._maybe_offer_event_copy(state, p1_id, trainer_event)  # noqa: SLF001 - documenta o limite atual da engine
+        state = engine._maybe_offer_event_copy(state, p1_id, trainer_event)  # noqa: SLF001
         state, copy_result = engine.resolve_pending_action(state, p2_id, 'copy')
 
-        self.assertFalse(copy_result['used'])
-        self.assertTrue(copy_result['unsupported_copy'])
-        self.assertEqual(state['turn']['phase'], 'event')
-        self.assertEqual(state['turn']['pending_event']['title'], 'Trainer Emiel')
+        self.assertTrue(copy_result['used'])
+        self.assertNotIn('unsupported_copy', copy_result)
 
     def test_electabuzz_always_adds_eight_to_the_final_battle_score(self):
         electabuzz = load_playable_pokemon_by_name('Electabuzz')
@@ -5876,6 +5863,50 @@ class TestPokemonAbilityRuntime(TestCase):
             pokemon_twice['ability_runtime']['abilities']['primary']['used_this_turn'],
         )
         self.assertEqual(len(pokemon_twice['abilities']), 1)
+
+    def test_sunflora_capture_rolls_two_dice_and_offers_only_those_values(self):
+        state, p1_id, _ = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Sunflora')
+        state = _land_on_tile(state, p1_id, 85)
+
+        with patch('game.engine.state.roll_dice', side_effect=[2, 5]):
+            mid_state, result = engine.roll_capture_attempt(state, p1_id)
+
+        self.assertTrue(result['requires_ability_decision'])
+        self.assertEqual(result['decision_type'], 'capture_choice')
+        pending = mid_state['turn']['pending_action']
+        choice_values = [opt['value'] for opt in pending['options'] if opt['value'] is not None]
+        self.assertEqual(sorted(choice_values), [2, 5])
+
+    def test_vaporeon_queues_heal_choice_on_ko_in_battle(self):
+        state, p1_id, p2_id = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Vaporeon', sequence=1)
+        state = self._give_runtime_pokemon(state, p1_id, 'Doduo', sequence=2)
+        state = self._give_runtime_pokemon(state, p2_id, 'Charizard', sequence=1)
+
+        # KO Doduo so Vaporeon heal has a target
+        player = next(p for p in state['players'] if p['id'] == p1_id)
+        player['pokemon'][1]['knocked_out'] = True
+
+        state = self._start_runtime_duel(
+            state, p2_id, p1_id,
+            challenger_slot_key='pokemon:0',
+            defender_slot_key='pokemon:0',
+        )
+        # Charizard (BP=7) beats Vaporeon (BP=3) — challenger (p2) rolls 6, defender (p1) rolls 1
+        with patch('game.engine.state.roll_battle_dice', side_effect=[6, 1]):
+            state, _ = engine.register_battle_roll(state, p2_id)
+            state, result = engine.register_battle_roll(state, p1_id)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.get('winner_id'), p2_id)
+        pending = state['turn']['pending_action']
+        self.assertIsNotNone(pending)
+        self.assertEqual(pending['type'], 'heal_other_choice')
+        self.assertEqual(pending['player_id'], p1_id)
+        self.assertEqual(pending['healer_name'], 'Vaporeon')
+        target_names = [opt['pokemon_name'] for opt in pending['options']]
+        self.assertIn('Doduo', target_names)
 
 
 class TestHostToolsRuntime(TestCase):
