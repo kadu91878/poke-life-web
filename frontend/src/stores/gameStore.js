@@ -187,6 +187,8 @@ export const useGameStore = defineStore('game', () => {
   function send(action, data = {}) {
     if (socket?.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ action, ...data }))
+    } else {
+      console.warn('[WS] send() descartado — socket não está aberto:', action, 'readyState:', socket?.readyState)
     }
   }
 

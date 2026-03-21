@@ -224,6 +224,101 @@ class TestStarterIdentity(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(consumer.player_id, 'p2')
 
 
+class TestCpuStarterSelection(unittest.IsolatedAsyncioTestCase):
+    """Garante que o fluxo de seleção de starter com CPU não trava."""
+
+    def _make_cpu_game_state(self, cpu_first: bool = True):
+        from game.engine.state import initialize_game
+        state = build_initial_state('CPU01')
+        state['players'] = [
+            {'id': 'human-1', 'name': 'Ash', 'is_active': True, 'is_connected': True,
+             'position': 0, 'pokeballs': 6, 'full_restores': 2, 'starter_pokemon': None,
+             'pokemon': [], 'items': {}, 'badges': [], 'master_points': 0,
+             'has_reached_league': False, 'is_host': True, 'color': 'red'},
+            {'id': 'cpu-1', 'name': 'CPU', 'is_active': True, 'is_connected': False,
+             'is_cpu': True, 'position': 0, 'pokeballs': 6, 'full_restores': 2,
+             'starter_pokemon': None, 'pokemon': [], 'items': {}, 'badges': [],
+             'master_points': 0, 'has_reached_league': False, 'is_host': False, 'color': 'blue'},
+        ]
+        order = ['cpu-1', 'human-1'] if cpu_first else ['human-1', 'cpu-1']
+        with patch('game.engine.state.random.shuffle', new=lambda ids: ids.__setitem__(slice(None), order)):
+            return initialize_game(state)
+
+    async def test_human_selects_starter_then_cpu_executes(self):
+        """Após human selecionar, _execute_cpu_action completa e fase vai para roll."""
+        from game.engine import cpu as cpu_engine
+        state = self._make_cpu_game_state(cpu_first=False)  # human first
+
+        self.assertEqual(state['turn']['current_player_id'], 'human-1')
+
+        consumer = _make_consumer(player_id='human-1')
+        holder = _attach_state(consumer, state)
+
+        starters = state['turn']['available_starters']
+        await consumer.handle_select_starter({'starter_id': starters[0]['id']})
+        consumer.send_error.assert_not_called()
+
+        # CPU should now be current player
+        self.assertEqual(holder['state']['turn']['current_player_id'], 'cpu-1')
+
+        # CPU action should be needed
+        cpu_ids = cpu_engine.needs_cpu_action(holder['state'])
+        self.assertIn('cpu-1', cpu_ids)
+
+        # Execute CPU action directly (simulates _delayed_cpu_action without sleep)
+        await consumer._execute_cpu_action(holder['state'], 'cpu-1')
+
+        # Phase should now be roll — all starters chosen
+        self.assertEqual(holder['state']['turn']['phase'], 'roll')
+
+    async def test_cpu_goes_first_then_human_can_select(self):
+        """Com CPU primeiro, _execute_cpu_action completa e human pode selecionar."""
+        from game.engine import cpu as cpu_engine
+        state = self._make_cpu_game_state(cpu_first=True)
+
+        self.assertEqual(state['turn']['current_player_id'], 'cpu-1')
+
+        consumer = _make_consumer(player_id='human-1')
+        holder = _attach_state(consumer, state)
+
+        # CPU acts first
+        cpu_ids = cpu_engine.needs_cpu_action(holder['state'])
+        self.assertIn('cpu-1', cpu_ids)
+        await consumer._execute_cpu_action(holder['state'], 'cpu-1')
+
+        # Human should now be current player
+        self.assertEqual(holder['state']['turn']['current_player_id'], 'human-1')
+
+        # Human selects
+        starters = holder['state']['turn']['available_starters']
+        await consumer.handle_select_starter({'starter_id': starters[0]['id']})
+        consumer.send_error.assert_not_called()
+
+        # Phase should be roll
+        self.assertEqual(holder['state']['turn']['phase'], 'roll')
+
+    async def test_delayed_cpu_skips_if_not_needed(self):
+        """_delayed_cpu_action salta execução quando CPU não é mais o jogador atual."""
+        from game.engine import cpu as cpu_engine
+        state = self._make_cpu_game_state(cpu_first=False)  # human first
+
+        consumer = _make_consumer(player_id='human-1')
+        holder = _attach_state(consumer, state)
+
+        # Manually advance state: human already chose, CPU also chose, phase=roll
+        starters = state['turn']['available_starters']
+        new_state = engine.select_starter(state, 'human-1', starters[0]['id'])
+        new_state = engine.select_starter(new_state, 'cpu-1', new_state['turn']['available_starters'][0]['id'])
+        holder['state'] = new_state
+
+        self.assertEqual(holder['state']['turn']['phase'], 'roll')
+
+        # CPU task runs but should skip (no longer needed)
+        broadcast_calls_before = consumer.broadcast_state.call_count
+        await consumer._delayed_cpu_action('cpu-1', 0)
+        self.assertEqual(consumer.broadcast_state.call_count, broadcast_calls_before)
+
+
 class GameWebSocketActionTests(unittest.IsolatedAsyncioTestCase):
     async def test_join_and_save_handlers(self):
         consumer = _make_consumer()

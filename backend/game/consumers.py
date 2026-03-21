@@ -1001,14 +1001,25 @@ class GameConsumer(AsyncWebsocketConsumer):
             delay = 1.5 + i * 1.2
             asyncio.create_task(self._delayed_cpu_action(cpu_id, delay))
 
-    async def _delayed_cpu_action(self, cpu_player_id: str, delay: float) -> None:
+    async def _delayed_cpu_action(self, cpu_player_id: str, delay: float, *, _attempt: int = 1) -> None:
         await asyncio.sleep(delay)
         try:
             async with self._room_lock():
                 state = await self.get_game_state()
+                # Re-check: state may have changed while waiting (another task or player acted first)
+                if cpu_player_id not in cpu_engine.needs_cpu_action(state):
+                    _cpu_debug('SKIP', 'ação já não é necessária', cpu_player_id=cpu_player_id, state=state)
+                    return
                 await self._execute_cpu_action(state, cpu_player_id)
         except Exception as exc:
-            _cpu_debug('ERROR', 'erro ao executar ação', cpu_player_id=cpu_player_id, error=str(exc))
+            import traceback
+            _cpu_debug('ERROR', f'erro ao executar ação (tentativa {_attempt}/3)',
+                       cpu_player_id=cpu_player_id, error=str(exc))
+            traceback.print_exc()
+            if _attempt < 3:
+                asyncio.create_task(
+                    self._delayed_cpu_action(cpu_player_id, 2.0 * _attempt, _attempt=_attempt + 1)
+                )
 
     async def _execute_cpu_action(self, state: dict, cpu_player_id: str) -> None:
         """Execute one CPU decision step, save, and broadcast."""
