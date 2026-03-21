@@ -1234,10 +1234,23 @@ def _queue_capture_choice_decision(
     """Fila uma decisão de capture_choice antes do dado de captura ser rolado."""
     pokemon_name = pokemon.get('name', 'Pokémon')
     ability_name = ability.get('name') or 'Habilidade'
-    options = [
-        {'id': str(val), 'label': f'Escolher {val}', 'value': val}
-        for val in range(1, 7)
-    ]
+    _cap_effect = next(
+        (e for e in (ability.get('effects') or []) if e.get('effect_kind') == 'capture_choice'),
+        None,
+    )
+    two_dice = bool((_cap_effect or {}).get('params', {}).get('two_dice'))
+    if two_dice:
+        dice1 = roll_dice()
+        dice2 = roll_dice()
+        dice_vals = sorted({dice1, dice2})
+        options = [{'id': str(val), 'label': f'Escolher {val}', 'value': val} for val in dice_vals]
+        prompt = f'{pokemon_name} pode usar {ability_name}. Você rolou {dice1} e {dice2}. Escolha um resultado:'
+    else:
+        options = [
+            {'id': str(val), 'label': f'Escolher {val}', 'value': val}
+            for val in range(1, 7)
+        ]
+        prompt = f'{pokemon_name} pode usar {ability_name}. Escolha o resultado do dado de captura:'
     options.append({'id': 'skip', 'label': 'Não usar habilidade', 'value': None})
     _set_pending_action(state, {
         'type': 'capture_choice_decision',
@@ -1249,7 +1262,7 @@ def _queue_capture_choice_decision(
         'has_charges': bool(ability.get('has_charges')),
         'use_full_restore': use_full_restore,
         'original_capture_action': copy.deepcopy(pending_capture_action),
-        'prompt': f'{pokemon_name} pode usar {ability_name}. Escolha o resultado do dado de captura:',
+        'prompt': prompt,
         'options': options,
         'allowed_actions': ['resolve_pending_action'],
     })
@@ -3650,23 +3663,6 @@ def _find_available_event_copy_holder(player: dict) -> tuple[str, dict, dict] | 
     return None
 
 
-def _is_supported_immediate_event_copy(card: dict, result: dict) -> bool:
-    effect = result.get('effect')
-    effect_type = event_card_effect_type(card)
-    if effect in {
-        'capture_attempt',
-        'gift_pokemon_choice',
-        'teleporter_choice',
-        'mr_fuji_choice',
-        'oak_assistant_choice',
-        'trainer_battle',
-    }:
-        return False
-    if effect_type in {'move_backward_trigger', 'move_forward_trigger', 'all_discard_item'}:
-        return False
-    if result.get('category') == 'special_event' and effect == 'gift_pokemon_from_area':
-        return False
-    return True
 
 
 def _queue_next_event_copy_offer(state: dict) -> bool:
@@ -3767,23 +3763,6 @@ def _resolve_event_copy_decision(
     if not ability or (ability.get('has_charges') and int(ability.get('charges_remaining') or 0) <= 0):
         return None, 'Esta habilidade não possui cargas restantes'
 
-    trial_state = copy.deepcopy(state)
-    trial_state, result = apply_event_effect(trial_state, player_id, card)
-    if not _is_supported_immediate_event_copy(card, result):
-        _log_warning(
-            state,
-            player['name'],
-            f"a cópia de {card.get('title', 'Evento')} por {holder_name} exige um subtipo de resolução fora de turno que a engine ainda não suporta",
-        )
-        _queue_next_event_copy_offer(state)
-        return state, {
-            'type': 'event_copy_decision',
-            'used': False,
-            'pokemon': holder_name,
-            'card_title': card.get('title'),
-            'unsupported_copy': True,
-        }
-
     adjust_primary_ability_charges(pokemon, -1)
     state, result = apply_event_effect(state, player_id, card)
     state = _handle_event_result_followups(state, player_id, card, result)
@@ -3792,7 +3771,9 @@ def _resolve_event_copy_decision(
         player['name'],
         f"{holder_name} copiou {card.get('title', 'Evento')} -> {_describe_card_result_for_log(result)}.",
     )
-    _queue_next_event_copy_offer(state)
+    # Only advance the copy queue if no new pending action was created by the copied event
+    if not state['turn'].get('pending_action'):
+        _queue_next_event_copy_offer(state)
     return state, {
         'type': 'event_copy_decision',
         'used': True,
@@ -5841,21 +5822,16 @@ def _handle_torrent(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
 # Para adicionar uma nova habilidade: crie _handle_xxx acima e registre aqui.
 _ACTIVE_ABILITY_HANDLERS: dict[str, callable] = {
     'hurricane':      _handle_hurricane,
-    'extreme_speed':  _handle_extreme_speed,
-    'flash_fire':     _handle_extreme_speed,   # Growlithe: mesma lógica do Extreme Speed
     'teleport':       _handle_teleport,
     'water_gun':      _handle_water_gun,
     'hydro_pump':     _handle_hydro_pump,
     'compound_eyes':  _handle_compound_eyes,
     'run_away':       _handle_run_away,
-    'psychic':        _handle_psychic,
-    'psybeam':        _handle_psybeam,
     'static':         _handle_move_3,
     'thunder':        _handle_move_3,
     'move_3':         _handle_move_3,          # Pichu: ability slug 'Move 3'
     'torrent':        _handle_torrent,
     'volt_absorb':    _handle_move_2,          # Jolteon: mover 2 casas
-    'synchronize':    _handle_move_1,          # Mew: mover 1 casa
 }
 
 
@@ -6091,6 +6067,189 @@ def use_pokemon_ability(
             'ability_name': ability_name,
             'effect_kind': effect_kind,
             'awaiting_target': True,
+        }
+
+    if effect_kind == 'advance_after_landing':
+        if state['turn'].get('phase') != 'action':
+            return None, 'Use após cair em uma casa (fase de ação)'
+        board_data = state.get('board', {})
+        old_pos = player['position']
+        new_pos = calculate_new_position(old_pos, 1, board_data)
+        player['position'] = new_pos
+        tile = get_tile(board_data, new_pos)
+        effect = get_tile_effect(tile)
+        state['turn']['pending_pokemon'] = None
+        state['turn']['pending_action'] = None
+        state['turn']['capture_context'] = None
+        state['turn']['current_tile'] = tile
+        mark_primary_ability_used(pokemon, scope='turn', consume_charge=consume_charge)
+        _log(state, player['name'],
+             f'Usou {ability_name} de {pokemon_name}! Avançou para a próxima casa: {tile["name"]}')
+        if _handle_pokecenter_pass_through(
+            state, player_id,
+            start_position=old_pos, end_position=new_pos,
+            final_tile=tile, final_effect=effect,
+        ):
+            return state, {
+                'type': 'manual_pokemon_ability',
+                'pokemon': pokemon_name,
+                'ability_name': ability_name,
+                'effect_kind': effect_kind,
+                'new_position': new_pos,
+            }
+        state = _resolve_tile_effect(state, player_id, tile, effect)
+        return state, {
+            'type': 'manual_pokemon_ability',
+            'pokemon': pokemon_name,
+            'ability_name': ability_name,
+            'effect_kind': effect_kind,
+            'new_position': new_pos,
+        }
+
+    if effect_kind == 'targeted_move':
+        mode = (action.get('params') or {}).get('mode')
+        if mode == 'player_teleport':
+            forward_only = bool((action.get('params') or {}).get('forward_only', False))
+            max_steps = (action.get('params') or {}).get('max_steps')
+            current_pos = player['position']
+            other_players = [
+                p for p in state.get('players', [])
+                if p.get('is_active') and p['id'] != player_id
+            ]
+            if forward_only:
+                other_players = [p for p in other_players if p['position'] > current_pos]
+            if max_steps is not None:
+                other_players = [p for p in other_players if abs(p['position'] - current_pos) <= int(max_steps)]
+            if not other_players:
+                return None, 'Não há jogadores elegíveis para se mover'
+            options = [
+                {'id': p['id'], 'label': f"Posição de {p['name']} (casa {p['position']})"}
+                for p in other_players
+            ]
+            _set_pending_action(state, {
+                'type': 'alakazam_teleport_choice',
+                'player_id': player_id,
+                'slot_key': slot_key,
+                'ability_name': ability_name,
+                'has_charges': consume_charge,
+                'prompt': f'{pokemon_name} pode teletransportar para a posição de outro jogador:',
+                'options': options,
+                'allowed_actions': ['resolve_pending_action'],
+            })
+            return state, {
+                'type': 'manual_pokemon_ability',
+                'pokemon': pokemon_name,
+                'ability_name': ability_name,
+                'effect_kind': effect_kind,
+                'awaiting_target': True,
+            }
+        if mode == 'backward_event_tile':
+            board_data = state.get('board', {})
+            current_pos = player['position']
+            target_pos = None
+            for pos in range(current_pos - 1, -1, -1):
+                candidate = get_tile(board_data, pos)
+                if candidate.get('type') == 'event':
+                    target_pos = pos
+                    break
+            if target_pos is None:
+                return None, 'Não há casa de evento atrás da sua posição atual'
+            old_pos = current_pos
+            player['position'] = target_pos
+            tile = get_tile(board_data, target_pos)
+            effect = get_tile_effect(tile)
+            state['turn']['dice_result'] = target_pos
+            state['turn']['current_tile'] = tile
+            mark_primary_ability_used(pokemon, scope='turn', consume_charge=consume_charge)
+            _log(state, player['name'],
+                 f'Usou {ability_name} de {pokemon_name}! Voltou para a casa de evento mais próxima: {tile["name"]} (posição {target_pos})')
+            state = _resolve_tile_effect(state, player_id, tile, effect)
+            return state, {
+                'type': 'manual_pokemon_ability',
+                'pokemon': pokemon_name,
+                'ability_name': ability_name,
+                'effect_kind': effect_kind,
+                'target_position': target_pos,
+            }
+        return None, 'Modo de movimento direcionado não suportado'
+
+    if effect_kind == 'draw_victory':
+        if (action.get('params') or {}).get('after_duel_loss'):
+            return None, 'Esta habilidade é ativada automaticamente após perder um duelo'
+        mark_primary_ability_used(pokemon, scope='turn', consume_charge=consume_charge)
+        _log(state, player['name'], f'Usou {ability_name} de {pokemon_name}! Comprando carta de vitória.')
+        state = _award_victory_cards(state, player_id, 1, source='pokemon_ability')
+        return state, {
+            'type': 'manual_pokemon_ability',
+            'pokemon': pokemon_name,
+            'ability_name': ability_name,
+            'effect_kind': effect_kind,
+        }
+
+    if effect_kind == 'draw_event':
+        from_discard = bool((action.get('params') or {}).get('from_discard', False))
+        if from_discard:
+            event_tile_only = bool((action.get('params') or {}).get('event_tile_only', False))
+            if event_tile_only and (state['turn'].get('current_tile') or {}).get('type') != 'event':
+                return None, 'Quagsire só pode usar esta habilidade em uma casa de evento'
+            discard_pile = state.get('decks', {}).get('event_discard', [])
+            if not discard_pile:
+                return None, 'O descarte de eventos está vazio'
+            top_card = discard_pile[-1]
+            state['decks']['event_discard'] = discard_pile[:-1]
+            mark_primary_ability_used(pokemon, scope='turn', consume_charge=consume_charge)
+            reveal_card(state, player_id, top_card, 'event', resolved=True)
+            state.setdefault('consumed', {}).setdefault('events', []).append(top_card.get('id'))
+            state, result = apply_event_effect(state, player_id, top_card)
+            state['decks']['event_discard'] = append_to_discard(state['decks']['event_discard'], top_card)
+            _log(state, player['name'],
+                 f'Usou {ability_name} de {pokemon_name}! Comprou carta do descarte de eventos: {_describe_card_for_log(top_card)}')
+            state = _handle_event_result_followups(state, player_id, top_card, result)
+            return state, {
+                'type': 'manual_pokemon_ability',
+                'pokemon': pokemon_name,
+                'ability_name': ability_name,
+                'effect_kind': effect_kind,
+                'card': top_card,
+            }
+        else:
+            mark_primary_ability_used(pokemon, scope='turn', consume_charge=consume_charge)
+            _log(state, player['name'], f'Usou {ability_name} de {pokemon_name}! Comprando carta de evento.')
+            state = _draw_event_cards(state, player_id, 1, source='pokemon_ability')
+            return state, {
+                'type': 'manual_pokemon_ability',
+                'pokemon': pokemon_name,
+                'ability_name': ability_name,
+                'effect_kind': effect_kind,
+            }
+
+    if effect_kind == 'event_peek':
+        event_deck = state.get('decks', {}).get('event_deck', [])
+        event_discard = state.get('decks', {}).get('event_discard', [])
+        peek_card = event_deck[0] if event_deck else (event_discard[-1] if event_discard else None)
+        _log(state, player['name'], f'Usou {ability_name} de {pokemon_name}! Espreitou o topo da pilha de eventos.')
+        return state, {
+            'type': 'manual_pokemon_ability',
+            'pokemon': pokemon_name,
+            'ability_name': ability_name,
+            'effect_kind': effect_kind,
+            'peek_card': peek_card,
+        }
+
+    if effect_kind == 'area_capture_free':
+        tile = state['turn'].get('current_tile') or get_tile(state['board'], player.get('position', 0))
+        if not tile:
+            return None, 'Não foi possível determinar a casa atual'
+        if not tile.get('data', {}).get('encounters'):
+            return None, 'Não há Pokémon disponíveis para captura nesta área'
+        mark_primary_ability_used(pokemon, scope='turn', consume_charge=consume_charge)
+        _log(state, player['name'], f'Usou {ability_name} de {pokemon_name}! Iniciando captura de Pokémon da área atual.')
+        state = _queue_board_encounter(state, player_id, tile, 'aerodactyl_ability')
+        return state, {
+            'type': 'manual_pokemon_ability',
+            'pokemon': pokemon_name,
+            'ability_name': ability_name,
+            'effect_kind': effect_kind,
         }
 
     return None, 'Esta ação de habilidade ainda não foi implementada com segurança'
@@ -7023,6 +7182,46 @@ def skip_action(state: dict, player_id: str) -> dict:
     return end_turn(state)
 
 
+def _resolve_alakazam_teleport_choice(
+    state: dict,
+    player_id: str,
+    pending_action: dict,
+    chosen: dict,
+) -> tuple[dict | None, str | dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+    target_id = chosen.get('id')
+    target = _get_player(state, target_id)
+    if not target or not target.get('is_active') or target_id == player_id:
+        return None, 'Alvo inválido'
+    board_data = state.get('board', {})
+    old_pos = player['position']
+    target_pos = target['position']
+    player['position'] = target_pos
+    tile = get_tile(board_data, target_pos)
+    effect = get_tile_effect(tile)
+    state['turn']['dice_result'] = target_pos
+    state['turn']['current_tile'] = tile
+    slot_key = pending_action.get('slot_key')
+    ability_name = pending_action.get('ability_name', 'Psychic')
+    pokemon = _get_player_pokemon_slot(player, slot_key)
+    if pokemon:
+        sync_pokemon_ability_state(pokemon)
+        mark_primary_ability_used(pokemon, scope='turn', consume_charge=bool(pending_action.get('has_charges')))
+    _clear_pending_action(state)
+    _log(state, player['name'],
+         f'Usou {ability_name}! Teletransportou para a posição de {target["name"]}: {tile["name"]}')
+    if _handle_pokecenter_pass_through(
+        state, player_id,
+        start_position=old_pos, end_position=target_pos,
+        final_tile=tile, final_effect=effect,
+    ):
+        return state, {'type': 'alakazam_teleport', 'target_id': target_id, 'new_position': target_pos}
+    state = _resolve_tile_effect(state, player_id, tile, effect)
+    return state, {'type': 'alakazam_teleport', 'target_id': target_id, 'new_position': target_pos}
+
+
 def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple[dict | None, str | dict]:
     state = copy.deepcopy(state)
     player = _get_player(state, player_id)
@@ -7057,6 +7256,7 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
         'knockout_redirect_decision',
         'wobbuffet_counter_decision',
         'trainer_repeat_decision',
+        'alakazam_teleport_choice',
     ):
         return None, 'Nenhuma escolha pendente'
     if pending_action.get('player_id') != player_id:
@@ -7095,6 +7295,9 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
 
     if pending_type == 'mewtwo_clone_choice':
         return _resolve_mewtwo_clone_choice(state, player_id, pending_action, chosen)
+
+    if pending_type == 'alakazam_teleport_choice':
+        return _resolve_alakazam_teleport_choice(state, player_id, pending_action, chosen)
 
     if pending_type == 'raikou_victory_bonus':
         return _resolve_raikou_victory_bonus_action(state, player_id, pending_action, chosen)
@@ -8804,11 +9007,6 @@ def _apply_post_battle_effects(
             _log(state, winner['name'],
                  f"Hyper Voice: {loser['name']} é imune ao recuo (Rock Head)!")
 
-    # ── Dynamic Punch: perdedor perde 1 item ────────────────────────────────
-    # Pendente: sistema de itens (ItemCard) não implementado ainda
-    elif winner_effect == 'dynamic_punch':
-        _log(state, winner['name'],
-             f"Dynamic Punch: {loser['name']} perdeu 1 item! (sistema de itens pendente)")
 
 
 def _knock_out_player_slot_with_log(state: dict, player: dict, slot_key: str | None) -> dict | None:
@@ -8848,6 +9046,13 @@ def _finalize_player_duel_outcome(
     state['turn']['phase'] = 'end'
     state = _award_victory_cards(state, winner['id'], 1, source='duel')
 
+    # Dewgong / Seel: consolation victory card after losing a duel
+    _loser_desc = (loser_pokemon.get('ability_description') or '').lower()
+    if 'take a victory card after losing a duel' in _loser_desc:
+        state = _award_victory_cards(state, loser['id'], 1, source='consolation_duel_loss')
+        _log(state, loser['name'],
+             f"{loser_pokemon.get('name')} usou sua habilidade de consolação e comprou uma carta de vitória após perder o duelo.")
+
     _apply_post_battle_effects(state, winner, loser, winner_pokemon, loser_pokemon)
     _queue_item_choice(state, winner['id'], 'Efeito de batalha')
 
@@ -8866,6 +9071,26 @@ def _finalize_player_duel_outcome(
         'recovery_pending': False,
         'turn_ended': False,
     }
+    # Vaporeon: when KO'd in battle, may heal one other pokémon (once per battle)
+    if knocked_out and knocked_out.get('name') == 'Vaporeon' and _player_has_any_conscious_pokemon(loser):
+        _vaporeon_heal_options = _build_heal_other_options(loser, loser_slot)
+        if _vaporeon_heal_options:
+            _set_pending_action(state, {
+                'type': 'heal_other_choice',
+                'player_id': loser['id'],
+                'healer_slot_key': loser_slot,
+                'healer_name': 'Vaporeon',
+                'ability_name': loser_pokemon.get('ability') or 'Hydration',
+                'heal_limit': 1,
+                'remaining_heals': 1,
+                'healed_pokemon_names': [],
+                'has_charges': False,
+                'prompt': 'Vaporeon foi nocauteado! Você pode curar um dos seus outros Pokémon.',
+                'options': _vaporeon_heal_options,
+                'allowed_actions': ['resolve_pending_action'],
+            })
+            return_data['recovery_pending'] = True
+
     if not _player_has_any_conscious_pokemon(loser):
         state, return_data = _handle_total_knockout_recovery(
             state,

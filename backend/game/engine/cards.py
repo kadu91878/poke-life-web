@@ -129,8 +129,6 @@ def _metadata_to_pokemon(card: dict) -> dict:
     if 'cannot battle' in ability_description.lower():
         can_battle = False
     battle_effect = card.get('engine_battle_effect') or card.get('battle_effect')
-    if not battle_effect and 'total battle outcomes are always increased by 8' in ability_description.lower():
-        battle_effect = 'battle_plus_8'
     return {
         'id': card.get('id') or raw_name.lower().replace(' ', '_'),
         'pokedex_id': card.get('engine_pokedex_id'),

@@ -75,7 +75,7 @@
       "engine_types": [
         "psychic"
       ],
-      "engine_ability_name": "Psychic",
+      "engine_ability_name": null,
       "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
@@ -155,7 +155,7 @@
       "engine_types": [
         "fire"
       ],
-      "engine_ability_name": "Extreme Speed",
+      "engine_ability_name": null,
       "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
@@ -184,8 +184,8 @@
         "ice",
         "flying"
       ],
-      "engine_ability_name": "Pressure",
-      "engine_battle_effect": "pressure",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": true,
       "engine_is_baby": false,
       "engine_rarity": "legendary",
@@ -468,8 +468,8 @@
         "fire",
         "flying"
       ],
-      "engine_ability_name": "Inferno",
-      "engine_battle_effect": "earthquake",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "epic",
@@ -524,8 +524,8 @@
       "engine_types": [
         "fire"
       ],
-      "engine_ability_name": "Slash",
-      "engine_battle_effect": "critical_hit",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "rare",
@@ -790,8 +790,8 @@
       "engine_types": [
         "normal"
       ],
-      "engine_ability_name": "Transform",
-      "engine_battle_effect": "transform",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "rare",
@@ -899,8 +899,8 @@
         "dragon",
         "flying"
       ],
-      "engine_ability_name": "Multiscale",
-      "engine_battle_effect": "multiscale",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "legendary",
@@ -927,8 +927,8 @@
       "engine_types": [
         "dragon"
       ],
-      "engine_ability_name": "Shed Skin",
-      "engine_battle_effect": "shed_skin",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "rare",
@@ -1086,7 +1086,7 @@
       "source_image_path": "/home/kadu/Projetos/split-assets/pokemon_cards_split/electabuzz.png",
       "engine_types": [],
       "engine_ability_name": "none",
-      "engine_battle_effect": null,
+      "engine_battle_effect": "battle_plus_8",
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "unknown",
@@ -1321,8 +1321,8 @@
       "engine_types": [
         "fire"
       ],
-      "engine_ability_name": "Flash Fire",
-      "engine_battle_effect": "earthquake",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "epic",
@@ -1405,8 +1405,8 @@
         "ghost",
         "poison"
       ],
-      "engine_ability_name": "Shadow Ball",
-      "engine_battle_effect": "shadow_ball",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "epic",
@@ -1434,7 +1434,7 @@
         "rock",
         "ground"
       ],
-      "engine_ability_name": "Rock Head",
+      "engine_ability_name": "none",
       "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
@@ -1599,8 +1599,8 @@
         "rock",
         "ground"
       ],
-      "engine_ability_name": "Earthquake",
-      "engine_battle_effect": "earthquake",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "epic",
@@ -1708,7 +1708,7 @@
       "engine_types": [
         "fire"
       ],
-      "engine_ability_name": "Flash Fire",
+      "engine_ability_name": null,
       "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
@@ -1737,8 +1737,8 @@
         "water",
         "flying"
       ],
-      "engine_ability_name": "Intimidate",
-      "engine_battle_effect": "intimidate",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "legendary",
@@ -1766,8 +1766,8 @@
         "ghost",
         "poison"
       ],
-      "engine_ability_name": "Curse",
-      "engine_battle_effect": "curse",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "rare",
@@ -2009,8 +2009,8 @@
         "normal",
         "fairy"
       ],
-      "engine_ability_name": "Cute Charm",
-      "engine_battle_effect": "cute_charm_battle",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "common",
@@ -2037,8 +2037,8 @@
       "engine_types": [
         "electric"
       ],
-      "engine_ability_name": "Volt Absorb",
-      "engine_battle_effect": "critical_hit",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "epic",
@@ -2117,8 +2117,8 @@
       "engine_types": [
         "psychic"
       ],
-      "engine_ability_name": "Psybeam",
-      "engine_battle_effect": "critical_hit",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "rare",
@@ -2313,8 +2313,8 @@
       "engine_types": [
         "fighting"
       ],
-      "engine_ability_name": "Dynamic Punch",
-      "engine_battle_effect": "dynamic_punch",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "epic",
@@ -2341,8 +2341,8 @@
       "engine_types": [
         "fighting"
       ],
-      "engine_ability_name": "No Guard",
-      "engine_battle_effect": "earthquake",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "uncommon",
@@ -2637,8 +2637,8 @@
       "engine_types": [
         "psychic"
       ],
-      "engine_ability_name": "Synchronize",
-      "engine_battle_effect": "synchronize",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": true,
       "engine_is_baby": false,
       "engine_rarity": "legendary",
@@ -2666,8 +2666,8 @@
       "engine_types": [
         "psychic"
       ],
-      "engine_ability_name": "Pressure",
-      "engine_battle_effect": "pressure_max",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": true,
       "engine_is_baby": false,
       "engine_rarity": "legendary",
@@ -2695,8 +2695,8 @@
         "fire",
         "flying"
       ],
-      "engine_ability_name": "Flame Body",
-      "engine_battle_effect": "flame_body",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": true,
       "engine_is_baby": false,
       "engine_rarity": "legendary",
@@ -3161,8 +3161,8 @@
       "engine_types": [
         "normal"
       ],
-      "engine_ability_name": "Slash",
-      "engine_battle_effect": "critical_hit",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "rare",
@@ -3322,8 +3322,8 @@
       "engine_types": [
         "electric"
       ],
-      "engine_ability_name": "Static",
-      "engine_battle_effect": "critical_hit",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "rare",
@@ -3586,8 +3586,8 @@
       "engine_types": [
         "electric"
       ],
-      "engine_ability_name": "Thunder",
-      "engine_battle_effect": "earthquake",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "epic",
@@ -3666,8 +3666,8 @@
       "engine_types": [
         "normal"
       ],
-      "engine_ability_name": "Super Fang",
-      "engine_battle_effect": "super_fang",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "uncommon",
@@ -3694,7 +3694,7 @@
       "engine_types": [
         "normal"
       ],
-      "engine_ability_name": "Run Away",
+      "engine_ability_name": "none",
       "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
@@ -3986,8 +3986,8 @@
       "engine_types": [
         "normal"
       ],
-      "engine_ability_name": "Thick Fat",
-      "engine_battle_effect": "thick_fat",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "epic",
@@ -4406,7 +4406,7 @@
       "engine_types": [
         "water"
       ],
-      "engine_ability_name": "Water Veil",
+      "engine_ability_name": "none",
       "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
@@ -4487,8 +4487,8 @@
         "grass",
         "poison"
       ],
-      "engine_ability_name": "Solar Beam",
-      "engine_battle_effect": "solar_beam",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "epic",
@@ -4739,8 +4739,8 @@
         "normal",
         "fairy"
       ],
-      "engine_ability_name": "Hyper Voice",
-      "engine_battle_effect": "hyper_voice",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": false,
       "engine_is_baby": false,
       "engine_rarity": "rare",
@@ -4846,8 +4846,8 @@
         "electric",
         "flying"
       ],
-      "engine_ability_name": "Static",
-      "engine_battle_effect": "static_zapdos",
+      "engine_ability_name": null,
+      "engine_battle_effect": null,
       "engine_is_legendary": true,
       "engine_is_baby": false,
       "engine_rarity": "legendary",
