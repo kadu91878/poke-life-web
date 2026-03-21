@@ -2436,7 +2436,8 @@ class TestRemainingSpecialTiles(TestCase):
     def test_safari_zone_offers_capture_for_displayed_pokemon(self):
         state, p1_id, _ = self._ready_state()
 
-        state = _land_on_tile(state, p1_id, 96)
+        # Tile 96 (safari_index=0) é a entrada sem captura; tile 97 é o primeiro tile de captura (Tauros)
+        state = _land_on_tile(state, p1_id, 97)
 
         self.assertEqual(state['turn']['pending_action']['type'], 'capture_attempt')
         self.assertEqual(state['turn']['capture_context'], 'safari')
@@ -2445,7 +2446,12 @@ class TestRemainingSpecialTiles(TestCase):
     def test_safari_zone_exit_returns_player_to_house(self):
         state, p1_id, _ = self._ready_state()
 
+        # Tile 105 (safari_index=9) é Venomoth + saída; ao pular a captura o jogador volta à entrada
         state = _land_on_tile(state, p1_id, 105)
+        self.assertEqual(state['turn']['pending_action']['type'], 'capture_attempt')
+        self.assertEqual(state['turn']['pending_pokemon']['name'], 'Venomoth')
+
+        state = engine.skip_action(state, p1_id)
 
         self.assertEqual(self._player(state, p1_id)['position'], 96)
 

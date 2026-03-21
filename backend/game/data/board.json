@@ -1429,7 +1429,7 @@
       "description": "Espaco de Vermillion City.",
       "data": {
         "encounters": [
-           {
+          {
             "roll": [
               1,
               4
@@ -1717,7 +1717,7 @@
       "description": "Area de captura em Celadon / Bicycle Bridge / Route 1 com encontros definidos pelo tabuleiro Kanto.",
       "data": {
         "encounters": [
-         {
+          {
             "roll": [
               2
             ],
@@ -1856,7 +1856,7 @@
       "description": "Area de captura em Celadon / Bicycle Bridge / Route 1 com encontros definidos pelo tabuleiro Kanto.",
       "data": {
         "encounters": [
-         {
+          {
             "roll": [
               2
             ],
@@ -1991,8 +1991,10 @@
       "data": {
         "special_effect": "safari_zone",
         "safari_index": 0,
-        "displayed_pokemon_name": "Tauros",
-        "return_to_tile_id": 96
+        "displayed_pokemon_name": null,
+        "return_to_tile_id": 96,
+        "is_entrance": true,
+        "allowed_rolls": null
       }
     },
     {
@@ -2004,7 +2006,15 @@
         "special_effect": "safari_zone",
         "safari_index": 1,
         "displayed_pokemon_name": "Tauros",
-        "return_to_tile_id": 96
+        "return_to_tile_id": 96,
+        "allowed_rolls": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
       }
     },
     {
@@ -2016,7 +2026,11 @@
         "special_effect": "safari_zone",
         "safari_index": 2,
         "displayed_pokemon_name": "Exeggcute",
-        "return_to_tile_id": 96
+        "return_to_tile_id": 96,
+        "allowed_rolls": [
+          1,
+          2
+        ]
       }
     },
     {
@@ -2028,7 +2042,15 @@
         "special_effect": "safari_zone",
         "safari_index": 3,
         "displayed_pokemon_name": "Tauros",
-        "return_to_tile_id": 96
+        "return_to_tile_id": 96,
+        "allowed_rolls": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
       }
     },
     {
@@ -2040,7 +2062,11 @@
         "special_effect": "safari_zone",
         "safari_index": 4,
         "displayed_pokemon_name": "Cubone",
-        "return_to_tile_id": 96
+        "return_to_tile_id": 96,
+        "allowed_rolls": [
+          4,
+          5
+        ]
       }
     },
     {
@@ -2052,7 +2078,11 @@
         "special_effect": "safari_zone",
         "safari_index": 5,
         "displayed_pokemon_name": "Paras",
-        "return_to_tile_id": 96
+        "return_to_tile_id": 96,
+        "allowed_rolls": [
+          3,
+          4
+        ]
       }
     },
     {
@@ -2064,7 +2094,12 @@
         "special_effect": "safari_zone",
         "safari_index": 6,
         "displayed_pokemon_name": "Beedrill",
-        "return_to_tile_id": 96
+        "return_to_tile_id": 96,
+        "allowed_rolls": [
+          4,
+          5,
+          6
+        ]
       }
     },
     {
@@ -2076,7 +2111,11 @@
         "special_effect": "safari_zone",
         "safari_index": 7,
         "displayed_pokemon_name": "Zubat",
-        "return_to_tile_id": 96
+        "return_to_tile_id": 96,
+        "allowed_rolls": [
+          2,
+          3
+        ]
       }
     },
     {
@@ -2088,7 +2127,10 @@
         "special_effect": "safari_zone",
         "safari_index": 8,
         "displayed_pokemon_name": "Chansey",
-        "return_to_tile_id": 96
+        "return_to_tile_id": 96,
+        "allowed_rolls": [
+          6
+        ]
       }
     },
     {
@@ -2101,7 +2143,12 @@
         "safari_index": 9,
         "displayed_pokemon_name": "Venomoth",
         "is_exit": true,
-        "return_to_tile_id": 96
+        "return_to_tile_id": 96,
+        "allowed_rolls": [
+          1,
+          2,
+          3
+        ]
       }
     },
     {
