@@ -127,6 +127,7 @@ def decide_action(state: dict, cpu_player_id: str) -> list[tuple[str, dict]]:
     if pending_item_choice and pending_item_choice.get('player_id') == cpu_player_id:
         return _decide_item_discard(player)
 
+    # ── Pending action owned by this CPU (may happen off-turn) ────────────
     pending_action = turn.get('pending_action')
     if pending_action and pending_action.get('player_id') == cpu_player_id:
         return _decide_pending(cpu_player_id, player, pending_action, turn)

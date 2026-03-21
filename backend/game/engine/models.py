@@ -22,6 +22,7 @@ SCORE_EFFECTS = frozenset({
     'critical_hit',     # rola dado extra, usa maior
     'earthquake',       # +1x BP de bônus
     'swift',            # +2 flat ao score
+    'battle_plus_8',    # +8 flat ao score total
     'shadow_ball',      # critical_hit + pós-batalha: perdedor perde 1 FR
     'flame_body',       # earthquake + pós-batalha: perdedor perde 1 FR
     'static_zapdos',    # critical_hit com 2 dados extras

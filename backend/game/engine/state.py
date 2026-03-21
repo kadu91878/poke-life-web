@@ -88,6 +88,7 @@ from .mechanics import (
     can_evolve,
     resolve_duel,
     resolve_elite_four,
+    roll_dice,
     roll_battle_dice,
     roll_capture_dice,
     roll_game_corner_dice,
@@ -177,6 +178,8 @@ _CARD_EFFECT_LOG_LABELS = {
     'trainer_battle': 'batalha de treinador',
     'capture_attempt': 'tentativa de captura',
     'gift_pokemon_choice': 'escolha de presente',
+    'reward_pokemon': 'recompensa de Pokémon',
+    'lucky_jynx_joke': 'sem efeito (Lucky Jynx)',
 }
 _FORCED_STOP_LOG_LABELS = {
     'team_rocket': 'Equipe Rocket',
@@ -781,6 +784,8 @@ def _iter_player_battle_slots(player: dict, *, include_knocked_out: bool = True)
 def _build_player_battle_pool(player: dict, *, include_knocked_out: bool = True) -> list[dict]:
     pool: list[dict] = []
     for slot_key, pokemon in _iter_player_battle_slots(player, include_knocked_out=include_knocked_out):
+        if not _pokemon_can_battle(pokemon):
+            continue
         candidate = copy.deepcopy(pokemon)
         candidate['battle_slot_key'] = slot_key
         candidate['types'] = [str(poke_type).title() for poke_type in candidate.get('types', [])]
@@ -908,7 +913,110 @@ def _get_trade_eligible_target_ids(state: dict, player_id: str) -> list[str]:
             eligible_ids.append(target['id'])
     return eligible_ids
 
+def _is_valid_mewtwo_clone_target(pokemon: dict | None, *, slot_key: str | None = None) -> bool:
+    if not isinstance(pokemon, dict):
+        return False
+    if slot_key == 'starter':
+        return False
+    if pokemon.get('acquisition_origin') == 'starter':
+        return False
+    if pokemon.get('is_starter'):
+        return False
+    if pokemon.get('is_legendary'):
+        return False
 
+    pokemon_name = str(pokemon.get('name') or '').strip()
+    if not pokemon_name:
+        return False
+    base_card = load_playable_pokemon_by_name(pokemon_name)
+    if not isinstance(base_card, dict):
+        return False
+    if base_card.get('is_starter') or base_card.get('is_legendary'):
+        return False
+    return True
+
+
+def _build_mewtwo_clone_options(state: dict, player_id: str) -> list[dict]:
+    options: list[dict] = []
+    for target_player in state.get('players', []):
+        if not target_player.get('is_active', True):
+            continue
+        for slot_key, pokemon in _iter_player_battle_slots(target_player, include_knocked_out=True):
+            if not _is_valid_mewtwo_clone_target(pokemon, slot_key=slot_key):
+                continue
+
+            owner_name = target_player.get('name', 'Jogador')
+            pokemon_name = pokemon.get('name', slot_key)
+            label = f'Clonar {pokemon_name} de {owner_name}'
+            if pokemon.get('knocked_out'):
+                label = f'{label} [KO]'
+
+            options.append({
+                'id': f"clone:{target_player.get('id')}:{slot_key}",
+                'label': label,
+                'target_player_id': target_player.get('id'),
+                'target_slot_key': slot_key,
+                'target_pokemon_name': pokemon_name,
+                'owner_name': owner_name,
+            })
+    return options
+
+
+def _pokemon_has_effect(pokemon: dict | None, effect_kind: str) -> bool:
+    if not isinstance(pokemon, dict):
+        return False
+    sync_pokemon_ability_state(pokemon)
+    return any(
+        _ability_supports_effect(ability, effect_kind)
+        for ability in (pokemon.get('abilities') or [])
+    )
+
+
+def _get_pokemon_effect_params(pokemon: dict | None, effect_kind: str) -> dict | None:
+    if not isinstance(pokemon, dict):
+        return None
+    sync_pokemon_ability_state(pokemon)
+    for ability in (pokemon.get('abilities') or []):
+        effect = _get_ability_effect(ability, effect_kind)
+        if effect:
+            return copy.deepcopy(effect.get('params') or {})
+    return None
+
+
+def _find_player_effect_holder(
+    player: dict,
+    effect_kind: str,
+    *,
+    include_knocked_out: bool = True,
+) -> tuple[str, dict] | None:
+    for slot_key, pokemon in _iter_player_battle_slots(player, include_knocked_out=include_knocked_out):
+        if _pokemon_has_effect(pokemon, effect_kind):
+            return slot_key, pokemon
+    return None
+
+
+def _player_has_alive_party_pokemon_with_effect(player: dict, effect_kind: str) -> tuple[str, dict] | None:
+    for index, pokemon in enumerate(player.get('pokemon') or []):
+        if pokemon.get('knocked_out'):
+            continue
+        if _pokemon_has_effect(pokemon, effect_kind):
+            return f'pokemon:{index}', pokemon
+    return None
+
+
+def _pokemon_can_battle(pokemon: dict | None) -> bool:
+    if not isinstance(pokemon, dict):
+        return False
+    if pokemon.get('can_battle') is False:
+        return False
+    return not _pokemon_has_effect(pokemon, 'cannot_battle')
+
+
+def _player_has_any_conscious_pokemon(player: dict) -> bool:
+    return any(
+        not pokemon.get('knocked_out')
+        for _, pokemon in _iter_player_battle_slots(player, include_knocked_out=True)
+    )
 def _update_last_movement_roll(
     state: dict,
     *,
@@ -930,6 +1038,16 @@ def _update_last_movement_roll(
     last_roll = state.get('turn', {}).get('last_roll')
     if isinstance(last_roll, dict) and last_roll.get('context') == 'movement':
         last_roll.update(payload)
+
+
+def _extract_moved_steps_from_turn(state: dict) -> int | None:
+    movement = state.get('turn', {}).get('movement_context') or {}
+    try:
+        start_position = int(movement.get('start_position'))
+        resolved_destination = int(movement.get('resolved_destination'))
+    except (TypeError, ValueError):
+        return None
+    return max(0, len(get_positions_between(start_position, resolved_destination)))
 
 
 def _queue_move_roll_ability_decision(
@@ -1264,6 +1382,28 @@ def _resolve_heal_other_choice(
     if not player:
         return None, 'Jogador não encontrado'
 
+    healer_slot_key = pending_action.get('healer_slot_key')
+    healer = _get_player_pokemon_slot(player, healer_slot_key)
+    ability_name = pending_action.get('ability_name', 'Habilidade')
+    healer_name = pending_action.get('healer_name', 'Pokémon')
+
+    if chosen.get('id') == 'stop':
+        healed_names = list(pending_action.get('healed_pokemon_names') or [])
+        _clear_pending_action(state)
+        _log(
+            state,
+            player['name'],
+            f'Encerrou {ability_name} de {healer_name} após curar {", ".join(healed_names)}.'
+            if healed_names
+            else f'Encerrou {ability_name} de {healer_name}.',
+        )
+        return state, {
+            'type': 'heal_other_choice',
+            'healer': healer_name,
+            'stopped': True,
+            'healed': healed_names,
+        }
+
     target_slot_key = chosen.get('slot_key') or chosen.get('id')
     target_poke = _get_player_pokemon_slot(player, target_slot_key)
     if not target_poke:
@@ -1271,25 +1411,288 @@ def _resolve_heal_other_choice(
     if not target_poke.get('knocked_out'):
         return None, 'Este Pokémon não está desmaiado'
 
-    healer_slot_key = pending_action.get('healer_slot_key')
-    healer = _get_player_pokemon_slot(player, healer_slot_key)
-    ability_name = pending_action.get('ability_name', 'Habilidade')
-    healer_name = pending_action.get('healer_name', 'Pokémon')
     target_name = target_poke.get('name', target_slot_key)
+    remaining_heals = max(0, int(pending_action.get('remaining_heals', 1) or 1))
+    healed_names = [*list(pending_action.get('healed_pokemon_names') or []), target_name]
 
     _heal_player_pokemon_slots(player, [target_slot_key])
-    if healer:
+    if healer and not pending_action.get('ability_consumed'):
         sync_pokemon_ability_state(healer)
-        mark_primary_ability_used(healer, scope='turn', consume_charge=False)
+        mark_primary_ability_used(healer, scope='turn', consume_charge=bool(pending_action.get('has_charges')))
     sync_player_inventory(player)
+    next_remaining = max(0, remaining_heals - 1)
+    next_options = _build_heal_other_options(
+        player,
+        healer_slot_key,
+        include_stop=bool(healed_names) and next_remaining > 0,
+    ) if next_remaining > 0 else []
+
+    if next_remaining > 0 and next_options:
+        _set_pending_action(state, {
+            **copy.deepcopy(pending_action),
+            'remaining_heals': next_remaining,
+            'healed_pokemon_names': healed_names,
+            'ability_consumed': True,
+            'options': next_options,
+            'prompt': f'{healer_name} pode curar até mais {next_remaining} Pokémon desmaiado(s):',
+        })
+        _log(state, player['name'], f'Usou {ability_name} de {healer_name} para curar {target_name}.')
+        return state, {
+            'type': 'heal_other_choice',
+            'healer': healer_name,
+            'healed': target_name,
+            'remaining_heals': next_remaining,
+            'awaiting_more_targets': True,
+        }
+
     _clear_pending_action(state)
-    _log(state, player['name'], f'Usou {ability_name} de {healer_name} para curar {target_name}.')
+    _log(
+        state,
+        player['name'],
+        f'Usou {ability_name} de {healer_name} para curar {", ".join(healed_names)}.',
+    )
     return state, {
         'type': 'heal_other_choice',
         'healer': healer_name,
-        'healed': target_name,
+        'healed': healed_names,
         'slot_key': target_slot_key,
     }
+
+
+def _resolve_evolve_other_choice(
+    state: dict,
+    player_id: str,
+    pending_action: dict,
+    chosen: dict,
+) -> tuple[dict | None, str | dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    target_slot_key = chosen.get('slot_key') or chosen.get('id')
+    target_poke = _get_player_pokemon_slot(player, target_slot_key)
+    if not target_poke:
+        return None, 'Pokémon alvo não encontrado'
+    if not can_evolve(target_poke):
+        return None, 'Este Pokémon não pode evoluir'
+
+    evolver_slot_key = pending_action.get('evolver_slot_key')
+    evolver = _get_player_pokemon_slot(player, evolver_slot_key)
+    ability_name = pending_action.get('ability_name', 'Habilidade')
+    evolver_name = pending_action.get('evolver_name', 'Pokémon')
+    target_name = target_poke.get('name', target_slot_key)
+
+    evolving = copy.deepcopy(target_poke)
+    evolving['battle_slot_key'] = target_slot_key
+    evolved = _try_evolve(state, player_id, evolving)
+    if not evolved:
+        return None, 'Não foi possível evoluir este Pokémon'
+
+    if evolver:
+        sync_pokemon_ability_state(evolver)
+        mark_primary_ability_used(evolver, scope='turn', consume_charge=bool(pending_action.get('has_charges')))
+    sync_player_inventory(player)
+    _clear_pending_action(state)
+    _log(state, player['name'], f'Usou {ability_name} de {evolver_name} para evoluir {target_name} para {evolved["name"]}.')
+    return state, {
+        'type': 'evolve_other_choice',
+        'evolver': evolver_name,
+        'pokemon': target_name,
+        'evolved_to': evolved['name'],
+        'slot_key': target_slot_key,
+    }
+
+
+def _resolve_mewtwo_clone_choice(
+    state: dict,
+    player_id: str,
+    pending_action: dict,
+    chosen: dict,
+) -> tuple[dict | None, str | dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    target_player_id = chosen.get('target_player_id')
+    target_slot_key = chosen.get('target_slot_key') or chosen.get('slot_key') or chosen.get('id')
+    target_player = _get_player(state, target_player_id)
+    if not target_player:
+        return None, 'Jogador do Pokémon alvo não encontrado'
+
+    target_pokemon = _get_player_pokemon_slot(target_player, target_slot_key)
+    if not _is_valid_mewtwo_clone_target(target_pokemon, slot_key=target_slot_key):
+        return None, 'Este Pokémon não pode ser clonado'
+
+    target_name = str(target_pokemon.get('name') or '').strip()
+    cloned_base = load_playable_pokemon_by_name(target_name)
+    if not isinstance(cloned_base, dict):
+        return None, 'Não foi possível clonar este Pokémon com segurança'
+
+    cloner_slot_key = pending_action.get('cloner_slot_key')
+    cloner = _get_player_pokemon_slot(player, cloner_slot_key)
+    ability_name = pending_action.get('ability_name', 'Habilidade')
+    cloner_name = pending_action.get('cloner_name', 'Pokémon')
+    owner_name = target_player.get('name', 'Jogador')
+
+    if cloner:
+        sync_pokemon_ability_state(cloner)
+        mark_primary_ability_used(cloner, scope='turn', consume_charge=bool(pending_action.get('has_charges')))
+
+    _clear_pending_action(state)
+    finalized, result = _grant_reward_pokemon(
+        state,
+        player_id,
+        copy.deepcopy(cloned_base),
+        source='mewtwo_clone',
+    )
+    if finalized is None:
+        return None, result
+
+    _log(finalized, player['name'], f'Usou {ability_name} de {cloner_name} para clonar {target_name} de {owner_name}.')
+    return finalized, {
+        'type': 'mewtwo_clone_choice',
+        'cloner': cloner_name,
+        'cloned_pokemon': target_name,
+        'source_player_id': target_player_id,
+        'source_player_name': owner_name,
+        'source_slot_key': target_slot_key,
+        **(result if isinstance(result, dict) else {}),
+    }
+
+
+def _finalize_pending_battle_outcome(
+    state: dict,
+    *,
+    battle: dict,
+    result: dict,
+    winner_is_challenger: bool,
+    knocked_out_slot: str | None = None,
+) -> tuple[dict | None, str | dict]:
+    mode = battle.get('mode', 'player')
+    if mode == 'player':
+        state, payload = _finalize_player_duel_outcome(
+            state,
+            battle,
+            result,
+            winner_is_challenger=winner_is_challenger,
+            knocked_out_slot=knocked_out_slot,
+        )
+        if battle.get('source') == _DEBUG_SHARED_BATTLE_SOURCE:
+            state = _restore_debug_shared_battle_state(state)
+            return state, payload
+        if state['turn'].get('phase') != 'battle' and not (
+            payload.get('recovery_pending') or payload.get('turn_ended')
+        ):
+            state = end_turn(state)
+        return state, payload
+
+    if mode == 'trainer':
+        return _finalize_trainer_battle_outcome(
+            state,
+            battle,
+            result,
+            player_wins=winner_is_challenger,
+            knocked_out_slot=knocked_out_slot,
+        )
+
+    if mode in ('gym', 'league'):
+        return _finalize_gym_round_outcome(
+            state,
+            battle,
+            result,
+            challenger_wins=winner_is_challenger,
+            knocked_out_slot=knocked_out_slot,
+        )
+
+    return None, 'Modo de batalha inválido para concluir a habilidade'
+
+
+def _resolve_knockout_redirect_decision(
+    state: dict,
+    player_id: str,
+    pending_action: dict,
+    chosen: dict,
+) -> tuple[dict | None, str | dict]:
+    battle = state['turn'].get('battle') or {}
+    result = copy.deepcopy(battle.get('pending_resolution_result') or {})
+    if not battle or not result:
+        return None, 'A batalha pendente não possui resolução para retomar'
+
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    protected_name = pending_action.get('protected_pokemon_name', 'Gengar')
+    protected_slot_key = pending_action.get('protected_slot_key')
+    _clear_pending_action(state)
+
+    knocked_out_slot = protected_slot_key
+    if chosen.get('id') != 'skip':
+        knocked_out_slot = chosen.get('slot_key') or chosen.get('id')
+        target = _get_player_pokemon_slot(player, knocked_out_slot)
+        if not target or target.get('knocked_out'):
+            return None, 'Pokémon inválido para redirecionar o nocaute'
+        _log(
+            state,
+            player['name'],
+            f"{protected_name} redirecionou o nocaute para {target.get('name', knocked_out_slot)}.",
+        )
+    else:
+        _log(state, player['name'], f'Decidiu não redirecionar o nocaute de {protected_name}.')
+
+    return _finalize_pending_battle_outcome(
+        state,
+        battle=battle,
+        result=result,
+        winner_is_challenger=bool(pending_action.get('winner_is_challenger')),
+        knocked_out_slot=knocked_out_slot,
+    )
+
+
+def _resolve_wobbuffet_counter_decision(
+    state: dict,
+    player_id: str,
+    pending_action: dict,
+    chosen: dict,
+) -> tuple[dict | None, str | dict]:
+    battle = state['turn'].get('battle') or {}
+    result = copy.deepcopy(battle.get('pending_resolution_result') or {})
+    if not battle or not result:
+        return None, 'A batalha pendente não possui resolução para retomar'
+
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    original_winner_is_challenger = bool(pending_action.get('winner_is_challenger'))
+    _clear_pending_action(state)
+
+    final_winner_is_challenger = original_winner_is_challenger
+    if chosen.get('id') == 'roll':
+        roll = roll_dice()
+        _record_roll(
+            state,
+            roll_type='habilidade',
+            player_id=player_id,
+            player_name=player['name'],
+            raw_result=roll,
+            final_result=roll,
+            context='wobbuffet',
+        )
+        if roll >= 4:
+            final_winner_is_challenger = (not original_winner_is_challenger) if battle.get('mode') == 'player' else True
+            _log(state, player['name'], f"Wobbuffet rolou {roll} e nocauteou o oponente no lugar dele mesmo.")
+        else:
+            _log(state, player['name'], f"Wobbuffet rolou {roll} e não conseguiu inverter o nocaute.")
+    else:
+        _log(state, player['name'], 'Decidiu não usar a habilidade de Wobbuffet.')
+
+    return _finalize_pending_battle_outcome(
+        state,
+        battle=battle,
+        result=result,
+        winner_is_challenger=final_winner_is_challenger,
+    )
 
 
 def _queue_battle_reroll_decision(
@@ -1559,6 +1962,76 @@ def _resolve_battle_bp_swap_decision(
     }
 
 
+def _resolve_trade_proposal(
+    state: dict,
+    player_id: str,
+    pending_action: dict,
+    chosen: dict,
+) -> tuple[dict | None, str | dict]:
+    proposer_id = pending_action.get('proposer_id')
+    proposer = _get_player(state, proposer_id)
+    target = _get_player(state, player_id)
+    if not proposer or not target:
+        return None, 'Jogador não encontrado'
+
+    offered_slot_key = str(pending_action.get('offered_slot_key') or '').strip()
+    offered_snapshot = pending_action.get('offered_pokemon') or {}
+    offered_name = offered_snapshot.get('name', offered_slot_key or 'Pokémon')
+
+    _clear_pending_action(state)
+
+    if chosen.get('id') == 'decline':
+        _log(
+            state,
+            target.get('name', 'Jogador'),
+            f"Recusou a troca proposta por {proposer.get('name', 'Jogador')} ({offered_name}).",
+        )
+        return state, {
+            'type': 'trade_proposal',
+            'accepted': False,
+            'proposer_id': proposer_id,
+            'target_player_id': player_id,
+            'offered_pokemon': offered_name,
+        }
+
+    requested_slot_key = str(chosen.get('slot_key') or chosen.get('id') or '').strip()
+    offered_live = _get_player_pokemon_slot(proposer, offered_slot_key)
+    requested_live = _get_player_pokemon_slot(target, requested_slot_key)
+    if not offered_live or not requested_live:
+        return None, 'Um dos Pokémon da troca não está mais disponível'
+    requested_name = requested_live.get('name', requested_slot_key or 'Pokémon')
+
+    proposer_free_slots = int(proposer.get('pokeballs', 0) or 0) + pokemon_slot_cost(offered_live) - pokemon_slot_cost(requested_live)
+    target_free_slots = int(target.get('pokeballs', 0) or 0) + pokemon_slot_cost(requested_live) - pokemon_slot_cost(offered_live)
+    if proposer_free_slots < 0 or target_free_slots < 0:
+        return None, 'A troca deixou um dos jogadores sem slots suficientes'
+
+    proposer_incoming = copy.deepcopy(requested_live)
+    target_incoming = copy.deepcopy(offered_live)
+    _set_player_pokemon_slot(proposer, offered_slot_key, proposer_incoming)
+    _set_player_pokemon_slot(target, requested_slot_key, target_incoming)
+    proposer['pokeballs'] = proposer_free_slots
+    target['pokeballs'] = target_free_slots
+    sync_player_inventory(proposer)
+    sync_player_inventory(target)
+
+    _log(
+        state,
+        proposer.get('name', 'Jogador'),
+        f"Trocou {offered_name} com {target.get('name', 'Jogador')} por {requested_name}.",
+    )
+    return state, {
+        'type': 'trade_proposal',
+        'accepted': True,
+        'proposer_id': proposer_id,
+        'target_player_id': player_id,
+        'proposer_name': proposer.get('name', 'Jogador'),
+        'target_name': target.get('name', 'Jogador'),
+        'offered_pokemon': offered_name,
+        'requested_pokemon': requested_name,
+    }
+
+
 def _resolve_abra_transfer_offer(
     state: dict,
     player_id: str,
@@ -1718,6 +2191,129 @@ def _set_pokemon_knocked_out(player: dict, slot_key: str | None, knocked_out: bo
     if pokemon is not None:
         pokemon['knocked_out'] = knocked_out
     return pokemon
+
+
+def _build_knockout_redirect_options(player: dict, protected_slot_key: str | None) -> list[dict]:
+    options: list[dict] = []
+    for slot_key, pokemon in _iter_player_battle_slots(player, include_knocked_out=False):
+        if slot_key == protected_slot_key:
+            continue
+        label = pokemon.get('name', slot_key)
+        if slot_key == 'starter':
+            label = f'{label} (Starter)'
+        options.append({
+            'id': slot_key,
+            'slot_key': slot_key,
+            'label': f'Nocautear {label} no lugar',
+            'pokemon_name': pokemon.get('name', slot_key),
+        })
+    return options
+
+
+def _build_heal_other_options(
+    player: dict,
+    healer_slot_key: str | None,
+    *,
+    include_stop: bool = False,
+) -> list[dict]:
+    options: list[dict] = []
+    for target_slot_key, target_poke in _iter_player_battle_slots(player, include_knocked_out=True):
+        if target_slot_key == healer_slot_key:
+            continue
+        if not target_poke.get('knocked_out'):
+            continue
+        label = target_poke.get('name', target_slot_key)
+        if target_slot_key == 'starter':
+            label = f'{label} (Starter)'
+        options.append({
+            'id': target_slot_key,
+            'slot_key': target_slot_key,
+            'label': f'Curar {label}',
+            'pokemon_name': target_poke.get('name', target_slot_key),
+        })
+    if include_stop and options:
+        options.append({'id': 'stop', 'label': 'Parar por aqui'})
+    return options
+
+
+def _build_evolve_other_options(
+    player: dict,
+    evolver_slot_key: str | None,
+    *,
+    exclude_self: bool,
+) -> list[dict]:
+    options: list[dict] = []
+    for target_slot_key, target_poke in _iter_player_battle_slots(player, include_knocked_out=True):
+        if exclude_self and target_slot_key == evolver_slot_key:
+            continue
+        if not can_evolve(target_poke):
+            continue
+        label = target_poke.get('name', target_slot_key)
+        if target_slot_key == 'starter':
+            label = f'{label} (Starter)'
+        options.append({
+            'id': target_slot_key,
+            'slot_key': target_slot_key,
+            'label': f'Evoluir {label}',
+            'pokemon_name': target_poke.get('name', target_slot_key),
+        })
+    return options
+
+
+def _queue_knockout_ability_decision_if_needed(
+    state: dict,
+    battle: dict,
+    *,
+    winner_is_challenger: bool,
+) -> bool:
+    challenger_choice = battle.get('challenger_choice') or {}
+    defender_choice = battle.get('defender_choice') or {}
+    loser_choice = defender_choice if winner_is_challenger else challenger_choice
+    loser_id = battle.get('defender_id') if winner_is_challenger else battle.get('challenger_id')
+    loser = _get_player(state, loser_id)
+    if not loser or not loser_choice:
+        return False
+
+    loser_slot = loser_choice.get('battle_slot_key')
+    loser_name = loser_choice.get('name', 'Pokémon')
+    battle['pending_resolution_result'] = copy.deepcopy(battle.get('pending_resolution_result') or {})
+
+    if _pokemon_has_effect(loser_choice, 'knockout_counter_roll'):
+        _set_pending_action(state, {
+            'type': 'wobbuffet_counter_decision',
+            'player_id': loser_id,
+            'winner_is_challenger': bool(winner_is_challenger),
+            'prompt': (
+                f'{loser_name} perdeu a batalha. Você pode rolar um dado; '
+                'com 4, 5 ou 6 o oponente será nocauteado no lugar.'
+            ),
+            'options': [
+                {'id': 'roll', 'label': 'Rolar dado de Wobbuffet'},
+                {'id': 'skip', 'label': f'Deixar {loser_name} ser nocauteado'},
+            ],
+            'allowed_actions': ['resolve_pending_action'],
+        })
+        return True
+
+    if _pokemon_has_effect(loser_choice, 'knockout_redirect'):
+        options = _build_knockout_redirect_options(loser, loser_slot)
+        if options:
+            _set_pending_action(state, {
+                'type': 'knockout_redirect_decision',
+                'player_id': loser_id,
+                'winner_is_challenger': bool(winner_is_challenger),
+                'protected_slot_key': loser_slot,
+                'protected_pokemon_name': loser_name,
+                'prompt': f'{loser_name} seria nocauteado. Escolha outro Pokémon para cair no lugar, se quiser.',
+                'options': [
+                    *options,
+                    {'id': 'skip', 'label': f'Deixar {loser_name} ser nocauteado'},
+                ],
+                'allowed_actions': ['resolve_pending_action'],
+            })
+            return True
+
+    return False
 
 
 def _heal_player_pokemon_slots(player: dict, slot_keys: list[str] | None = None) -> list[str]:
@@ -1958,6 +2554,7 @@ def _queue_market_event(state: dict, player_id: str, *, source: str, source_tile
     state['turn']['pending_event'] = card
     state['turn']['phase'] = 'event'
     reveal_card(state, player_id, card, 'event')
+    state = _maybe_offer_event_copy(state, player_id, card)
     source_name = source_tile.get('name') if isinstance(source_tile, dict) else source
     _log(state, player['name'], f"Chegou em {source_name}. O tile funciona como PokéMarket.")
     return state
@@ -2078,6 +2675,7 @@ def _resolve_pokemart_roll_action(state: dict, player_id: str, pending_action: d
         _clear_pending_action(state)
         _log(state, player['name'], f"Rolou {roll} em {source_name} e ganhou {reward['label']}.")
         state = _grant_special_tile_reward(state, player_id, reward['key'], source=source_name)
+        state = _grant_entei_market_tile_copies(state, player_id, reward['key'], source_name=source_name)
         state = _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True)
         return state, {
             'success': True,
@@ -2094,6 +2692,7 @@ def _resolve_pokemart_roll_action(state: dict, player_id: str, pending_action: d
     _clear_pending_action(state)
     _log(state, player['name'], f"No reroll de {source_name}, tirou {roll} e ganhou {reward['label']}.")
     state = _grant_special_tile_reward(state, player_id, reward['key'], source=source_name)
+    state = _grant_entei_market_tile_copies(state, player_id, reward['key'], source_name=source_name)
     state = _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True)
     return state, {
         'success': True,
@@ -2218,6 +2817,32 @@ def _apply_pending_effect(state: dict, player_id: str, effect: dict) -> dict:
         return _award_victory_cards(state, player_id, int(effect.get('count', 0) or 0), source=effect.get('source', 'special_tile'))
     if kind == 'draw_event_cards':
         return _draw_event_cards(state, player_id, int(effect.get('count', 0) or 0), source=effect.get('source', 'special_tile'))
+    if kind == 'queue_event_card':
+        return _queue_pending_event_card(
+            state,
+            player_id,
+            effect.get('card') or {},
+            source_name=effect.get('source_name', 'Articuno'),
+            already_revealed=True,
+            log_message=effect.get('log_message'),
+        )
+    if kind == 'offer_raikou_victory_bonus':
+        return _queue_raikou_victory_bonus_action(state, player_id, source=effect.get('source', 'battle'))
+    if kind == 'queue_league_intermission':
+        return _queue_league_intermission(
+            state,
+            player_id,
+            int(effect.get('next_member_index', 0) or 0),
+            int(effect.get('arrival_order', 0) or 0),
+        )
+    if kind == 'check_league_end':
+        _check_league_end(state, player_id)
+        return state
+    if kind == 'finish_turn':
+        if not turn_has_blocking_interaction(state.get('turn')):
+            state['turn']['phase'] = 'end'
+            return end_turn(state)
+        return state
     if kind == 'bill_teleport_choice':
         tile = get_tile(state.get('board', {}), int(effect.get('tile_id', -1))) if effect.get('tile_id') is not None else None
         return _queue_bill_teleport_choice(state, player_id, source_tile=tile)
@@ -2537,6 +3162,8 @@ def _queue_release_pokemon_choice(
     capture_roll: dict | None = None,
     reward_source: str | None = None,
     capture_context: str | None = None,
+    repeat_reward: bool = False,
+    reward_card: dict | None = None,
 ) -> tuple[dict | None, str | dict]:
     player = _get_player(state, player_id)
     if not player:
@@ -2563,6 +3190,8 @@ def _queue_release_pokemon_choice(
         'capture_roll': copy.deepcopy(capture_roll),
         'reward_source': reward_source,
         'capture_context': capture_context,
+        'repeat_reward': bool(repeat_reward),
+        'reward_card': copy.deepcopy(reward_card) if reward_card else None,
         'prompt': prompt,
         'allow_cancel': True,
         'options': options,
@@ -2783,6 +3412,8 @@ def _grant_reward_pokemon(
     pokemon: dict,
     *,
     source: str,
+    repeat_reward: bool = False,
+    reward_card: dict | None = None,
 ) -> tuple[dict, dict | str]:
     player = _get_player(state, player_id)
     if not player:
@@ -2808,6 +3439,8 @@ def _grant_reward_pokemon(
             capture_cost=required_slots,
             reward_source=source,
             capture_context=source,
+            repeat_reward=repeat_reward,
+            reward_card=reward_card,
         )
 
     finalized, result = _finalize_capture(
@@ -2828,6 +3461,344 @@ def _grant_reward_pokemon(
         **result,
         'granted': True,
         'source': source,
+        'repeat_reward': bool(repeat_reward),
+    }
+
+
+def _queue_repeatable_reward_pokemon_choice(
+    state: dict,
+    player_id: str,
+    *,
+    source: str,
+    card: dict,
+    pokemon_name: str,
+) -> dict:
+    return _queue_reward_choice(
+        state,
+        player_id,
+        source=source,
+        card=card,
+        options=[
+            {
+                'id': f'accept-{pokemon_name.lower().replace(" ", "-")}',
+                'label': f'Receber {pokemon_name}',
+                'pokemon_name': pokemon_name,
+                'repeat_reward': True,
+            },
+            {
+                'id': 'stop',
+                'label': 'Parar',
+                'stop_reward_loop': True,
+            },
+        ],
+        prompt=f'Você pode receber outro {pokemon_name}. Escolha entre continuar ou parar.',
+    )
+
+
+def _handle_event_result_followups(state: dict, player_id: str, card: dict, result: dict) -> dict:
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    effect_type = event_card_effect_type(card)
+    if result.get('effect') == 'capture_attempt':
+        capture_action = result.get('capture_action') or {}
+        pokemon_name = capture_action.get('pokemon_name')
+        if pokemon_name:
+            pokemon = load_playable_pokemon_by_name(pokemon_name)
+            if pokemon:
+                return _queue_capture_attempt(
+                    state,
+                    player_id,
+                    pokemon=pokemon,
+                    capture_context=capture_action.get('capture_context', 'event_card'),
+                    source='event_card',
+                    allowed_rolls=capture_action.get('allowed_rolls'),
+                    source_card=card,
+                )
+        state['turn']['phase'] = 'action'
+        _set_pending_action(state, {
+            'type': 'capture_attempt',
+            'player_id': player_id,
+            'source': 'event_card',
+            'capture_context': capture_action.get('capture_context', 'event_card'),
+            'allowed_actions': ['roll_capture_dice', 'skip_action'],
+            'resolver_card': copy.deepcopy(capture_action.get('card') or card),
+            'source_card': copy.deepcopy(card),
+        })
+        return state
+
+    if result.get('effect') == 'gift_pokemon_choice':
+        options = result.get('options') or []
+        if options:
+            state = _queue_reward_choice(
+                state,
+                player_id,
+                source='victory_card' if card.get('pile') == 'victory' else 'event_card',
+                card=card,
+                options=options,
+                prompt='Escolha um dos Pokémon disponíveis',
+            )
+        if result.get('unsupported_options'):
+            _log_warning(state, player['name'], f"opções indisponíveis ignoradas: {', '.join(result['unsupported_options'])}")
+        return state
+
+    if result.get('effect') == 'teleporter_choice':
+        options = [
+            {'id': p['id'], 'label': p['name'], 'target_player_id': p['id']}
+            for p in state.get('players', [])
+            if p.get('is_active', True) and p['id'] != player_id
+        ]
+        return _queue_reward_choice(
+            state,
+            player_id,
+            source='event_card',
+            card=card,
+            options=options,
+            prompt='Escolha para qual jogador você quer se teleportar',
+        )
+
+    if result.get('effect') == 'mr_fuji_choice':
+        options = []
+        for index, pokemon in enumerate(player.get('pokemon_inventory', [])):
+            options.append({
+                'id': f"mr-fuji-{index}",
+                'label': pokemon['name'],
+                'pokemon_index': index,
+            })
+        return _queue_reward_choice(
+            state,
+            player_id,
+            source='event_card',
+            card=card,
+            options=options,
+            prompt='Escolha qual Pokémon entregar ao Mr. Fuji',
+        )
+
+    if result.get('effect') == 'oak_assistant_choice':
+        active_players = [p for p in state.get('players', []) if p.get('is_active', True)]
+        min_pokeballs = min((p.get('pokeballs', 0) for p in active_players), default=0)
+        if player.get('pokeballs', 0) == min_pokeballs and player.get('items'):
+            options = [
+                {'id': item['key'], 'label': f"{item['name']} x{item['quantity']}", 'item_key': item['key']}
+                for item in player.get('items', [])
+            ]
+            return _queue_reward_choice(
+                state,
+                player_id,
+                source='event_card',
+                card=card,
+                options=options,
+                prompt='Escolha um item para trocar por 1 Pokébola',
+            )
+        _log(state, player['name'], "Oak's Assistant não teve efeito: você não é elegível ou não possui itens")
+        return state
+
+    if result.get('effect') == 'trainer_battle':
+        trainer_context = result.get('trainer_battle_context') or {}
+        return _start_trainer_battle(state, player_id, trainer_context, source='event_card')
+
+    if effect_type == 'move_backward_trigger':
+        old_position = player['position']
+        player['position'] = max(0, player['position'] - int(result.get('spaces', 3)))
+        tile = get_tile(state['board'], player['position'])
+        state['turn']['current_tile'] = tile
+        if _handle_pokecenter_pass_through(
+            state,
+            player_id,
+            start_position=old_position,
+            end_position=player['position'],
+            final_tile=tile,
+            final_effect=get_tile_effect(tile),
+        ):
+            return state
+        return _resolve_tile_effect(state, player_id, tile, get_tile_effect(tile))
+
+    if effect_type == 'move_forward_trigger':
+        old_position = player['position']
+        player['position'] = calculate_new_position(player['position'], int(result.get('spaces', 5)), state['board'])
+        tile = get_tile(state['board'], player['position'])
+        state['turn']['current_tile'] = tile
+        if _handle_pokecenter_pass_through(
+            state,
+            player_id,
+            start_position=old_position,
+            end_position=player['position'],
+            final_tile=tile,
+            final_effect=get_tile_effect(tile),
+        ):
+            return state
+        return _resolve_tile_effect(state, player_id, tile, get_tile_effect(tile))
+
+    if result.get('category') == 'special_event' and result.get('effect') == 'gift_pokemon_from_area':
+        tile = state['turn'].get('current_tile') or get_tile(state['board'], player.get('position', 0))
+        if tile:
+            return _queue_board_encounter(state, player_id, tile, 'event_card')
+
+    return state
+
+
+def _find_available_event_copy_holder(player: dict) -> tuple[str, dict, dict] | None:
+    for slot_key, pokemon in _iter_player_battle_slots(player, include_knocked_out=False):
+        sync_pokemon_ability_state(pokemon)
+        for ability in (pokemon.get('abilities') or []):
+            if not _ability_supports_effect(ability, 'event_copy'):
+                continue
+            if ability.get('has_charges') and int(ability.get('charges_remaining') or 0) <= 0:
+                continue
+            return slot_key, pokemon, ability
+    return None
+
+
+def _is_supported_immediate_event_copy(card: dict, result: dict) -> bool:
+    effect = result.get('effect')
+    effect_type = event_card_effect_type(card)
+    if effect in {
+        'capture_attempt',
+        'gift_pokemon_choice',
+        'teleporter_choice',
+        'mr_fuji_choice',
+        'oak_assistant_choice',
+        'trainer_battle',
+    }:
+        return False
+    if effect_type in {'move_backward_trigger', 'move_forward_trigger', 'all_discard_item'}:
+        return False
+    if result.get('category') == 'special_event' and effect == 'gift_pokemon_from_area':
+        return False
+    return True
+
+
+def _queue_next_event_copy_offer(state: dict) -> bool:
+    queue = state['turn'].get('event_copy_queue') or []
+    if not queue:
+        state['turn'].pop('event_copy_queue', None)
+        return False
+
+    next_offer = copy.deepcopy(queue[0])
+    state['turn']['event_copy_queue'] = copy.deepcopy(queue[1:])
+    holder_name = next_offer.get('holder_name', 'Pokémon')
+    card = next_offer.get('card') or {}
+    player_name = next_offer.get('player_name', 'Jogador')
+    charges_total = next_offer.get('charges_total')
+    charges_remaining = next_offer.get('charges_remaining')
+    charge_label = ''
+    if charges_total is not None:
+        charge_label = f' ({charges_remaining}/{charges_total})'
+
+    _set_pending_action(state, {
+        'type': 'event_copy_decision',
+        'player_id': next_offer['player_id'],
+        'slot_key': next_offer['slot_key'],
+        'holder_name': holder_name,
+        'card': copy.deepcopy(card),
+        'prompt': f'{player_name}: {holder_name} pode copiar a carta {card.get("title", "Evento")}.',
+        'options': [
+            {'id': 'copy', 'label': f'Copiar com {holder_name}{charge_label}'},
+            {'id': 'skip', 'label': 'Não copiar'},
+        ],
+        'allowed_actions': ['resolve_pending_action'],
+    })
+    return True
+
+
+def _maybe_offer_event_copy(state: dict, source_player_id: str, card: dict) -> dict:
+    if not isinstance(card, dict) or state['turn'].get('pending_action'):
+        return state
+
+    offers: list[dict] = []
+    for player in state.get('players', []):
+        if player.get('id') == source_player_id or not player.get('is_active', True):
+            continue
+        holder = _find_available_event_copy_holder(player)
+        if not holder:
+            continue
+        slot_key, pokemon, ability = holder
+        offers.append({
+            'player_id': player['id'],
+            'player_name': player.get('name', 'Jogador'),
+            'slot_key': slot_key,
+            'holder_name': pokemon.get('name', 'Pokémon'),
+            'card': copy.deepcopy(card),
+            'charges_total': ability.get('charges_total'),
+            'charges_remaining': ability.get('charges_remaining'),
+        })
+
+    if not offers:
+        return state
+
+    queue = state['turn'].get('event_copy_queue') or []
+    state['turn']['event_copy_queue'] = [*copy.deepcopy(queue), *offers]
+    _queue_next_event_copy_offer(state)
+    return state
+
+
+def _resolve_event_copy_decision(
+    state: dict,
+    player_id: str,
+    pending_action: dict,
+    chosen: dict,
+) -> tuple[dict | None, str | dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    slot_key = pending_action.get('slot_key')
+    pokemon = _get_player_pokemon_slot(player, slot_key)
+    if not pokemon:
+        return None, 'Pokémon da habilidade não encontrado'
+
+    holder_name = pending_action.get('holder_name', 'Pokémon')
+    card = copy.deepcopy(pending_action.get('card') or {})
+    _clear_pending_action(state)
+
+    if chosen.get('id') == 'skip':
+        _log(state, player['name'], f'Decidiu não copiar a carta {card.get("title", "Evento")} com {holder_name}.')
+        _queue_next_event_copy_offer(state)
+        return state, {
+            'type': 'event_copy_decision',
+            'used': False,
+            'pokemon': holder_name,
+            'card_title': card.get('title'),
+        }
+
+    sync_pokemon_ability_state(pokemon)
+    ability = next(iter(pokemon.get('abilities') or []), None)
+    if not ability or (ability.get('has_charges') and int(ability.get('charges_remaining') or 0) <= 0):
+        return None, 'Esta habilidade não possui cargas restantes'
+
+    trial_state = copy.deepcopy(state)
+    trial_state, result = apply_event_effect(trial_state, player_id, card)
+    if not _is_supported_immediate_event_copy(card, result):
+        _log_warning(
+            state,
+            player['name'],
+            f"a cópia de {card.get('title', 'Evento')} por {holder_name} exige um subtipo de resolução fora de turno que a engine ainda não suporta",
+        )
+        _queue_next_event_copy_offer(state)
+        return state, {
+            'type': 'event_copy_decision',
+            'used': False,
+            'pokemon': holder_name,
+            'card_title': card.get('title'),
+            'unsupported_copy': True,
+        }
+
+    adjust_primary_ability_charges(pokemon, -1)
+    state, result = apply_event_effect(state, player_id, card)
+    state = _handle_event_result_followups(state, player_id, card, result)
+    _log(
+        state,
+        player['name'],
+        f"{holder_name} copiou {card.get('title', 'Evento')} -> {_describe_card_result_for_log(result)}.",
+    )
+    _queue_next_event_copy_offer(state)
+    return state, {
+        'type': 'event_copy_decision',
+        'used': True,
+        'pokemon': holder_name,
+        'card_title': card.get('title'),
+        'result': result,
     }
 
 
@@ -2860,6 +3831,31 @@ def _award_victory_cards(state: dict, player_id: str, count: int, source: str) -
             trainer_context = result.get('trainer_battle_context') or {}
             state = _start_trainer_battle(state, player_id, trainer_context, source='victory_card')
             return state
+
+        if result.get('effect') == 'reward_pokemon':
+            pokemon_name = result.get('reward_pokemon_name')
+            if pokemon_name:
+                pokemon = load_playable_pokemon_by_name(pokemon_name)
+                if pokemon:
+                    if result.get('reward_loop'):
+                        return _queue_repeatable_reward_pokemon_choice(
+                            state,
+                            player_id,
+                            source='victory_card',
+                            card=card,
+                            pokemon_name=pokemon['name'],
+                        )
+                    result_state, reward_result = _grant_reward_pokemon(
+                        state,
+                        player_id,
+                        pokemon,
+                        source='victory_card',
+                        reward_card=card,
+                    )
+                    if result_state is not None:
+                        state = result_state
+                        if state['turn'].get('phase') == 'release_pokemon' or turn_has_blocking_interaction(state.get('turn')):
+                            return state
 
         if result.get('effect') == 'capture_attempt':
             capture_action = result.get('capture_action') or {}
@@ -2922,6 +3918,248 @@ def _award_victory_cards(state: dict, player_id: str, count: int, source: str) -
     return state
 
 
+def _consume_and_discard_event_card(state: dict, card: dict | None) -> None:
+    if not isinstance(card, dict):
+        return
+    state['decks']['event_discard'] = append_to_discard(state['decks']['event_discard'], card)
+    state.setdefault('consumed', {}).setdefault('events', []).append(card.get('id'))
+
+
+def _queue_pending_event_card(
+    state: dict,
+    player_id: str,
+    card: dict,
+    *,
+    source_name: str,
+    already_revealed: bool = False,
+    log_message: str | None = None,
+) -> dict:
+    player = _get_player(state, player_id)
+    if not player or not isinstance(card, dict):
+        return state
+
+    state['turn']['pending_event'] = copy.deepcopy(card)
+    state['turn']['phase'] = 'event'
+    if not already_revealed:
+        reveal_card(state, player_id, card, 'event')
+    state = _maybe_offer_event_copy(state, player_id, card)
+    _log(
+        state,
+        player['name'],
+        log_message or f"Carta de evento revelada em {source_name}: {_describe_card_for_log(card)} — confirme para aplicar.",
+    )
+    return state
+
+
+def _draw_articuno_event_choice(state: dict, player_id: str, *, source_name: str) -> dict:
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    drawn_cards: list[dict] = []
+    for _ in range(2):
+        card, new_deck, new_discard = draw_card(
+            state['decks']['event_deck'],
+            state['decks']['event_discard'],
+        )
+        state['decks']['event_deck'] = new_deck
+        state['decks']['event_discard'] = new_discard
+        if not card:
+            break
+        drawn_cards.append(card)
+
+    if not drawn_cards:
+        state['turn']['phase'] = 'end'
+        return end_turn(state)
+
+    if len(drawn_cards) == 1:
+        return _queue_pending_event_card(state, player_id, drawn_cards[0], source_name=source_name)
+
+    for card in drawn_cards:
+        reveal_card(state, player_id, card, 'event')
+
+    first_card, second_card = drawn_cards
+    _set_pending_action(state, {
+        'type': 'articuno_event_choice',
+        'player_id': player_id,
+        'source_name': source_name,
+        'cards': [
+            {'id': 'first', 'label': 'Primeira carta', 'card': copy.deepcopy(first_card)},
+            {'id': 'second', 'label': 'Segunda carta', 'card': copy.deepcopy(second_card)},
+        ],
+        'prompt': (
+            'Articuno permitiu comprar 2 cartas de evento. '
+            'Escolha se você quer resolver a primeira, a segunda ou as duas na ordem.'
+        ),
+        'options': [
+            {'id': 'first_only', 'label': f"Resolver só a primeira: {first_card.get('title', 'Carta 1')}"},
+            {'id': 'second_only', 'label': f"Resolver só a segunda: {second_card.get('title', 'Carta 2')}"},
+            {'id': 'both', 'label': 'Resolver as duas'},
+        ],
+        'allowed_actions': ['resolve_pending_action'],
+    })
+    state['turn']['phase'] = 'event'
+    state['turn']['pending_event'] = None
+    _log(
+        state,
+        player['name'],
+        f"Articuno revelou 2 cartas em {source_name}: {first_card.get('title', 'Carta 1')} e {second_card.get('title', 'Carta 2')}.",
+    )
+    return state
+
+
+def _resolve_articuno_event_choice(
+    state: dict,
+    player_id: str,
+    pending_action: dict,
+    chosen: dict,
+) -> tuple[dict | None, str | dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    cards = pending_action.get('cards') or []
+    first_entry = next((entry for entry in cards if entry.get('id') == 'first'), None)
+    second_entry = next((entry for entry in cards if entry.get('id') == 'second'), None)
+    if not first_entry or not second_entry:
+        return None, 'Cartas do Articuno inválidas'
+
+    option_id = chosen.get('id')
+    if option_id == 'first_only':
+        selected_entries = [first_entry]
+        discarded_entries = [second_entry]
+    elif option_id == 'second_only':
+        selected_entries = [second_entry]
+        discarded_entries = [first_entry]
+    elif option_id == 'both':
+        selected_entries = [first_entry, second_entry]
+        discarded_entries = []
+    else:
+        return None, 'Opção inválida do Articuno'
+
+    _clear_pending_action(state)
+    state['turn']['pending_event'] = None
+
+    for entry in discarded_entries:
+        card = copy.deepcopy(entry.get('card') or {})
+        _consume_and_discard_event_card(state, card)
+        _log(
+            state,
+            player['name'],
+            f"Articuno descartou sem resolver: {card.get('title', 'Carta de Evento')}.",
+        )
+
+    selected_cards = [copy.deepcopy(entry.get('card') or {}) for entry in selected_entries]
+    if not selected_cards:
+        return None, 'Nenhuma carta foi selecionada'
+
+    for card in reversed(selected_cards[1:]):
+        _queue_pending_effect(state, {
+            'kind': 'queue_event_card',
+            'card': copy.deepcopy(card),
+            'source_name': pending_action.get('source_name', 'Articuno'),
+            'log_message': f"Articuno preparou a próxima carta escolhida: {card.get('title', 'Carta de Evento')}.",
+        })
+
+    first_card = selected_cards[0]
+    state = _queue_pending_event_card(
+        state,
+        player_id,
+        first_card,
+        source_name=pending_action.get('source_name', 'Articuno'),
+        already_revealed=True,
+        log_message=f"Articuno escolheu {first_card.get('title', 'Carta de Evento')} para resolver agora.",
+    )
+    return state, {
+        'success': True,
+        'type': 'articuno_event_choice',
+        'selected_cards': [card.get('title') for card in selected_cards],
+        'discarded_cards': [entry.get('card', {}).get('title') for entry in discarded_entries],
+    }
+
+
+def _queue_raikou_victory_bonus_action(state: dict, player_id: str, *, source: str) -> dict:
+    player = _get_player(state, player_id)
+    if not player:
+        return state
+
+    source_label = 'a batalha da Liga' if source == 'league' else 'a batalha de Ginásio'
+    _set_pending_action(state, {
+        'type': 'raikou_victory_bonus',
+        'player_id': player_id,
+        'source': source,
+        'prompt': f'Raikou sobreviveu a {source_label}. Você quer comprar 1 carta de vitória extra?',
+        'options': [
+            {'id': 'take', 'label': 'Comprar carta extra'},
+            {'id': 'skip', 'label': 'Não comprar agora'},
+        ],
+        'allowed_actions': ['resolve_pending_action'],
+    })
+    state['turn']['phase'] = 'action'
+    _log(state, player['name'], 'Raikou liberou a opção de comprar 1 carta de vitória extra.')
+    return state
+
+
+def _queue_gym_victory_followups(
+    state: dict,
+    player_id: str,
+    *,
+    allow_raikou_bonus: bool,
+) -> dict:
+    _queue_pending_effect(state, {'kind': 'award_victory_cards', 'count': 1, 'source': 'gym'})
+    if allow_raikou_bonus:
+        _queue_pending_effect(state, {'kind': 'offer_raikou_victory_bonus', 'source': 'gym'})
+    _queue_pending_effect(state, {'kind': 'finish_turn'})
+    return _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=False)
+
+
+def _queue_league_victory_followups(
+    state: dict,
+    player_id: str,
+    *,
+    allow_raikou_bonus: bool,
+    next_member_index: int | None,
+    arrival_order: int,
+) -> dict:
+    if state.get('turn', {}).get('phase') == 'battle' and not state.get('turn', {}).get('battle'):
+        state['turn']['phase'] = 'action'
+    _queue_pending_effect(state, {'kind': 'award_victory_cards', 'count': 1, 'source': 'league'})
+    if allow_raikou_bonus:
+        _queue_pending_effect(state, {'kind': 'offer_raikou_victory_bonus', 'source': 'league'})
+    if next_member_index is not None:
+        _queue_pending_effect(
+            state,
+            {
+                'kind': 'queue_league_intermission',
+                'next_member_index': int(next_member_index),
+                'arrival_order': int(arrival_order),
+            },
+        )
+    else:
+        _queue_pending_effect(state, {'kind': 'check_league_end'})
+    return _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=False)
+
+
+def _resolve_raikou_victory_bonus_action(state: dict, player_id: str, pending_action: dict, chosen: dict) -> tuple[dict, dict]:
+    player = _get_player(state, player_id)
+    _clear_pending_action(state)
+
+    took_card = chosen.get('id') == 'take'
+    if took_card:
+        state = _award_victory_cards(state, player_id, 1, source='raikou_bonus')
+        _log(state, player['name'], 'Decidiu usar o bônus do Raikou para comprar 1 carta de vitória extra.')
+    else:
+        _log(state, player['name'], 'Decidiu não usar o bônus opcional do Raikou.')
+
+    state = _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=False)
+    return state, {
+        'success': True,
+        'type': 'raikou_victory_bonus',
+        'used': took_card,
+        'source': pending_action.get('source'),
+    }
+
+
 def _draw_event_cards(state: dict, player_id: str, count: int, source: str) -> dict:
     player = _get_player(state, player_id)
     if not player or count <= 0:
@@ -2946,20 +4184,12 @@ def _draw_event_cards(state: dict, player_id: str, count: int, source: str) -> d
             player['name'],
             f"Carta de evento revelada em {source}: {_describe_card_for_log(card)} -> {_describe_card_result_for_log(result)}.",
         )
-
-        effect_type = event_card_effect_type(card)
-        if state['turn'].get('pending_action') or state['turn'].get('pending_event') or state['turn'].get('pending_pokemon') or state['turn'].get('phase') == 'battle':
+        state = _handle_event_result_followups(state, player_id, card, result)
+        if turn_has_blocking_interaction(state.get('turn')) or state['turn'].get('phase') == 'battle':
             return state
-        if effect_type == 'move_backward_trigger':
-            player['position'] = max(0, player['position'] - int(result.get('spaces', 3)))
-            tile = get_tile(state['board'], player['position'])
-            state['turn']['current_tile'] = tile
-            state = _resolve_tile_effect(state, player_id, tile, get_tile_effect(tile))
-        elif effect_type == 'move_forward_trigger':
-            player['position'] = calculate_new_position(player['position'], int(result.get('spaces', 5)), state['board'])
-            tile = get_tile(state['board'], player['position'])
-            state['turn']['current_tile'] = tile
-            state = _resolve_tile_effect(state, player_id, tile, get_tile_effect(tile))
+        state = _maybe_offer_event_copy(state, player_id, card)
+        if turn_has_blocking_interaction(state.get('turn')):
+            return state
 
     return state
 
@@ -3038,11 +4268,19 @@ def _find_pokemon_with_ability(player: dict, ability_action: str) -> dict | None
 
 
 def _ability_supports_effect(ability: dict | None, effect_kind: str) -> bool:
+    return _get_ability_effect(ability, effect_kind) is not None
+
+
+def _get_ability_effect(ability: dict | None, effect_kind: str) -> dict | None:
     if not isinstance(ability, dict):
-        return False
-    return any(
-        effect.get('effect_kind') == effect_kind and effect.get('implemented') is True
-        for effect in (ability.get('effects') or [])
+        return None
+    return next(
+        (
+            effect
+            for effect in (ability.get('effects') or [])
+            if effect.get('effect_kind') == effect_kind and effect.get('implemented') is True
+        ),
+        None,
     )
 
 
@@ -3128,23 +4366,34 @@ def _compute_team_bonus_bp(player: dict, chosen: dict) -> int:
     """
     sync_pokemon_ability_state(chosen)
     chosen_slot_key = chosen.get('battle_slot_key', '')
-    for ability in (chosen.get('abilities') or []):
-        for effect in (ability.get('effects') or []):
-            if effect.get('effect_kind') != 'team_bonus' or not effect.get('implemented'):
-                continue
-            params = effect.get('params') or {}
-            bonus_per_ally = int(params.get('bonus_bp_per_ally') or 0)
-            ally_name = params.get('ally_name') or chosen.get('name', '')
-            if not bonus_per_ally or not ally_name:
-                continue
-            ally_name_lc = ally_name.lower()
-            count = sum(
-                1
-                for slot_key, p in _iter_player_battle_slots(player, include_knocked_out=True)
-                if (p.get('name') or '').lower() == ally_name_lc and slot_key != chosen_slot_key
-            )
-            return count * bonus_per_ally
-    return 0
+    total_bonus = 0
+
+    for slot_key, pokemon in _iter_player_battle_slots(player, include_knocked_out=True):
+        sync_pokemon_ability_state(pokemon)
+        for ability in (pokemon.get('abilities') or []):
+            for effect in (ability.get('effects') or []):
+                if effect.get('effect_kind') != 'team_bonus' or not effect.get('implemented'):
+                    continue
+                params = effect.get('params') or {}
+                flat_bonus = int(params.get('flat_bonus') or 0)
+                if flat_bonus:
+                    total_bonus += flat_bonus
+                    continue
+                if slot_key != chosen_slot_key:
+                    continue
+                bonus_per_ally = int(params.get('bonus_bp_per_ally') or 0)
+                ally_name = params.get('ally_name') or chosen.get('name', '')
+                if not bonus_per_ally or not ally_name:
+                    continue
+                ally_name_lc = ally_name.lower()
+                count = sum(
+                    1
+                    for ally_slot_key, teammate in _iter_player_battle_slots(player, include_knocked_out=True)
+                    if (teammate.get('name') or '').lower() == ally_name_lc and ally_slot_key != chosen_slot_key
+                )
+                total_bonus += count * bonus_per_ally
+
+    return total_bonus
 
 
 def _award_team_bonus_mp(state: dict, player: dict, pokemon: dict) -> None:
@@ -3697,6 +4946,9 @@ def _resolve_tile_effect(state: dict, player_id: str, tile: dict, effect: dict) 
                 )
 
     elif tile_type == 'event':
+        articuno_holder = _find_player_effect_holder(player, 'event_tile_double_draw_choice', include_knocked_out=False)
+        if articuno_holder:
+            return _draw_articuno_event_choice(state, player_id, source_name=tile.get('name', '?'))
         card, new_deck, new_discard = draw_card(
             state['decks']['event_deck'],
             state['decks']['event_discard'],
@@ -3705,14 +4957,7 @@ def _resolve_tile_effect(state: dict, player_id: str, tile: dict, effect: dict) 
         state['decks']['event_discard'] = new_discard
 
         if card:
-            state['turn']['pending_event'] = card
-            state['turn']['phase'] = 'event'
-            reveal_card(state, player_id, card, 'event')
-            _log(
-                state,
-                player['name'],
-                f"Carta de evento revelada no tile {tile.get('name', '?')}: {_describe_card_for_log(card)} — confirme para aplicar.",
-            )
+            state = _queue_pending_event_card(state, player_id, card, source_name=tile.get('name', '?'))
         else:
             state['turn']['phase'] = 'end'
             state = end_turn(state)
@@ -3835,24 +5080,44 @@ def _resolve_team_rocket_roll_action(
     }
 
     if rocket_roll <= 3:
-        stolen_pokemon = _remove_last_captured_team_pokemon(player)
-        if stolen_pokemon:
+        protected_index = _get_last_captured_team_pokemon_index(player)
+        protector = (
+            _find_player_effect_holder(player, 'team_rocket_protection', include_knocked_out=True)
+            if protected_index is not None
+            else None
+        )
+        if protector and protected_index is not None:
+            protected_pokemon = player['pokemon'][protected_index]
+            protector_name = protector[1].get('name', 'Farfetch\'d')
             _log(
                 state,
                 'Equipe Rocket',
-                f"Rolou {rocket_roll} e roubou {stolen_pokemon['name']}, o último Pokémon capturado de {player['name']}.",
+                f"Rolou {rocket_roll}, mas {protector_name} protegeu {protected_pokemon['name']} e impediu o roubo do último Pokémon capturado de {player['name']}.",
             )
             result.update({
-                'stolen': True,
-                'stolen_pokemon': stolen_pokemon['name'],
+                'stolen': False,
+                'protected_by': protector_name,
+                'protected_pokemon': protected_pokemon.get('name'),
             })
         else:
-            _log(
-                state,
-                'Equipe Rocket',
-                f"Rolou {rocket_roll}, mas {player['name']} não tinha Pokémon capturado elegível para roubo. O inicial e suas evoluções não contam como captura.",
-            )
-            result['stolen'] = False
+            stolen_pokemon = _remove_last_captured_team_pokemon(player)
+            if stolen_pokemon:
+                _log(
+                    state,
+                    'Equipe Rocket',
+                    f"Rolou {rocket_roll} e roubou {stolen_pokemon['name']}, o último Pokémon capturado de {player['name']}.",
+                )
+                result.update({
+                    'stolen': True,
+                    'stolen_pokemon': stolen_pokemon['name'],
+                })
+            else:
+                _log(
+                    state,
+                    'Equipe Rocket',
+                    f"Rolou {rocket_roll}, mas {player['name']} não tinha Pokémon capturado elegível para roubo. O inicial e suas evoluções não contam como captura.",
+                )
+                result['stolen'] = False
     else:
         _log(
             state,
@@ -3915,6 +5180,33 @@ def _grant_special_tile_reward(state: dict, player_id: str, reward_key: str, *, 
     item_name = item_def.get('name') or normalized_key
     _log(state, player['name'], f"Recebeu {item_name} em {source}.")
     _queue_item_choice(state, player_id, f'Recompensa em {source}')
+    return state
+
+
+def _grant_entei_market_tile_copies(state: dict, source_player_id: str, reward_key: str, *, source_name: str) -> dict:
+    normalized_key = str(reward_key or '').strip().lower()
+    if normalized_key in {'pokeball', 'master_ball'}:
+        return state
+
+    source_player = _get_player(state, source_player_id)
+    item_def = get_item_def(normalized_key)
+    item_name = item_def.get('name') or normalized_key
+
+    for player in state.get('players', []):
+        if player.get('id') == source_player_id:
+            continue
+        if not player.get('is_active', True):
+            continue
+        holder = _find_player_effect_holder(player, 'market_tile_item_copy', include_knocked_out=True)
+        if not holder:
+            continue
+        add_item(player, normalized_key, 1)
+        _queue_item_choice(state, player['id'], f'Cópia de {source_name} via Entei')
+        _log(
+            state,
+            player['name'],
+            f"Entei copiou {item_name} que {source_player['name'] if source_player else 'outro jogador'} recebeu em {source_name}.",
+        )
     return state
 
 
@@ -4065,7 +5357,7 @@ def _resolve_mr_fuji_house_tile(state: dict, player_id: str, tile: dict) -> dict
 
 
 def _resolve_celadon_dept_store_tile(state: dict, player_id: str, tile: dict) -> dict:
-    return _queue_market_event(state, player_id, source='celadon_dept_store', source_tile=tile)
+    return _resolve_pokemart_tile(state, player_id, tile)
 
 
 def _resolve_teleporter_tile(state: dict, player_id: str, tile: dict) -> dict:
@@ -4289,134 +5581,21 @@ def resolve_event(state: dict, player_id: str, use_run_away: bool = False) -> tu
             return None, 'Rattata com Run Away não disponível'
         if not is_negative_event_card(card):
             return None, 'Run Away só funciona em eventos negativos'
-        rattata['ability_used'] = True
+        _mark_legacy_ability_usage(rattata)
         _log(state, player['name'], f"Usou Run Away! Fugiu do evento: {card.get('title', '?')}")
     else:
         state, result = apply_event_effect(state, player_id, card)
         _log(state, player['name'], f"Evento: {card.get('title', 'Carta de Evento')}")
-        effect_type = event_card_effect_type(card)
-        if result.get('effect') == 'capture_attempt':
-            capture_action = result.get('capture_action') or {}
-            pokemon_name = capture_action.get('pokemon_name')
-            if pokemon_name:
-                pokemon = load_playable_pokemon_by_name(pokemon_name)
-                if pokemon:
-                    state = _queue_capture_attempt(
-                        state,
-                        player_id,
-                        pokemon=pokemon,
-                        capture_context=capture_action.get('capture_context', 'event_card'),
-                        source='event_card',
-                        allowed_rolls=capture_action.get('allowed_rolls'),
-                        source_card=card,
-                    )
-            else:
-                state['turn']['phase'] = 'action'
-                _set_pending_action(state, {
-                    'type': 'capture_attempt',
-                    'player_id': player_id,
-                    'source': 'event_card',
-                    'capture_context': capture_action.get('capture_context', 'event_card'),
-                    'allowed_actions': ['roll_capture_dice', 'skip_action'],
-                    'resolver_card': copy.deepcopy(capture_action.get('card') or card),
-                    'source_card': copy.deepcopy(card),
-                })
-        elif result.get('effect') == 'gift_pokemon_choice':
-            options = result.get('options') or []
-            if options:
-                state = _queue_reward_choice(
-                    state,
-                    player_id,
-                    source='victory_card' if card.get('pile') == 'victory' else 'event_card',
-                    card=card,
-                    options=options,
-                    prompt='Escolha um dos Pokémon disponíveis',
-                )
-            if result.get('unsupported_options'):
-                _log_warning(state, player['name'], f"opções indisponíveis ignoradas: {', '.join(result['unsupported_options'])}")
-        elif result.get('effect') == 'teleporter_choice':
-            options = [
-                {'id': p['id'], 'label': p['name'], 'target_player_id': p['id']}
-                for p in state.get('players', [])
-                if p.get('is_active', True) and p['id'] != player_id
-            ]
-            state = _queue_reward_choice(state, player_id, source='event_card', card=card, options=options, prompt='Escolha para qual jogador você quer se teleportar')
-        elif result.get('effect') == 'mr_fuji_choice':
-            options = []
-            for index, pokemon in enumerate(player.get('pokemon_inventory', [])):
-                options.append({
-                    'id': f"mr-fuji-{index}",
-                    'label': pokemon['name'],
-                    'pokemon_index': index,
-                })
-            state = _queue_reward_choice(state, player_id, source='event_card', card=card, options=options, prompt='Escolha qual Pokémon entregar ao Mr. Fuji')
-        elif result.get('effect') == 'oak_assistant_choice':
-            active_players = [p for p in state.get('players', []) if p.get('is_active', True)]
-            min_pokeballs = min((p.get('pokeballs', 0) for p in active_players), default=0)
-            if player.get('pokeballs', 0) == min_pokeballs and player.get('items'):
-                options = [
-                    {'id': item['key'], 'label': f"{item['name']} x{item['quantity']}", 'item_key': item['key']}
-                    for item in player.get('items', [])
-                ]
-                state = _queue_reward_choice(state, player_id, source='event_card', card=card, options=options, prompt='Escolha um item para trocar por 1 Pokébola')
-            else:
-                _log(state, player['name'], "Oak's Assistant não teve efeito: você não é elegível ou não possui itens")
-        if result.get('effect') == 'trainer_battle':
-            trainer_context = result.get('trainer_battle_context') or {}
-            state = _start_trainer_battle(state, player_id, trainer_context, source='event_card')
-            turn['pending_event'] = None
-            state['decks']['event_discard'] = append_to_discard(state['decks']['event_discard'], card)
-            state.setdefault('consumed', {}).setdefault('events', []).append(card.get('id'))
-            return state, 'ok'
-        if effect_type == 'move_backward_trigger':
-            old_position = player['position']
-            player['position'] = max(0, player['position'] - int(result.get('spaces', 3)))
-            tile = get_tile(state['board'], player['position'])
-            state['turn']['current_tile'] = tile
-            if _handle_pokecenter_pass_through(
-                state,
-                player_id,
-                start_position=old_position,
-                end_position=player['position'],
-                final_tile=tile,
-                final_effect=get_tile_effect(tile),
-            ):
-                state['decks']['event_discard'] = append_to_discard(state['decks']['event_discard'], card)
-                state.setdefault('consumed', {}).setdefault('events', []).append(card.get('id'))
-                state['turn']['pending_event'] = None
-                return state, 'ok'
-            state = _resolve_tile_effect(state, player_id, tile, get_tile_effect(tile))
-        elif effect_type == 'move_forward_trigger':
-            old_position = player['position']
-            player['position'] = calculate_new_position(player['position'], int(result.get('spaces', 5)), state['board'])
-            tile = get_tile(state['board'], player['position'])
-            state['turn']['current_tile'] = tile
-            if _handle_pokecenter_pass_through(
-                state,
-                player_id,
-                start_position=old_position,
-                end_position=player['position'],
-                final_tile=tile,
-                final_effect=get_tile_effect(tile),
-            ):
-                state['decks']['event_discard'] = append_to_discard(state['decks']['event_discard'], card)
-                state.setdefault('consumed', {}).setdefault('events', []).append(card.get('id'))
-                state['turn']['pending_event'] = None
-                return state, 'ok'
-            state = _resolve_tile_effect(state, player_id, tile, get_tile_effect(tile))
-        elif result.get('category') == 'special_event' and result.get('effect') == 'gift_pokemon_from_area':
-            tile = state['turn'].get('current_tile') or get_tile(state['board'], player.get('position', 0))
-            if tile:
-                state = _queue_board_encounter(state, player_id, tile, 'event_card')
+        state = _handle_event_result_followups(state, player_id, card, result)
 
-    state['decks']['event_discard'] = append_to_discard(state['decks']['event_discard'], card)
-    state.setdefault('consumed', {}).setdefault('events', []).append(card.get('id'))
+    _consume_and_discard_event_card(state, card)
     state['turn']['pending_event'] = None
-    if state['turn'].get('pending_action') or state['turn'].get('pending_pokemon') or state['turn'].get('phase') in ('action', 'battle'):
+    if turn_has_blocking_interaction(state.get('turn')) or state['turn'].get('phase') in ('action', 'battle', 'item_choice', 'release_pokemon'):
         return state, 'ok'
-    if not _queue_item_choice(state, player_id, f"Evento: {card.get('title', 'Carta de Evento')}"):
-        state['turn']['phase'] = 'end'
-        state = end_turn(state)
+    _queue_item_choice(state, player_id, f"Evento: {card.get('title', 'Carta de Evento')}")
+    if turn_has_blocking_interaction(state.get('turn')):
+        return state, 'ok'
+    state = _resume_pending_effects_or_finish_turn(state, player_id, end_turn_when_done=True)
     return state, 'ok'
 
 
@@ -4431,6 +5610,12 @@ def resolve_event(state: dict, player_id: str, use_run_away: bool = False) -> tu
 # Os handlers podem chamar _resolve_tile_effect, end_turn, _log etc.
 # definidos posteriormente no módulo (Python resolve nomes em tempo de chamada).
 
+def _mark_legacy_ability_usage(pokemon: dict, *, scope: str = 'turn') -> None:
+    sync_pokemon_ability_state(pokemon)
+    primary = next(iter(pokemon.get('abilities') or []), None)
+    consume_charge = bool(primary and primary.get('charges_total') is not None)
+    mark_primary_ability_used(pokemon, scope=scope, consume_charge=consume_charge)
+
 def _handle_movement_replace(state: dict, player: dict, pokemon: dict, steps: int, **kw) -> tuple:
     """Base compartilhada para habilidades que substituem o rolar do dado."""
     turn = state['turn']
@@ -4444,7 +5629,7 @@ def _handle_movement_replace(state: dict, player: dict, pokemon: dict, steps: in
     effect = get_tile_effect(tile)
     turn['dice_result'] = steps
     turn['current_tile'] = tile
-    pokemon['ability_used'] = True
+    _mark_legacy_ability_usage(pokemon)
     _log(state, player['name'],
          f"Usou {pokemon['ability']}! Avançou {steps} casas para {tile['name']}")
     if _handle_pokecenter_pass_through(
@@ -4478,7 +5663,7 @@ def _handle_extreme_speed(state: dict, player: dict, pokemon: dict, **kw) -> tup
     turn['pending_action'] = None
     turn['capture_context'] = None
     turn['current_tile'] = tile
-    pokemon['ability_used'] = True
+    _mark_legacy_ability_usage(pokemon)
     _log(state, player['name'],
          f"Usou Extreme Speed! Avançou para a próxima casa: {tile['name']}")
     if _handle_pokecenter_pass_through(
@@ -4509,7 +5694,7 @@ def _handle_teleport(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
     effect = get_tile_effect(tile)
     turn['dice_result'] = target_position
     turn['current_tile'] = tile
-    pokemon['ability_used'] = True
+    _mark_legacy_ability_usage(pokemon)
     _log(state, player['name'],
          f"Usou Teleport! Voltou para casa {target_position}: {tile['name']}")
     state = _resolve_tile_effect(state, player['id'], tile, effect)
@@ -4543,7 +5728,7 @@ def _handle_compound_eyes(state: dict, player: dict, pokemon: dict, **kw) -> tup
     if not turn.get('pending_pokemon'):
         return None, 'Não há Pokémon disponível para capturar agora'
     turn['compound_eyes_active'] = True
-    pokemon['ability_used'] = True
+    _mark_legacy_ability_usage(pokemon)
     _log(state, player['name'], 'Usou Compound Eyes! Próxima captura não gasta Pokébola')
     return state, {}
 
@@ -4556,7 +5741,7 @@ def _handle_run_away(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
     if not card or not is_negative_event_card(card):
         return None, 'Run Away só funciona em eventos negativos'
     turn['pending_event'] = None
-    pokemon['ability_used'] = True
+    _mark_legacy_ability_usage(pokemon)
     _log(state, player['name'],
          f"Usou Run Away! Fugiu do evento: {card.get('title', '?')}")
     turn['phase'] = 'end'
@@ -4583,7 +5768,7 @@ def _handle_psychic(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
     effect = get_tile_effect(tile)
     turn['dice_result'] = target_pos
     turn['current_tile'] = tile
-    pokemon['ability_used'] = True
+    _mark_legacy_ability_usage(pokemon)
     _log(state, player['name'],
          f"Usou Psychic! Teletransportou para a posição de {target['name']}: {tile['name']}")
     if _handle_pokecenter_pass_through(
@@ -4620,7 +5805,7 @@ def _handle_psybeam(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
     effect = get_tile_effect(tile)
     turn['dice_result'] = target_pos
     turn['current_tile'] = tile
-    pokemon['ability_used'] = True
+    _mark_legacy_ability_usage(pokemon)
     _log(state, player['name'],
          f"Usou Psybeam! Voltou para a casa de evento mais próxima: {tile['name']} (posição {target_pos})")
     state = _resolve_tile_effect(state, player['id'], tile, effect)
@@ -4698,7 +5883,13 @@ def use_ability(state: dict, player_id: str, ability_action: str,
     pokemon = _find_pokemon_with_ability(player, ability_action)
     if not pokemon:
         return None, f'Você não tem um Pokémon com a habilidade "{ability_action}"'
-    if pokemon.get('ability_used'):
+    sync_pokemon_ability_state(pokemon)
+    primary_ability = next(iter(pokemon.get('abilities') or []), None)
+    runtime_used_this_turn = bool(
+        isinstance(primary_ability, dict)
+        and ((primary_ability.get('runtime') or {}).get('used_this_turn'))
+    )
+    if pokemon.get('ability_used') or runtime_used_this_turn:
         return None, 'Habilidade já utilizada'
 
     handler = _ACTIVE_ABILITY_HANDLERS.get(ability_action)
@@ -4804,22 +5995,8 @@ def use_pokemon_ability(
     if effect_kind == 'heal_other':
         if state['turn'].get('phase') == 'battle':
             return None, 'Não é possível curar outro Pokémon durante uma batalha'
-        # Find knocked-out Pokémon excluding the ability user's own slot
-        options = []
-        for target_slot_key, target_poke in _iter_player_battle_slots(player, include_knocked_out=True):
-            if target_slot_key == slot_key:
-                continue
-            if not target_poke.get('knocked_out'):
-                continue
-            label = target_poke.get('name', target_slot_key)
-            if target_slot_key == 'starter':
-                label = f'{label} (Starter)'
-            options.append({
-                'id': target_slot_key,
-                'slot_key': target_slot_key,
-                'label': f'Curar {label}',
-                'pokemon_name': target_poke.get('name', target_slot_key),
-            })
+        heal_limit = max(1, int((action.get('params') or {}).get('heal_limit', 1) or 1))
+        options = _build_heal_other_options(player, slot_key, include_stop=False)
         if not options:
             return None, 'Nenhum Pokémon elegível para curar (nenhum desmaiado)'
         _set_pending_action(state, {
@@ -4828,7 +6005,83 @@ def use_pokemon_ability(
             'healer_slot_key': slot_key,
             'healer_name': pokemon_name,
             'ability_name': ability_name,
-            'prompt': f'{pokemon_name} pode curar um Pokémon desmaiado:',
+            'has_charges': consume_charge,
+            'remaining_heals': heal_limit,
+            'healed_pokemon_names': [],
+            'ability_consumed': False,
+            'prompt': (
+                f'{pokemon_name} pode curar até {heal_limit} Pokémon desmaiado(s):'
+                if heal_limit > 1
+                else f'{pokemon_name} pode curar um Pokémon desmaiado:'
+            ),
+            'options': options,
+            'allowed_actions': ['resolve_pending_action'],
+        })
+        return state, {
+            'type': 'manual_pokemon_ability',
+            'pokemon': pokemon_name,
+            'ability_name': ability_name,
+            'effect_kind': effect_kind,
+            'awaiting_target': True,
+        }
+
+    if effect_kind == 'evolve_other':
+        if state['turn'].get('phase') == 'battle':
+            return None, 'Não é possível evoluir outro Pokémon durante uma batalha'
+        exclude_self = bool((action.get('params') or {}).get('exclude_self'))
+        options = _build_evolve_other_options(player, slot_key, exclude_self=exclude_self)
+        if not options:
+            return None, 'Nenhum Pokémon elegível para evoluir'
+        _set_pending_action(state, {
+            'type': 'evolve_other_choice',
+            'player_id': player_id,
+            'evolver_slot_key': slot_key,
+            'evolver_name': pokemon_name,
+            'ability_name': ability_name,
+            'has_charges': consume_charge,
+            'prompt': f'{pokemon_name} pode escolher um Pokémon para evoluir:',
+            'options': options,
+            'allowed_actions': ['resolve_pending_action'],
+        })
+        return state, {
+            'type': 'manual_pokemon_ability',
+            'pokemon': pokemon_name,
+            'ability_name': ability_name,
+            'effect_kind': effect_kind,
+            'awaiting_target': True,
+        }
+
+    if effect_kind == 'recharge_all_other_abilities':
+        if state['turn'].get('phase') == 'battle':
+            return None, 'Não é possível recarregar habilidades durante uma batalha'
+        restored = _restore_all_other_primary_ability_charges(player, slot_key)
+        if not restored:
+            return None, 'Nenhum outro Pokémon elegível para recarregar'
+        mark_primary_ability_used(pokemon, scope='turn', consume_charge=consume_charge)
+        restored_names = ', '.join(entry['pokemon_name'] for entry in restored)
+        _log(state, player['name'], f'Usou {ability_name} de {pokemon_name} para recarregar {restored_names}.')
+        return state, {
+            'type': 'manual_pokemon_ability',
+            'pokemon': pokemon_name,
+            'ability_name': ability_name,
+            'effect_kind': effect_kind,
+            'recharged_pokemon': [entry['pokemon_name'] for entry in restored],
+        }
+
+    if effect_kind == 'clone_in_game_pokemon':
+        if state['turn'].get('phase') == 'battle':
+            return None, 'Não é possível clonar Pokémon durante uma batalha'
+        options = _build_mewtwo_clone_options(state, player_id)
+        if not options:
+            return None, 'Nenhum Pokémon válido em jogo para clonar'
+        _set_pending_action(state, {
+            'type': 'mewtwo_clone_choice',
+            'player_id': player_id,
+            'cloner_slot_key': slot_key,
+            'cloner_name': pokemon_name,
+            'ability_name': ability_name,
+            'has_charges': consume_charge,
+            'prompt': f'{pokemon_name} pode copiar qualquer Pokémon em jogo que não seja lendário nem inicial:',
             'options': options,
             'allowed_actions': ['resolve_pending_action'],
         })
@@ -4998,13 +6251,18 @@ def _finalize_league_member_victory(state: dict, battle: dict, result: dict) -> 
         player['bonus_master_points'] = player.get('bonus_master_points', 0) + mp_reward
         sync_player_inventory(player)
         _log(state, player['name'], f"Derrotou {member_name} da Liga! +{mp_reward} MP")
-
-    state = _award_victory_cards(state, battle['challenger_id'], 1, source='league')
+    allow_raikou_bonus = bool(player and _player_has_alive_party_pokemon_with_effect(player, 'bonus_victory_on_gym_or_league_win'))
 
     next_index = member_index + 1
     if not is_champion and next_index < len(_LEAGUE_MEMBERS):
         state['turn']['battle'] = None
-        state = _queue_league_intermission(state, battle['challenger_id'], next_index, arrival_order)
+        state = _queue_league_victory_followups(
+            state,
+            battle['challenger_id'],
+            allow_raikou_bonus=allow_raikou_bonus,
+            next_member_index=next_index,
+            arrival_order=arrival_order,
+        )
         return state, {
             **result,
             'mode': 'league',
@@ -5021,7 +6279,13 @@ def _finalize_league_member_victory(state: dict, battle: dict, result: dict) -> 
         _log(state, player['name'], f"Derrotou o Campeão {member_name}! Pokémon League concluída!")
 
     state['turn']['battle'] = None
-    _check_league_end(state, battle['challenger_id'])
+    state = _queue_league_victory_followups(
+        state,
+        battle['challenger_id'],
+        allow_raikou_bonus=allow_raikou_bonus,
+        next_member_index=None,
+        arrival_order=arrival_order,
+    )
     return state, {
         **result,
         'mode': 'league',
@@ -5645,15 +6909,28 @@ def release_pokemon_for_capture(
     state['turn'].pop('pending_release_choice', None)
     state['turn']['phase'] = 'action'
     if resolution_type == 'reward':
+        repeat_reward = bool(pending.get('repeat_reward'))
+        reward_card = pending.get('reward_card') or {}
         finalized, result = _grant_reward_pokemon(
             state,
             player_id,
             pokemon,
             source=pending.get('reward_source', 'reward'),
+            repeat_reward=repeat_reward,
+            reward_card=reward_card,
         )
         if finalized is None:
             return None, result
         _log(finalized, player['name'], f"Recebeu {pokemon['name']} após liberar espaço")
+        if repeat_reward:
+            finalized = _queue_repeatable_reward_pokemon_choice(
+                finalized,
+                player_id,
+                source=pending.get('reward_source', 'reward'),
+                card=reward_card,
+                pokemon_name=pokemon.get('name', 'Pokémon'),
+            )
+            return finalized, {**result, 'released_pokemon': released, 'repeat_reward': True}
         finalized = _resume_pending_effects_or_finish_turn(finalized, player_id, end_turn_when_done=True)
         return finalized, {**result, 'released_pokemon': released}
 
@@ -5756,8 +7033,10 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
     pending_type = pending_action.get('type')
     if pending_type not in (
         'ability_decision',
+        'articuno_event_choice',
         'team_rocket_roll',
         'pokemart_roll',
+        'raikou_victory_bonus',
         'reward_choice',
         'gym_heal',
         'pokecenter_heal',
@@ -5770,8 +7049,14 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
         'battle_reroll_decision',
         'battle_bp_swap_decision',
         'heal_other_choice',
+        'evolve_other_choice',
+        'mewtwo_clone_choice',
         'trade_proposal',
         'abra_transfer_offer',
+        'event_copy_decision',
+        'knockout_redirect_decision',
+        'wobbuffet_counter_decision',
+        'trainer_repeat_decision',
     ):
         return None, 'Nenhuma escolha pendente'
     if pending_action.get('player_id') != player_id:
@@ -5786,6 +7071,9 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
         if pending_action.get('decision_kind') == 'move_roll':
             return _resolve_move_roll_ability_decision(state, player_id, pending_action, chosen)
         return None, 'Tipo de decisão de habilidade ainda não suportado'
+
+    if pending_type == 'articuno_event_choice':
+        return _resolve_articuno_event_choice(state, player_id, pending_action, chosen)
 
     if pending_type == 'capture_choice_decision':
         return _resolve_capture_choice_decision(state, player_id, pending_action, chosen)
@@ -5802,11 +7090,32 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
     if pending_type == 'heal_other_choice':
         return _resolve_heal_other_choice(state, player_id, pending_action, chosen)
 
+    if pending_type == 'evolve_other_choice':
+        return _resolve_evolve_other_choice(state, player_id, pending_action, chosen)
+
+    if pending_type == 'mewtwo_clone_choice':
+        return _resolve_mewtwo_clone_choice(state, player_id, pending_action, chosen)
+
+    if pending_type == 'raikou_victory_bonus':
+        return _resolve_raikou_victory_bonus_action(state, player_id, pending_action, chosen)
+
     if pending_type == 'trade_proposal':
-        return _resolve_abra_transfer_offer(state, player_id, pending_action, chosen)
+        return _resolve_trade_proposal(state, player_id, pending_action, chosen)
 
     if pending_type == 'abra_transfer_offer':
         return _resolve_abra_transfer_offer(state, player_id, pending_action, chosen)
+
+    if pending_type == 'event_copy_decision':
+        return _resolve_event_copy_decision(state, player_id, pending_action, chosen)
+
+    if pending_type == 'knockout_redirect_decision':
+        return _resolve_knockout_redirect_decision(state, player_id, pending_action, chosen)
+
+    if pending_type == 'wobbuffet_counter_decision':
+        return _resolve_wobbuffet_counter_decision(state, player_id, pending_action, chosen)
+
+    if pending_type == 'trainer_repeat_decision':
+        return _resolve_trainer_repeat_decision(state, player_id, pending_action, chosen)
 
     if pending_type == 'team_rocket_roll':
         return _resolve_team_rocket_roll_action(state, player_id, pending_action)
@@ -6011,6 +7320,7 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
         candidate_slots = list(pending_action.get('candidate_slots') or [])
         gym_id = pending_action.get('gym_id')
         leader_name = pending_action.get('leader_name', 'Lider')
+        allow_raikou_bonus = bool(pending_action.get('allow_raikou_bonus'))
 
         if chosen.get('id') != 'finish':
             slot_key = chosen.get('slot_key') or chosen.get('id')
@@ -6024,10 +7334,11 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
 
         if chosen.get('id') == 'finish' or remaining_heals <= 0:
             if pending_action.get('award_victory_card', True):
-                state = _award_victory_cards(state, player_id, 1, source='gym')
-            if not state['turn'].get('battle') and not state['turn'].get('pending_action'):
-                state['turn']['phase'] = 'end'
-                state = end_turn(state)
+                state = _queue_gym_victory_followups(
+                    state,
+                    player_id,
+                    allow_raikou_bonus=allow_raikou_bonus,
+                )
             return state, {
                 'success': True,
                 'type': 'gym_heal',
@@ -6043,12 +7354,14 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
             remaining_heals=remaining_heals,
             healed_slots=healed_slots,
             candidate_slots=candidate_slots,
+            allow_raikou_bonus=allow_raikou_bonus,
         )
         if not state['turn'].get('pending_action') and pending_action.get('award_victory_card', True):
-            state = _award_victory_cards(state, player_id, 1, source='gym')
-            if not state['turn'].get('battle') and not state['turn'].get('pending_action'):
-                state['turn']['phase'] = 'end'
-                state = end_turn(state)
+            state = _queue_gym_victory_followups(
+                state,
+                player_id,
+                allow_raikou_bonus=allow_raikou_bonus,
+            )
         return state, {
             'success': True,
             'type': 'gym_heal',
@@ -6075,15 +7388,40 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
             'charges_total': recharged['charges_total'],
         }
 
+    if chosen.get('stop_reward_loop'):
+        state = end_turn(state)
+        return state, {
+            'success': True,
+            'type': 'reward_choice',
+            'stopped': True,
+        }
+
     if 'pokemon_name' in chosen:
         pokemon, support = resolve_supported_pokemon_reward(chosen['pokemon_name'])
         if not support['supported'] or not pokemon:
             _log_warning(state, player['name'], f"recompensa ignorada por falta de suporte jogável: {chosen['pokemon_name']}")
             state = end_turn(state)
             return state, {'success': False, 'unsupported_pokemon': chosen['pokemon_name']}
-        result_state, result = _grant_reward_pokemon(state, player_id, pokemon, source=source)
+        repeat_reward = bool(chosen.get('repeat_reward'))
+        result_state, result = _grant_reward_pokemon(
+            state,
+            player_id,
+            pokemon,
+            source=source,
+            repeat_reward=repeat_reward,
+            reward_card=card,
+        )
         if result_state is None:
             return None, result
+        if repeat_reward and result_state['turn'].get('phase') != 'release_pokemon':
+            result_state = _queue_repeatable_reward_pokemon_choice(
+                result_state,
+                player_id,
+                source=source,
+                card=card,
+                pokemon_name=pokemon['name'],
+            )
+            return result_state, {'success': True, 'pokemon': pokemon, 'source': source, 'repeat_reward': True}
         if result_state['turn'].get('phase') != 'release_pokemon':
             result_state = end_turn(result_state)
         return result_state, {'success': True, 'pokemon': pokemon, 'source': source}
@@ -6284,6 +7622,7 @@ def _queue_gym_heal_action(
     remaining_heals: int,
     healed_slots: list[str],
     candidate_slots: list[str],
+    allow_raikou_bonus: bool = False,
 ) -> dict:
     player = _get_player(state, player_id)
     if not player:
@@ -6316,6 +7655,7 @@ def _queue_gym_heal_action(
         'healed_slots': list(healed_slots),
         'candidate_slots': list(candidate_slots),
         'award_victory_card': True,
+        'allow_raikou_bonus': bool(allow_raikou_bonus),
         'prompt': f"Voce venceu {leader_name}! Escolha ate {remaining_heals} Pokemon para curar.",
         'options': options,
         'allowed_actions': ['resolve_pending_action'],
@@ -6390,6 +7730,7 @@ def _finalize_gym_victory(state: dict, battle: dict, result: dict) -> tuple[dict
 
     state['turn']['battle'] = None
     candidate_slots = list(battle.get('defeated_player_slots') or [])
+    allow_raikou_bonus = bool(player and _player_has_alive_party_pokemon_with_effect(player, 'bonus_victory_on_gym_or_league_win'))
     state = _queue_gym_heal_action(
         state,
         battle['challenger_id'],
@@ -6398,13 +7739,15 @@ def _finalize_gym_victory(state: dict, battle: dict, result: dict) -> tuple[dict
         remaining_heals=3,
         healed_slots=[],
         candidate_slots=candidate_slots,
+        allow_raikou_bonus=allow_raikou_bonus,
     )
 
     if not state['turn'].get('pending_action'):
-        state = _award_victory_cards(state, battle['challenger_id'], 1, source='gym')
-        if not state['turn'].get('battle') and not state['turn'].get('pending_action'):
-            state['turn']['phase'] = 'end'
-            state = end_turn(state)
+        state = _queue_gym_victory_followups(
+            state,
+            battle['challenger_id'],
+            allow_raikou_bonus=allow_raikou_bonus,
+        )
 
     return state, {
         **result,
@@ -6455,7 +7798,7 @@ def _finalize_gym_loss(state: dict, battle: dict, result: dict) -> tuple[dict, d
         'recovery_pending': False,
         'turn_ended': False,
     }
-    if not _build_player_battle_pool(player, include_knocked_out=False):
+    if not _player_has_any_conscious_pokemon(player):
         state, return_data = _handle_total_knockout_recovery(
             state,
             battle['challenger_id'],
@@ -6596,6 +7939,10 @@ def _resolve_gym_battle(state: dict) -> tuple[dict, dict]:
         defender_score=result['defender_score'],
         winner_message='Empate no round do ginásio. Role novamente.'
         if battle_tied
+        else f"{challenger_choice['name']} venceu automaticamente por habilidade."
+        if result.get('challenger_auto_win')
+        else f"{defender_choice['name']} venceu automaticamente por habilidade."
+        if result.get('defender_auto_win')
         else f"{player['name'] if result['challenger_wins'] else leader_name} venceu o round.",
     )
 
@@ -6628,85 +7975,26 @@ def _resolve_gym_battle(state: dict) -> tuple[dict, dict]:
             },
         )
 
-    if result['challenger_wins']:
-        if current_slot and can_evolve(challenger_choice) and not challenger_choice.get('is_baby', False):
-            pending = battle.setdefault('pending_evolution_slots', [])
-            if current_slot not in pending:
-                pending.append(current_slot)
-        if current_leader_index not in battle['defeated_leader_indexes']:
-            battle['defeated_leader_indexes'].append(current_leader_index)
-        _log(state, player['name'], f"{challenger_choice['name']} derrotou {defender_choice['name']} no ginasio!")
-
-        refreshed_choice = copy.deepcopy(_get_player_pokemon_slot(player, current_slot)) if current_slot else None
-        if refreshed_choice:
-            refreshed_choice['battle_slot_key'] = current_slot
-        battle['challenger_choice'] = refreshed_choice
-        battle['challenger_roll'] = None
-        battle['defender_roll'] = None
-        next_choice = _prepare_gym_leader_choice(battle)
-
-        if next_choice:
-            battle['sub_phase'] = 'rolling'
-            battle['choice_stage'] = 'complete'
-            battle['round_number'] = int(battle.get('round_number', 1) or 1) + 1
-            state['turn']['battle'] = battle
-            state['turn']['phase'] = 'battle'
-            _log(state, leader_name, f"Enviou {next_choice['name']} para continuar a batalha de ginasio.")
-            return state, {
-                **result_payload,
-                'mode': 'gym',
-                'winner_id': player['id'],
-                'loser_id': None,
-                'winner_name': player['name'],
-                'loser_name': leader_name,
-                'winner_pokemon': challenger_choice['name'],
-                'loser_pokemon': defender_choice['name'],
-                'battle_finished': False,
-                'continues': True,
-                'needs_new_choice': False,
-                'next_leader_pokemon': next_choice['name'],
-            }
-
-        state['turn']['battle'] = battle
-        if battle.get('mode') == 'league':
-            return _finalize_league_member_victory(state, battle, result_payload)
-        return _finalize_gym_victory(state, battle, result_payload)
-
-    if current_slot and current_slot not in battle['defeated_player_slots']:
-        battle['defeated_player_slots'].append(current_slot)
-    _set_pokemon_knocked_out(player, current_slot, True)
-    sync_player_inventory(player)
-    _log(state, leader_name, f"{defender_choice['name']} derrotou {challenger_choice['name']}!")
-
-    available_pool = _build_player_battle_pool(player, include_knocked_out=False)
-    if available_pool:
-        battle['challenger_choice'] = None
-        battle['challenger_roll'] = None
-        battle['defender_roll'] = None
-        battle['sub_phase'] = 'choosing'
-        battle['choice_stage'] = 'challenger'
-        battle['round_number'] = int(battle.get('round_number', 1) or 1) + 1
+    battle['pending_resolution_result'] = copy.deepcopy(result)
+    if _queue_knockout_ability_decision_if_needed(
+        state,
+        battle,
+        winner_is_challenger=bool(result['challenger_wins']),
+    ):
         state['turn']['battle'] = battle
         state['turn']['phase'] = 'battle'
-        _log(state, player['name'], f"Escolha outro Pokemon para continuar contra {defender_choice['name']}.")
         return state, {
             **result_payload,
             'mode': 'gym',
-            'winner_id': None,
-            'loser_id': player['id'],
-            'winner_name': leader_name,
-            'loser_name': player['name'],
-            'winner_pokemon': defender_choice['name'],
-            'loser_pokemon': challenger_choice['name'],
-            'battle_finished': False,
-            'continues': True,
-            'needs_new_choice': True,
+            'awaiting_knockout_decision': True,
         }
 
-    state['turn']['battle'] = battle
-    if battle.get('mode') == 'league':
-        return _finalize_league_member_loss(state, battle, result_payload)
-    return _finalize_gym_loss(state, battle, result_payload)
+    return _finalize_gym_round_outcome(
+        state,
+        battle,
+        result,
+        challenger_wins=bool(result['challenger_wins']),
+    )
 
 
 def _build_trainer_opponent_card(battle: dict) -> dict:
@@ -6749,8 +8037,12 @@ def _start_trainer_battle(state: dict, player_id: str, trainer_context: dict, so
         'reward_plan': copy.deepcopy(trainer_context.get('reward_plan') or {}),
         'source_card_title': trainer_context.get('card_title', 'Trainer Battle'),
         'source_card_category': trainer_context.get('card_category'),
-        'remaining_rounds': int((trainer_context.get('reward_plan') or {}).get('max_battles', 1) or 1),
-        'pending_evolution_slots': [],
+        'remaining_rounds': int(
+            trainer_context.get('remaining_rounds')
+            or (trainer_context.get('reward_plan') or {}).get('max_battles', 1)
+            or 1
+        ),
+        'pending_evolution_slots': copy.deepcopy(trainer_context.get('pending_evolution_slots') or []),
     }
     clear_revealed_card(state)
     _log(state, player['name'], f"Iniciou batalha de treinador contra {state['turn']['battle']['defender_name']} ({source})")
@@ -6762,6 +8054,9 @@ def _build_recharge_ability_reward_options(player: dict) -> list[dict]:
     for slot_key, pokemon in _iter_player_battle_slots(player, include_knocked_out=True):
         sync_pokemon_ability_state(pokemon)
         ability = next(iter(pokemon.get('abilities') or []), None)
+        recharge_effect_params = _get_pokemon_effect_params(pokemon, 'recharge_all_other_abilities') or {}
+        if recharge_effect_params.get('self_recharge_blocked'):
+            continue
         if not isinstance(ability, dict) or ability.get('charges_total') is None:
             continue
         charges_total = int(ability.get('charges_total') or 0)
@@ -6786,6 +8081,9 @@ def _restore_primary_ability_charge_for_slot(player: dict, slot_key: str) -> dic
         return None
 
     sync_pokemon_ability_state(pokemon)
+    recharge_effect_params = _get_pokemon_effect_params(pokemon, 'recharge_all_other_abilities') or {}
+    if recharge_effect_params.get('self_recharge_blocked'):
+        return None
     ability = next(iter(pokemon.get('abilities') or []), None)
     if not isinstance(ability, dict) or ability.get('charges_total') is None:
         return None
@@ -6804,6 +8102,31 @@ def _restore_primary_ability_charge_for_slot(player: dict, slot_key: str) -> dic
         'charges_remaining': charges_after,
         'charges_total': charges_total,
     }
+
+
+def _restore_all_other_primary_ability_charges(player: dict, excluding_slot_key: str | None) -> list[dict]:
+    restored: list[dict] = []
+    for target_slot_key, pokemon in _iter_player_battle_slots(player, include_knocked_out=True):
+        if target_slot_key == excluding_slot_key:
+            continue
+        sync_pokemon_ability_state(pokemon)
+        recharge_effect_params = _get_pokemon_effect_params(pokemon, 'recharge_all_other_abilities') or {}
+        if recharge_effect_params.get('self_recharge_blocked'):
+            continue
+        ability = next(iter(pokemon.get('abilities') or []), None)
+        if not isinstance(ability, dict) or ability.get('charges_total') is None:
+            continue
+        charges_total = int(ability.get('charges_total') or 0)
+        charges_remaining = int(ability.get('charges_remaining') or 0)
+        if charges_remaining >= charges_total:
+            continue
+        adjust_primary_ability_charges(pokemon, charges_total - charges_remaining)
+        restored.append({
+            'slot_key': target_slot_key,
+            'pokemon_name': pokemon.get('name', target_slot_key),
+            'charges_total': charges_total,
+        })
+    return restored
 
 
 def _apply_trainer_battle_rewards(state: dict, player_id: str, battle: dict) -> list[dict]:
@@ -6879,6 +8202,103 @@ def _apply_deferred_trainer_evolutions(state: dict, player_id: str, slot_keys: l
     return evolved
 
 
+def _summarize_trainer_rewards(rewards: list[dict]) -> str:
+    return ', '.join(
+        f"{reward['count']} carta(s) de vitória" if reward['type'] == 'victory_card'
+        else f"{reward['amount']} Master Points" if reward['type'] == 'master_points'
+        else 'um turno extra' if reward['type'] == 'extra_turn'
+        else f"1 carga para {reward['pokemon']}" if reward['type'] == 'ability_charge'
+        else reward['type']
+        for reward in rewards
+    )
+
+
+def _queue_trainer_repeat_decision(state: dict, battle: dict, player: dict, rewards: list[dict]) -> None:
+    rounds_left = max(int(battle.get('remaining_rounds', 1) or 1) - 1, 0)
+    trainer_name = battle.get('defender_name', 'Trainer')
+    reward_summary = _summarize_trainer_rewards(rewards)
+
+    state['turn']['battle'] = None
+    state['turn']['phase'] = 'action'
+    _set_pending_action(state, {
+        'type': 'trainer_repeat_decision',
+        'player_id': player['id'],
+        'trainer_name': trainer_name,
+        'trainer_bp': int(battle.get('defender_bp', 3) or 3),
+        'source': battle.get('source', 'event_card'),
+        'reward_plan': copy.deepcopy(battle.get('reward_plan') or {}),
+        'source_card_title': battle.get('source_card_title', 'Trainer Battle'),
+        'source_card_category': battle.get('source_card_category'),
+        'remaining_rounds': rounds_left,
+        'pending_evolution_slots': copy.deepcopy(battle.get('pending_evolution_slots') or []),
+        'prompt': f'Você venceu {trainer_name}. Deseja lutar novamente? Restam até {rounds_left} combate(s).',
+        'options': [
+            {'id': 'continue', 'label': 'Continuar lutando'},
+            {'id': 'stop', 'label': 'Parar por aqui'},
+        ],
+        'allowed_actions': ['resolve_pending_action'],
+    })
+    _log(
+        state,
+        'Duelo',
+        f"{player['name']} venceu a batalha contra {trainer_name}"
+        + (f" e recebeu {reward_summary}" if reward_summary else '')
+        + f". Pode lutar novamente; restam até {rounds_left} combate(s).",
+    )
+
+
+def _resolve_trainer_repeat_decision(
+    state: dict,
+    player_id: str,
+    pending_action: dict,
+    chosen: dict,
+) -> tuple[dict | None, str | dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    trainer_name = pending_action.get('trainer_name', 'Trainer')
+    rounds_left = int(pending_action.get('remaining_rounds', 0) or 0)
+    pending_slots = copy.deepcopy(pending_action.get('pending_evolution_slots') or [])
+    _clear_pending_action(state)
+
+    if chosen.get('id') == 'continue':
+        _log(state, player['name'], f"Decidiu continuar a série de batalhas contra {trainer_name}.")
+        state = _start_trainer_battle(
+            state,
+            player_id,
+            {
+                'trainer_name': trainer_name,
+                'trainer_bp': int(pending_action.get('trainer_bp', 3) or 3),
+                'reward_plan': copy.deepcopy(pending_action.get('reward_plan') or {}),
+                'card_title': pending_action.get('source_card_title', 'Trainer Battle'),
+                'card_category': pending_action.get('source_card_category'),
+                'remaining_rounds': rounds_left,
+                'pending_evolution_slots': pending_slots,
+            },
+            source=pending_action.get('source', 'event_card'),
+        )
+        return state, {
+            'success': True,
+            'decision': 'continue',
+            'trainer_name': trainer_name,
+            'remaining_rounds': rounds_left,
+        }
+
+    state['turn']['battle'] = None
+    state['turn']['phase'] = 'end'
+    evolved = _apply_deferred_trainer_evolutions(state, player_id, pending_slots, trainer_name)
+    _log(state, 'Duelo', f"{player['name']} decidiu parar após derrotar {trainer_name}.")
+    if not state['turn'].get('pending_action'):
+        state = end_turn(state)
+    return state, {
+        'success': True,
+        'decision': 'stop',
+        'trainer_name': trainer_name,
+        'evolved': evolved,
+    }
+
+
 def _resolve_trainer_battle(state: dict) -> tuple[dict, dict]:
     battle = copy.deepcopy(state['turn']['battle'])
     player = _get_player(state, battle['challenger_id'])
@@ -6929,20 +8349,12 @@ def _resolve_trainer_battle(state: dict) -> tuple[dict, dict]:
         defender_score=result['defender_score'],
         winner_message='Empate na batalha de treinador. Role novamente.'
         if battle_tied
+        else f"{player_pokemon['name']} venceu automaticamente por habilidade."
+        if result.get('challenger_auto_win')
+        else f"{trainer_card['name']} venceu automaticamente por habilidade."
+        if result.get('defender_auto_win')
         else f"{player['name'] if player_wins else battle['defender_name']} venceu a batalha.",
     )
-
-    rewards: list[dict] = []
-    continues = False
-    evolved: list[dict] = []
-    return_data = {
-        'returned_to_tile_id': None,
-        'returned_to_tile_name': None,
-        'stayed_on_safe_tile': False,
-        'recovery_pending': False,
-        'turn_ended': False,
-    }
-    current_slot = player_pokemon.get('battle_slot_key')
 
     if battle_tied:
         return _prepare_tied_battle_reroll(
@@ -6958,98 +8370,29 @@ def _resolve_trainer_battle(state: dict) -> tuple[dict, dict]:
             },
         )
 
-    if player_wins:
-        if current_slot and can_evolve(player_pokemon) and not player_pokemon.get('is_baby', False):
-            pending = battle.setdefault('pending_evolution_slots', [])
-            if current_slot not in pending:
-                pending.append(current_slot)
-        rewards = _apply_trainer_battle_rewards(state, player['id'], battle)
-        follow_up_battle = state['turn'].get('phase') == 'battle' and (state['turn'].get('battle') or {}).get('source') == 'victory_card'
-        if battle.get('reward_plan', {}).get('repeat_battle') and int(battle.get('remaining_rounds', 1) or 1) > 1:
-            next_battle = copy.deepcopy(battle)
-            next_battle['challenger_choice'] = None
-            next_battle['challenger_roll'] = None
-            next_battle['defender_roll'] = None
-            next_battle['sub_phase'] = 'choosing'
-            next_battle['choice_stage'] = 'challenger'
-            next_battle['remaining_rounds'] = int(next_battle.get('remaining_rounds', 1) or 1) - 1
-            state['turn']['battle'] = next_battle
-            state['turn']['phase'] = 'battle'
-            continues = True
-            _log(state, 'Duelo', f"{player['name']} venceu e pode batalhar novamente contra {battle['defender_name']}")
-        elif follow_up_battle:
-            evolved = _apply_deferred_trainer_evolutions(
-                state,
-                player['id'],
-                battle.get('pending_evolution_slots') or [],
-                battle['defender_name'],
-            )
-            continues = True
-            _log(state, 'Duelo', f"{player['name']} venceu a batalha contra {battle['defender_name']} e iniciou uma nova batalha de recompensa")
-        else:
-            state['turn']['battle'] = None
-            state['turn']['phase'] = 'end'
-            evolved = _apply_deferred_trainer_evolutions(
-                state,
-                player['id'],
-                battle.get('pending_evolution_slots') or [],
-                battle['defender_name'],
-            )
-            reward_summary = ', '.join(
-                f"{reward['count']} carta(s) de vitória" if reward['type'] == 'victory_card'
-                else f"{reward['amount']} Master Points" if reward['type'] == 'master_points'
-                else 'um turno extra' if reward['type'] == 'extra_turn'
-                else f"1 carga para {reward['pokemon']}" if reward['type'] == 'ability_charge'
-                else reward['type']
-                for reward in rewards
-            )
-            _log(state, 'Duelo', f"{player['name']} venceu a batalha contra {battle['defender_name']}" + (f" e recebeu {reward_summary}" if reward_summary else ''))
-            if not state['turn'].get('pending_action'):
-                state = end_turn(state)
-    else:
-        if current_slot:
-            knocked_out = _set_pokemon_knocked_out(player, current_slot, True)
-            if knocked_out is not None:
-                sync_player_inventory(player)
-                _log(state, player['name'], f"{player_pokemon['name']} ficou nocauteado e não pode ser usado até ser curado.")
-        state['turn']['battle'] = None
-        state['turn']['phase'] = 'end'
-        evolved = _apply_deferred_trainer_evolutions(
-            state,
-            player['id'],
-            battle.get('pending_evolution_slots') or [],
-            battle['defender_name'],
-        )
-        if not _build_player_battle_pool(player, include_knocked_out=False):
-            state, return_data = _handle_total_knockout_recovery(
-                state,
-                player['id'],
-                source=f"perder a batalha contra {battle['defender_name']}",
-            )
-        _log(state, 'Duelo', f"{battle['defender_name']} venceu a batalha contra {player['name']}")
-        if not (return_data.get('recovery_pending') or return_data.get('turn_ended')):
-            state = end_turn(state)
+    battle['pending_resolution_result'] = copy.deepcopy(result)
+    if _queue_knockout_ability_decision_if_needed(
+        state,
+        battle,
+        winner_is_challenger=player_wins,
+    ):
+        state['turn']['battle'] = battle
+        state['turn']['phase'] = 'battle'
+        return state, {
+            **result,
+            'mode': 'trainer',
+            'challenger_name': player['name'],
+            'defender_name': battle['defender_name'],
+            'awaiting_knockout_decision': True,
+        }
 
-    return state, {
-        **result,
-        'winner_id': player['id'] if player_wins else None,
-        'loser_id': None if player_wins else player['id'],
-        'challenger_name': player['name'],
-        'defender_name': battle['defender_name'],
-        'winner_name': player['name'] if player_wins else battle['defender_name'],
-        'loser_name': battle['defender_name'] if player_wins else player['name'],
-        'winner_pokemon': player_pokemon['name'] if player_wins else trainer_card['name'],
-        'loser_pokemon': trainer_card['name'] if player_wins else player_pokemon['name'],
-        'mode': 'trainer',
-        'rewards': rewards,
-        'continues': continues,
-        'evolved': evolved,
-        'knocked_out_pokemon': None if player_wins else player_pokemon['name'],
-        'returned_to_tile_id': return_data.get('returned_to_tile_id'),
-        'returned_to_tile_name': return_data.get('returned_to_tile_name'),
-        'stayed_on_safe_tile': return_data.get('stayed_on_safe_tile', False),
-        'recovery_pending': return_data.get('recovery_pending', False),
-    }
+    return _finalize_trainer_battle_outcome(
+        state,
+        battle,
+        result,
+        player_wins=player_wins,
+    )
+
 
 def propose_trade(
     state: dict,
@@ -7111,7 +8454,6 @@ def propose_trade(
         'offered_pokemon': offered_name,
         'preferred_requested_slot_key': str(requested_slot_key or '').strip() or None,
     }
-
 
 def start_duel(state: dict, challenger_id: str, defender_id: str) -> dict | None:
     """Inicia um duelo entre dois jogadores."""
@@ -7225,6 +8567,11 @@ def register_battle_choice(
     if team_bp_bonus > 0:
         chosen['battle_points'] = chosen.get('battle_points', 0) + team_bp_bonus
         chosen['team_bonus_bp'] = team_bp_bonus
+
+    auto_win_params = _get_pokemon_effect_params(chosen, 'battle_auto_win_threshold') or {}
+    auto_win_threshold = auto_win_params.get('opponent_bp_lte')
+    if auto_win_threshold is not None:
+        chosen['battle_auto_win_threshold'] = int(auto_win_threshold)
 
     if is_challenger:
         battle['challenger_choice'] = chosen
@@ -7464,6 +8811,317 @@ def _apply_post_battle_effects(
              f"Dynamic Punch: {loser['name']} perdeu 1 item! (sistema de itens pendente)")
 
 
+def _knock_out_player_slot_with_log(state: dict, player: dict, slot_key: str | None) -> dict | None:
+    knocked_out = _set_pokemon_knocked_out(player, slot_key, True)
+    if knocked_out is not None:
+        sync_player_inventory(player)
+        _log(state, player['name'], f"{knocked_out['name']} ficou nocauteado e não pode ser usado até ser curado.")
+    return knocked_out
+
+
+def _finalize_player_duel_outcome(
+    state: dict,
+    battle: dict,
+    result: dict,
+    *,
+    winner_is_challenger: bool,
+    knocked_out_slot: str | None = None,
+) -> tuple[dict, dict]:
+    challenger = _get_player(state, battle['challenger_id'])
+    defender = _get_player(state, battle['defender_id'])
+    ch_pokemon = battle['challenger_choice']
+    def_pokemon = battle['defender_choice']
+
+    winner = challenger if winner_is_challenger else defender
+    loser = defender if winner_is_challenger else challenger
+    winner_pokemon = ch_pokemon if winner_is_challenger else def_pokemon
+    loser_pokemon = def_pokemon if winner_is_challenger else ch_pokemon
+    loser_slot = knocked_out_slot if knocked_out_slot is not None else loser_pokemon.get('battle_slot_key')
+    knocked_out = _knock_out_player_slot_with_log(state, loser, loser_slot)
+
+    winner['bonus_points'] = winner.get('bonus_points', 0) + 5
+    winner['bonus_master_points'] = winner.get('bonus_master_points', 0) + 5
+    sync_player_inventory(winner)
+    _log(state, winner['name'], "Venceu o duelo! +5 Master Points")
+
+    state['turn']['battle'] = None
+    state['turn']['phase'] = 'end'
+    state = _award_victory_cards(state, winner['id'], 1, source='duel')
+
+    _apply_post_battle_effects(state, winner, loser, winner_pokemon, loser_pokemon)
+    _queue_item_choice(state, winner['id'], 'Efeito de batalha')
+
+    evolved = None
+    if can_evolve(winner_pokemon):
+        is_baby = winner_pokemon.get('is_baby', False)
+        if not is_baby:
+            evolved = _try_evolve(state, winner['id'], winner_pokemon, heal_on_evolve=True)
+            if evolved:
+                _log(state, winner['name'], f"{winner_pokemon['name']} evoluiu para {evolved['name']} e foi curado automaticamente após a batalha!")
+
+    return_data = {
+        'returned_to_tile_id': None,
+        'returned_to_tile_name': None,
+        'stayed_on_safe_tile': False,
+        'recovery_pending': False,
+        'turn_ended': False,
+    }
+    if not _player_has_any_conscious_pokemon(loser):
+        state, return_data = _handle_total_knockout_recovery(
+            state,
+            loser['id'],
+            source=f"perder o duelo contra {winner['name']}",
+        )
+
+    if loser_pokemon.get('name') == 'Abra':
+        left_player = _get_player_to_left(state, loser['id'])
+        if left_player and left_player['id'] != loser['id']:
+            state.setdefault('abra_transfer_offers', []).append({
+                'from_player_id': loser['id'],
+                'to_player_id': left_player['id'],
+                'pokemon': copy.deepcopy(loser_pokemon),
+                'loser_slot': loser_slot,
+            })
+            _log(state, loser['name'],
+                 f"Abra perdeu a batalha! {left_player['name']} poderá adicionar Abra ao time no próximo turno.")
+
+    _log(state, 'Duelo', f"{winner['name']} venceu a batalha e comprou uma carta de vitória")
+
+    battle_result = {
+        **result,
+        'mode': 'player',
+        'challenger_name': challenger['name'],
+        'defender_name': defender['name'],
+        'winner_id': winner['id'],
+        'loser_id': loser['id'],
+        'winner_name': winner['name'],
+        'loser_name': loser['name'],
+        'evolved': evolved,
+        'winner_pokemon': winner_pokemon['name'],
+        'loser_pokemon': loser_pokemon['name'],
+        'pluspower_used': bool(winner_pokemon.get('pluspower_applied') or loser_pokemon.get('pluspower_applied')),
+        'knocked_out_pokemon': knocked_out.get('name') if knocked_out else None,
+        'returned_to_tile_id': return_data.get('returned_to_tile_id'),
+        'returned_to_tile_name': return_data.get('returned_to_tile_name'),
+        'stayed_on_safe_tile': return_data.get('stayed_on_safe_tile', False),
+        'recovery_pending': return_data.get('recovery_pending', False),
+    }
+    return state, battle_result
+
+
+def _finalize_trainer_battle_outcome(
+    state: dict,
+    battle: dict,
+    result: dict,
+    *,
+    player_wins: bool,
+    knocked_out_slot: str | None = None,
+) -> tuple[dict, dict]:
+    player = _get_player(state, battle['challenger_id'])
+    trainer_card = copy.deepcopy(battle.get('defender_choice') or _build_trainer_opponent_card(battle))
+    player_pokemon = battle['challenger_choice']
+    current_slot = player_pokemon.get('battle_slot_key')
+
+    rewards: list[dict] = []
+    continues = False
+    evolved: list[dict] = []
+    return_data = {
+        'returned_to_tile_id': None,
+        'returned_to_tile_name': None,
+        'stayed_on_safe_tile': False,
+        'recovery_pending': False,
+        'turn_ended': False,
+    }
+    knocked_out = None
+
+    if player_wins:
+        if current_slot and can_evolve(player_pokemon) and not player_pokemon.get('is_baby', False):
+            pending = battle.setdefault('pending_evolution_slots', [])
+            if current_slot not in pending:
+                pending.append(current_slot)
+        rewards = _apply_trainer_battle_rewards(state, player['id'], battle)
+        follow_up_battle = state['turn'].get('phase') == 'battle' and (state['turn'].get('battle') or {}).get('source') == 'victory_card'
+        if battle.get('reward_plan', {}).get('repeat_battle') and int(battle.get('remaining_rounds', 1) or 1) > 1:
+            _queue_trainer_repeat_decision(state, battle, player, rewards)
+            continues = True
+        elif follow_up_battle:
+            evolved = _apply_deferred_trainer_evolutions(
+                state,
+                player['id'],
+                battle.get('pending_evolution_slots') or [],
+                battle['defender_name'],
+            )
+            continues = True
+            _log(state, 'Duelo', f"{player['name']} venceu a batalha contra {battle['defender_name']} e iniciou uma nova batalha de recompensa")
+        else:
+            state['turn']['battle'] = None
+            state['turn']['phase'] = 'end'
+            evolved = _apply_deferred_trainer_evolutions(
+                state,
+                player['id'],
+                battle.get('pending_evolution_slots') or [],
+                battle['defender_name'],
+            )
+            reward_summary = _summarize_trainer_rewards(rewards)
+            _log(state, 'Duelo', f"{player['name']} venceu a batalha contra {battle['defender_name']}" + (f" e recebeu {reward_summary}" if reward_summary else ''))
+            if not state['turn'].get('pending_action'):
+                state = _resume_pending_effects_or_finish_turn(state, player['id'], end_turn_when_done=True)
+    else:
+        knocked_out = _knock_out_player_slot_with_log(state, player, knocked_out_slot if knocked_out_slot is not None else current_slot)
+        state['turn']['battle'] = None
+        state['turn']['phase'] = 'end'
+        evolved = _apply_deferred_trainer_evolutions(
+            state,
+            player['id'],
+            battle.get('pending_evolution_slots') or [],
+            battle['defender_name'],
+        )
+        if not _player_has_any_conscious_pokemon(player):
+            state, return_data = _handle_total_knockout_recovery(
+                state,
+                player['id'],
+                source=f"perder a batalha contra {battle['defender_name']}",
+            )
+        _log(state, 'Duelo', f"{battle['defender_name']} venceu a batalha contra {player['name']}")
+        if not (return_data.get('recovery_pending') or return_data.get('turn_ended')):
+            state = _resume_pending_effects_or_finish_turn(state, player['id'], end_turn_when_done=True)
+
+    return state, {
+        **result,
+        'winner_id': player['id'] if player_wins else None,
+        'loser_id': None if player_wins else player['id'],
+        'challenger_name': player['name'],
+        'defender_name': battle['defender_name'],
+        'winner_name': player['name'] if player_wins else battle['defender_name'],
+        'loser_name': battle['defender_name'] if player_wins else player['name'],
+        'winner_pokemon': player_pokemon['name'] if player_wins else trainer_card['name'],
+        'loser_pokemon': trainer_card['name'] if player_wins else player_pokemon['name'],
+        'mode': 'trainer',
+        'rewards': rewards,
+        'continues': continues,
+        'evolved': evolved,
+        'knocked_out_pokemon': knocked_out.get('name') if knocked_out else None,
+        'returned_to_tile_id': return_data.get('returned_to_tile_id'),
+        'returned_to_tile_name': return_data.get('returned_to_tile_name'),
+        'stayed_on_safe_tile': return_data.get('stayed_on_safe_tile', False),
+        'recovery_pending': return_data.get('recovery_pending', False),
+    }
+
+
+def _finalize_gym_round_outcome(
+    state: dict,
+    battle: dict,
+    result: dict,
+    *,
+    challenger_wins: bool,
+    knocked_out_slot: str | None = None,
+) -> tuple[dict, dict]:
+    player = _get_player(state, battle['challenger_id'])
+    leader_name = battle.get('defender_name', 'Lider')
+    challenger_choice = battle['challenger_choice']
+    defender_choice = battle['defender_choice']
+    current_slot = challenger_choice.get('battle_slot_key')
+    current_leader_index = int(battle.get('leader_current_index', 0) or 0)
+    result_payload = {
+        **result,
+        'gym_id': battle['gym_id'],
+        'gym_name': battle.get('gym_name'),
+        'leader_name': leader_name,
+        'badge': battle.get('badge_name'),
+        'challenger_name': player['name'],
+        'defender_name': leader_name,
+        'current_leader_pokemon': defender_choice['name'],
+        'player_pokemon': challenger_choice['name'],
+    }
+
+    if challenger_wins:
+        if current_slot and can_evolve(challenger_choice) and not challenger_choice.get('is_baby', False):
+            pending = battle.setdefault('pending_evolution_slots', [])
+            if current_slot not in pending:
+                pending.append(current_slot)
+        if current_leader_index not in battle['defeated_leader_indexes']:
+            battle['defeated_leader_indexes'].append(current_leader_index)
+        _log(state, player['name'], f"{challenger_choice['name']} derrotou {defender_choice['name']} no ginasio!")
+
+        refreshed_choice = copy.deepcopy(_get_player_pokemon_slot(player, current_slot)) if current_slot else None
+        if refreshed_choice:
+            refreshed_choice['battle_slot_key'] = current_slot
+        battle['challenger_choice'] = refreshed_choice
+        battle['challenger_roll'] = None
+        battle['defender_roll'] = None
+        battle.pop('pending_resolution_result', None)
+        next_choice = _prepare_gym_leader_choice(battle)
+
+        if next_choice:
+            battle['sub_phase'] = 'rolling'
+            battle['choice_stage'] = 'complete'
+            battle['round_number'] = int(battle.get('round_number', 1) or 1) + 1
+            state['turn']['battle'] = battle
+            state['turn']['phase'] = 'battle'
+            _log(state, leader_name, f"Enviou {next_choice['name']} para continuar a batalha de ginasio.")
+            return state, {
+                **result_payload,
+                'mode': 'gym',
+                'winner_id': player['id'],
+                'loser_id': None,
+                'winner_name': player['name'],
+                'loser_name': leader_name,
+                'winner_pokemon': challenger_choice['name'],
+                'loser_pokemon': defender_choice['name'],
+                'battle_finished': False,
+                'continues': True,
+                'needs_new_choice': False,
+                'next_leader_pokemon': next_choice['name'],
+                'knocked_out_pokemon': defender_choice['name'],
+            }
+
+        state['turn']['battle'] = battle
+        if battle.get('mode') == 'league':
+            return _finalize_league_member_victory(state, battle, result_payload)
+        return _finalize_gym_victory(state, battle, result_payload)
+
+    actual_ko_slot = knocked_out_slot if knocked_out_slot is not None else current_slot
+    if actual_ko_slot and actual_ko_slot not in battle['defeated_player_slots']:
+        battle['defeated_player_slots'].append(actual_ko_slot)
+    knocked_out = _knock_out_player_slot_with_log(state, player, actual_ko_slot)
+    _log(state, leader_name, f"{defender_choice['name']} derrotou {challenger_choice['name']}!")
+
+    available_pool = _build_player_battle_pool(player, include_knocked_out=False)
+    if available_pool:
+        battle['challenger_choice'] = None
+        battle['challenger_roll'] = None
+        battle['defender_roll'] = None
+        battle['sub_phase'] = 'choosing'
+        battle['choice_stage'] = 'challenger'
+        battle['round_number'] = int(battle.get('round_number', 1) or 1) + 1
+        battle.pop('pending_resolution_result', None)
+        state['turn']['battle'] = battle
+        state['turn']['phase'] = 'battle'
+        _log(state, player['name'], f"Escolha outro Pokemon para continuar contra {defender_choice['name']}.")
+        return state, {
+            **result_payload,
+            'mode': 'gym',
+            'winner_id': None,
+            'loser_id': player['id'],
+            'winner_name': leader_name,
+            'loser_name': player['name'],
+            'winner_pokemon': defender_choice['name'],
+            'loser_pokemon': challenger_choice['name'],
+            'battle_finished': False,
+            'continues': True,
+            'needs_new_choice': True,
+            'knocked_out_pokemon': knocked_out.get('name') if knocked_out else None,
+        }
+
+    state['turn']['battle'] = battle
+    if battle.get('mode') == 'league':
+        return _finalize_league_member_loss(state, battle, result_payload)
+    return _finalize_gym_loss(state, battle, {
+        **result_payload,
+        'knocked_out_pokemon': knocked_out.get('name') if knocked_out else None,
+    })
+
+
 def _resolve_duel(state: dict) -> tuple[dict, dict]:
     battle = state['turn']['battle']
     battle_source = battle.get('source')
@@ -7519,6 +9177,10 @@ def _resolve_duel(state: dict) -> tuple[dict, dict]:
         defender_score=result['defender_score'],
         winner_message='Empate na batalha. Ambos devem rolar novamente.'
         if battle_tied
+        else f"{ch_pokemon['name']} venceu automaticamente por habilidade."
+        if result.get('challenger_auto_win')
+        else f"{def_pokemon['name']} venceu automaticamente por habilidade."
+        if result.get('defender_auto_win')
         else f"{challenger['name'] if result['challenger_wins'] else defender['name']} venceu a batalha.",
     )
 
@@ -7536,94 +9198,36 @@ def _resolve_duel(state: dict) -> tuple[dict, dict]:
             },
         )
 
-    winner = challenger if result['challenger_wins'] else defender
-    loser = defender if result['challenger_wins'] else challenger
-    winner_pokemon = ch_pokemon if result['challenger_wins'] else def_pokemon
-    loser_pokemon = def_pokemon if result['challenger_wins'] else ch_pokemon
-    loser_slot = loser_pokemon.get('battle_slot_key')
+    battle['pending_resolution_result'] = copy.deepcopy(result)
+    if _queue_knockout_ability_decision_if_needed(
+        state,
+        battle,
+        winner_is_challenger=bool(result['challenger_wins']),
+    ):
+        state['turn']['battle'] = battle
+        state['turn']['phase'] = 'battle'
+        return state, {
+            **result,
+            'mode': 'player',
+            'challenger_name': challenger['name'],
+            'defender_name': defender['name'],
+            'awaiting_knockout_decision': True,
+        }
 
-    if loser_slot:
-        knocked_out = _set_pokemon_knocked_out(loser, loser_slot, True)
-        if knocked_out is not None:
-            sync_player_inventory(loser)
-            _log(state, loser['name'], f"{loser_pokemon['name']} ficou nocauteado e não pode ser usado até ser curado.")
-
-    winner['bonus_points'] = winner.get('bonus_points', 0) + 5
-    winner['bonus_master_points'] = winner.get('bonus_master_points', 0) + 5
-    sync_player_inventory(winner)
-    _log(state, winner['name'], f"Venceu o duelo! +5 Master Points")
-
-    state['turn']['battle'] = None
-    state['turn']['phase'] = 'end'
-    state = _award_victory_cards(state, winner['id'], 1, source='duel')
-
-    _apply_post_battle_effects(state, winner, loser, winner_pokemon, loser_pokemon)
-    # Enforce item capacity after battle effects (e.g. shed_skin adds FR)
-    _queue_item_choice(state, winner['id'], 'Efeito de batalha')
-
-    evolved = None
-    if can_evolve(winner_pokemon):
-        is_baby = winner_pokemon.get('is_baby', False)
-        if not is_baby:
-            evolved = _try_evolve(state, winner['id'], winner_pokemon, heal_on_evolve=True)
-            if evolved:
-                _log(state, winner['name'], f"{winner_pokemon['name']} evoluiu para {evolved['name']} e foi curado automaticamente após a batalha!")
-
-    return_data = {
-        'returned_to_tile_id': None,
-        'returned_to_tile_name': None,
-        'stayed_on_safe_tile': False,
-        'recovery_pending': False,
-        'turn_ended': False,
-    }
-    if not _build_player_battle_pool(loser, include_knocked_out=False):
-        state, return_data = _handle_total_knockout_recovery(
-            state,
-            loser['id'],
-            source=f"perder o duelo contra {winner['name']}",
-        )
-
-    # Abra passivo: se Abra foi o Pokémon derrotado, oferecer ao jogador à esquerda
-    if loser_pokemon.get('name') == 'Abra':
-        left_player = _get_player_to_left(state, loser['id'])
-        if left_player and left_player['id'] != loser['id']:
-            state.setdefault('abra_transfer_offers', []).append({
-                'from_player_id': loser['id'],
-                'to_player_id': left_player['id'],
-                'pokemon': copy.deepcopy(loser_pokemon),
-                'loser_slot': loser_slot,
-            })
-            _log(state, loser['name'],
-                 f"Abra perdeu a batalha! {left_player['name']} poderá adicionar Abra ao time no próximo turno.")
-
-    reward_summary = 'comprou uma carta de vitória'
-    _log(state, 'Duelo', f"{winner['name']} venceu a batalha e {reward_summary}")
-
-    battle_result = {
-        **result,
-        'mode': 'player',
-        'challenger_name': challenger['name'],
-        'defender_name': defender['name'],
-        'winner_id': winner['id'],
-        'loser_id': loser['id'],
-        'winner_name': winner['name'],
-        'loser_name': loser['name'],
-        'evolved': evolved,
-        'winner_pokemon': winner_pokemon['name'],
-        'loser_pokemon': loser_pokemon['name'],
-        'pluspower_used': bool(winner_pokemon.get('pluspower_applied') or loser_pokemon.get('pluspower_applied')),
-        'knocked_out_pokemon': loser_pokemon['name'],
-        'returned_to_tile_id': return_data.get('returned_to_tile_id'),
-        'returned_to_tile_name': return_data.get('returned_to_tile_name'),
-        'stayed_on_safe_tile': return_data.get('stayed_on_safe_tile', False),
-        'recovery_pending': return_data.get('recovery_pending', False),
-    }
+    state, battle_result = _finalize_player_duel_outcome(
+        state,
+        battle,
+        result,
+        winner_is_challenger=bool(result['challenger_wins']),
+    )
 
     if battle_source == _DEBUG_SHARED_BATTLE_SOURCE:
         state = _restore_debug_shared_battle_state(state)
         return state, battle_result
 
-    if state['turn'].get('phase') != 'battle' and not (return_data.get('recovery_pending') or return_data.get('turn_ended')):
+    if state['turn'].get('phase') != 'battle' and not (
+        battle_result.get('recovery_pending') or battle_result.get('turn_ended')
+    ):
         state = end_turn(state)
     return state, battle_result
 
@@ -8383,6 +9987,8 @@ def end_turn(state: dict) -> dict:
 
     active_ids = _ordered_active_player_ids(state)
     current_id = turn.get('current_player_id')
+    turn['previous_player_id'] = current_id
+    turn['previous_player_move_steps'] = _extract_moved_steps_from_turn(state)
     next_id = _next_player_id(state)
     visited = 0
     while next_id and visited < max(1, len(active_ids)):

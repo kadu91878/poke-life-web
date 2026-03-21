@@ -129,6 +129,10 @@ def _score_with_effect(bp: int, roll: int, battle_effect: str | None) -> int:
         # +2 flat ao score total
         return bp * roll + 2
 
+    if battle_effect == 'battle_plus_8':
+        # Electabuzz: +8 flat ao score total
+        return bp * roll + 8
+
     if battle_effect == 'solar_beam':
         # +3 BP de bônus (ativado pelo jogador antes da batalha)
         return (bp + 3) * roll
@@ -184,6 +188,8 @@ def resolve_duel(
 
     ch_bp = challenger_pokemon.get('battle_points', 1)
     def_bp = defender_pokemon.get('battle_points', 1)
+    challenger_auto_win = int(challenger_pokemon.get('battle_auto_win_threshold', -1) or -1) >= 0 and int(defender_pokemon.get('battle_points', 1) or 1) <= int(challenger_pokemon.get('battle_auto_win_threshold', -1) or -1)
+    defender_auto_win = int(defender_pokemon.get('battle_auto_win_threshold', -1) or -1) >= 0 and int(challenger_pokemon.get('battle_points', 1) or 1) <= int(defender_pokemon.get('battle_auto_win_threshold', -1) or -1)
 
     # Vantagem de tipo: +1 BP por tipo do adversário que o atacante vence
     ch_types = challenger_pokemon.get('types', [])
@@ -241,8 +247,19 @@ def resolve_duel(
     score_ch = _score_with_effect(ch_bp, ch_roll, ch_effect)
     score_def = _score_with_effect(def_bp, def_roll, def_effect)
 
+    if challenger_auto_win and not defender_auto_win and score_ch <= score_def:
+        score_ch = score_def + 1
+    elif defender_auto_win and not challenger_auto_win and score_def <= score_ch:
+        score_def = score_ch + 1
+
     is_tie = score_ch == score_def
     challenger_wins = score_ch > score_def
+    if challenger_auto_win and not defender_auto_win:
+        is_tie = False
+        challenger_wins = True
+    elif defender_auto_win and not challenger_auto_win:
+        is_tie = False
+        challenger_wins = False
 
     return {
         'challenger_roll': ch_roll,
@@ -251,6 +268,8 @@ def resolve_duel(
         'defender_score': score_def,
         'challenger_wins': challenger_wins,
         'is_tie': is_tie,
+        'challenger_auto_win': challenger_auto_win and not defender_auto_win,
+        'defender_auto_win': defender_auto_win and not challenger_auto_win,
         # Efeitos originais (para pós-batalha em state.py)
         'challenger_battle_effect': ch_effect_orig,
         'defender_battle_effect': def_effect_orig,

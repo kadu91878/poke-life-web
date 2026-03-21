@@ -200,7 +200,8 @@
       "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_4_4x/evento_25.png",
       "title": "Trainer Emiel",
       "description": "Battle Emiel using one Pokémon. If you win, you may play an additional turn and you receive 10 Master Points!",
-      "category": "trainer_battle"
+      "category": "trainer_battle",
+      "bp": 6
     },
     {
       "id": 26,
@@ -208,7 +209,8 @@
       "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_4_4x/evento_26.png",
       "title": "Trainer Lieke",
       "description": "Battle Lieke using one Pokémon. If you win, you may draw two Victory Cards!",
-      "category": "trainer_battle"
+      "category": "trainer_battle",
+      "bp": 9
     },
     {
       "id": 27,
@@ -216,7 +218,8 @@
       "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_4_4x/evento_27.png",
       "title": "Trainer Joris",
       "description": "Battle Joris using one Pokémon. If you win, you may battle him again (you may use another Pokémon). You can only battle Joris four times.",
-      "category": "trainer_battle"
+      "category": "trainer_battle",
+      "bp": 4
     },
     {
       "id": 28,
@@ -224,7 +227,8 @@
       "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_4_4x/evento_28.png",
       "title": "Trainer Annemei",
       "description": "Battle Annemei using one Pokémon. If you win, you may recharge one ability charge of one of your Pokémon.",
-      "category": "trainer_battle"
+      "category": "trainer_battle",
+      "bp": 7
     },
     {
       "id": 29,
@@ -264,7 +268,8 @@
       "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_5_2x/evento_33.png",
       "title": "Trainer Johnny",
       "description": "Battle Johnny using one Pokémon. If you win, you may draw a Victory Card.",
-      "category": "trainer_battle"
+      "category": "trainer_battle",
+      "bp": 5
     },
     {
       "id": 34,
@@ -272,7 +277,8 @@
       "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_5_2x/evento_34.png",
       "title": "Trainer Amanda",
       "description": "Battle Amanda using one Pokémon. If you win, you may draw a Victory Card.",
-      "category": "trainer_battle"
+      "category": "trainer_battle",
+      "bp": 5
     },
     {
       "id": 35,
@@ -280,7 +286,8 @@
       "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_5_2x/evento_35.png",
       "title": "Trainer Nigel",
       "description": "Battle Nigel using one Pokémon. If you win, you may draw a Victory Card.",
-      "category": "trainer_battle"
+      "category": "trainer_battle",
+      "bp": 6
     },
     {
       "id": 36,
@@ -288,7 +295,8 @@
       "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_5_2x/evento_36.png",
       "title": "Trainer Bob",
       "description": "Battle Bob using one Pokémon. If you win, you may draw a Victory Card.",
-      "category": "trainer_battle"
+      "category": "trainer_battle",
+      "bp": 6
     },
     {
       "id": 37,
@@ -296,7 +304,8 @@
       "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_5_2x/evento_37.png",
       "title": "Trainer Jack",
       "description": "Battle Jack using one Pokémon. If you win, you may draw a Victory Card.",
-      "category": "trainer_battle"
+      "category": "trainer_battle",
+      "bp": 8
     },
     {
       "id": 38,
@@ -304,7 +313,8 @@
       "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_5_2x/evento_38.png",
       "title": "Trainer Joffrey",
       "description": "Battle Joffrey using one Pokémon. If you win, you may draw a Victory Card.",
-      "category": "trainer_battle"
+      "category": "trainer_battle",
+      "bp": 7
     },
     {
       "id": 39,
@@ -312,7 +322,8 @@
       "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_5_2x/evento_39.png",
       "title": "Trainer May",
       "description": "Battle May using one Pokémon. If you win, you may draw a Victory Card and you receive 10 Master Points.",
-      "category": "trainer_battle"
+      "category": "trainer_battle",
+      "bp": 8
     },
     {
       "id": 40,
@@ -320,7 +331,8 @@
       "image_path": "/home/kadu/Projetos/split-assets/split_remaining_assets_v2/Event Pile/events_5_2x/evento_40.png",
       "title": "Trainer Ash",
       "description": "Battle Ash using one Pokémon. If you win, you may draw a Victory Card and you receive 20 Master Points.",
-      "category": "trainer_battle"
+      "category": "trainer_battle",
+      "bp": 10
     },
     {
       "id": 41,

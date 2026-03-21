@@ -60,7 +60,7 @@
       "badge_image_path": "/assets/items/soul_badge.png",
       "master_points_reward": 20,
       "leader_team": [
-        { "name": "Venomoth", "battle_points": 4, "types": ["Bug", "Poison"] },
+        { "name": "Forretress", "battle_points": 4, "types": ["Bug", "Steel"] },
         { "name": "Muk", "battle_points": 8, "types": ["Poison"] },
         { "name": "Golbat", "battle_points": 4, "types": ["Poison", "Flying"] }
       ]
@@ -74,8 +74,8 @@
       "badge_image_path": "/assets/items/marsh_badge.png",
       "master_points_reward": 20,
       "leader_team": [
-        { "name": "Hypno", "battle_points": 8, "types": ["Psychic"] },
-        { "name": "Abra", "battle_points": 7, "types": ["Psychic"] }
+        { "name": "Alakazam", "battle_points": 8, "types": ["Psychic"] },
+        { "name": "Jynx", "battle_points": 7, "types": ["Ice", "Psychic"] }
       ]
     },
     {
@@ -87,7 +87,7 @@
       "badge_image_path": "/assets/items/volcano_badge.png",
       "master_points_reward": 20,
       "leader_team": [
-        { "name": "Charmeleon", "battle_points": 7, "types": ["Fire"] },
+        { "name": "Magmar", "battle_points": 7, "types": ["Fire"] },
         { "name": "Arcanine", "battle_points": 8, "types": ["Fire"] },
         { "name": "Flareon", "battle_points": 7, "types": ["Fire"] }
       ]
@@ -101,10 +101,10 @@
       "badge_image_path": "/assets/items/earth_badge.png",
       "master_points_reward": 20,
       "leader_team": [
-        { "name": "Dugtrio", "battle_points": 8, "types": ["Ground"] },
-        { "name": "Nidoking", "battle_points": 8, "types": ["Poison", "Ground"] },
         { "name": "Nidoqueen", "battle_points": 8, "types": ["Poison", "Ground"] },
-        { "name": "Rhyhorn", "battle_points": 7, "types": ["Ground", "Rock"] }
+        { "name": "Nidoking", "battle_points": 8, "types": ["Poison", "Ground"] },
+        { "name": "Rhydon", "battle_points": 8, "types": ["Ground", "Rock"] },
+        { "name": "Kangaskhan", "battle_points": 7, "types": ["Normal"] }
       ]
     }
   ]

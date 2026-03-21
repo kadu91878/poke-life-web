@@ -60,10 +60,34 @@ def _effect_label(effect_kind: str, params: dict[str, Any] | None = None) -> str
         return 'Ocupa slot extra'
     if effect_kind == 'team_bonus':
         return 'Bônus de equipe'
+    if effect_kind == 'battle_score_bonus':
+        return 'Bônus no resultado da batalha'
+    if effect_kind == 'battle_auto_win_threshold':
+        return 'Vitória automática por BP'
     if effect_kind == 'battle_reroll':
         return 'Rerrolar batalha'
     if effect_kind == 'capture_reroll':
         return 'Rerrolar captura'
+    if effect_kind == 'event_copy':
+        return 'Copiar carta de evento'
+    if effect_kind == 'knockout_redirect':
+        return 'Redirecionar nocaute'
+    if effect_kind == 'knockout_counter_roll':
+        return 'Contra-atacar nocaute'
+    if effect_kind == 'recharge_all_other_abilities':
+        return 'Recarregar habilidades do time'
+    if effect_kind == 'team_rocket_protection':
+        return 'Proteção contra Equipe Rocket'
+    if effect_kind == 'bonus_victory_on_gym_or_league_win':
+        return 'Vitória extra em ginásio ou Liga'
+    if effect_kind == 'market_tile_item_copy':
+        return 'Copiar item do Poké-Mart'
+    if effect_kind == 'repeat_previous_move':
+        return 'Repetir movimento do jogador anterior'
+    if effect_kind == 'event_tile_double_draw_choice':
+        return 'Escolher entre 2 cartas de evento'
+    if effect_kind == 'clone_in_game_pokemon':
+        return 'Clonar Pokémon em jogo'
     if effect_kind == 'heal_other':
         return 'Curar outro Pokémon'
     if effect_kind == 'draw_victory':
@@ -109,6 +133,12 @@ def _build_effect(
 def _infer_effects_from_description(pokemon: dict[str, Any]) -> list[dict[str, Any]]:
     description = str(pokemon.get('ability_description') or '').strip()
     normalized = description.lower()
+    pokemon_name = str(
+        pokemon.get('current_name')
+        or pokemon.get('real_name')
+        or pokemon.get('name')
+        or ''
+    ).strip().lower()
     effects: list[dict[str, Any]] = []
 
     def add(effect_kind: str, *, activation_mode: str, implemented: bool, params: dict[str, Any] | None = None, limit_scope: str | None = None) -> None:
@@ -222,7 +252,6 @@ def _infer_effects_from_description(pokemon: dict[str, Any]) -> list[dict[str, A
         ('instead of throwing the move dice, you may move 4 tiles', 4),
         ('you may move two tiles instead of throwing the move dice', 2),
         ('you may move one tile instead of throwing the move dice', 1),
-        ('you may always move one tile forward', 1),  # Mew: "instead of throwing ... you may always move one tile forward"
     )
     for phrase, steps in fixed_distance_matchers:
         if phrase in normalized:
@@ -233,6 +262,14 @@ def _infer_effects_from_description(pokemon: dict[str, Any]) -> list[dict[str, A
                 params={'steps': steps},
             )
 
+    if pokemon_name == 'mew' and 'you may always move one tile forward' in normalized:
+        add(
+            'fixed_move',
+            activation_mode='manual_before_roll',
+            implemented=True,
+            params={'steps_options': [1, 2, 3, 4, 5, 6]},
+        )
+
     if 'ao capturar, não gasta pokébola' in normalized or 'ao capturar, nao gasta pokebola' in normalized:
         add(
             'capture_free_next',
@@ -242,17 +279,47 @@ def _infer_effects_from_description(pokemon: dict[str, Any]) -> list[dict[str, A
         )
 
     if 'heal one of your other pok' in normalized:
-        add('heal_other', activation_mode='manual_action', implemented=True, limit_scope='turn')
+        add(
+            'heal_other',
+            activation_mode='manual_action',
+            implemented=True,
+            limit_scope='turn',
+            params={'heal_limit': 3 if pokemon_name == 'blissey' else 1},
+        )
     if 'draw a card from the victory pile' in normalized or 'take a victory card' in normalized:
         add('draw_victory', activation_mode='manual_action', implemented=False)
     if 'draw a card from the event pile' in normalized or 'top card of the event discard pile' in normalized:
         add('draw_event', activation_mode='manual_action', implemented=False)
     if 'look at the top card of the event pile' in normalized or 'take two cards at once' in normalized:
         add('event_peek', activation_mode='event_prompt', implemented=False)
-    if 'evolve one of your other pok' in normalized or 'cause one of your pok' in normalized:
-        add('evolve_other', activation_mode='manual_action', implemented=False)
+    if 'evolve one of your other pok' in normalized:
+        add(
+            'evolve_other',
+            activation_mode='manual_action',
+            implemented=True,
+            params={'exclude_self': True},
+        )
+    if 'cause one of your pok' in normalized:
+        add(
+            'evolve_other',
+            activation_mode='manual_action',
+            implemented=True,
+            params={'exclude_self': False},
+        )
     if 'increases the battle points of all pokémon in your team by 2' in normalized or 'increases the battle points of all pokemon in your team by 2' in normalized:
-        add('team_bonus', activation_mode='automatic_passive', implemented=False)
+        add(
+            'team_bonus',
+            activation_mode='automatic_passive',
+            implemented=True,
+            params={'flat_bonus': 2},
+        )
+    if 'recharge all of your pokémon' in normalized or "recharge all of your pokemon's abilities" in normalized:
+        add(
+            'recharge_all_other_abilities',
+            activation_mode='manual_action',
+            implemented=True,
+            params={'exclude_self': True, 'self_recharge_blocked': True},
+        )
     if 'extra battle point' in normalized and 'for each other' in normalized:
         # Beedrill: +1 BP and +10 MP for each other same-named pokemon in team
         ally_name = str(pokemon.get('current_name') or pokemon.get('real_name') or '').strip()
@@ -261,6 +328,60 @@ def _infer_effects_from_description(pokemon: dict[str, Any]) -> list[dict[str, A
             'bonus_mp_per_ally': 10,
             'ally_name': ally_name,
         })
+    if 'whenever another player takes a card from the event pile, you may choose to execute it too' in normalized:
+        add('event_copy', activation_mode='event_prompt', implemented=True)
+    if 'total battle outcomes are always increased by 8' in normalized:
+        add(
+            'battle_score_bonus',
+            activation_mode='automatic_passive',
+            implemented=True,
+            params={'score_bonus': 8},
+        )
+    if 'all opposing pokémon with less than 8 battle points automatically lose' in normalized or 'all opposing pokemon with less than 8 battle points automatically lose' in normalized:
+        add(
+            'battle_auto_win_threshold',
+            activation_mode='automatic_passive',
+            implemented=True,
+            params={'opponent_bp_lte': 7},
+        )
+    if 'whenever gengar is knocked out, you may choose to knock out one of your other pok' in normalized:
+        add('knockout_redirect', activation_mode='battle_knockout_prompt', implemented=True)
+    if 'when wobbuffet loses in battle, throw the dice' in normalized and 'enemy is knocked out instead' in normalized:
+        add('knockout_counter_roll', activation_mode='battle_knockout_prompt', implemented=True)
+    if 'all assaults from team rocket to fail miserably' in normalized:
+        add('team_rocket_protection', activation_mode='automatic_passive', implemented=True)
+    if 'whenever you win a gym or league battle with raikou still alive' in normalized:
+        add(
+            'bonus_victory_on_gym_or_league_win',
+            activation_mode='automatic_passive',
+            implemented=True,
+        )
+    if 'whenever any other player receives an item at a market, you receive it too' in normalized:
+        add(
+            'market_tile_item_copy',
+            activation_mode='automatic_passive',
+            implemented=True,
+            params={'exclude_reward_keys': ['pokeball', 'master_ball']},
+        )
+    if 'you may move the same amount of tiles as the previous player' in normalized:
+        add(
+            'repeat_previous_move',
+            activation_mode='manual_before_roll',
+            implemented=True,
+        )
+    if 'when landed on an event tile' in normalized and 'take two cards at once and choose which cards to execute' in normalized:
+        add(
+            'event_tile_double_draw_choice',
+            activation_mode='automatic_passive',
+            implemented=True,
+        )
+    if 'you can clone a pkmn currently in game' in normalized and 'no starters or legendaries' in normalized:
+        add(
+            'clone_in_game_pokemon',
+            activation_mode='manual_action',
+            implemented=True,
+            params={'exclude_starters': True, 'exclude_legendaries': True},
+        )
     if 'move forward to a tile no further than five ahead' in normalized:
         add(
             'targeted_move',
@@ -355,6 +476,16 @@ def _normalize_runtime_entry(entry: dict[str, Any] | None, *, charges_total: int
     }
 
 
+def _previous_player_movement_value(turn: dict[str, Any] | None) -> int | None:
+    if not isinstance(turn, dict):
+        return None
+    try:
+        steps = int(turn.get('previous_player_move_steps'))
+    except (TypeError, ValueError):
+        return None
+    return steps if steps > 0 else None
+
+
 def _attach_ability_snapshots(pokemon: dict[str, Any], *, turn: dict[str, Any] | None = None, player_id: str | None = None, current_player_id: str | None = None, slot_key: str | None = None) -> dict[str, Any]:
     definitions = get_static_ability_definitions(pokemon)
     runtime = copy.deepcopy((pokemon.get('ability_runtime') or {}).get('abilities') or {})
@@ -416,6 +547,39 @@ def _attach_ability_snapshots(pokemon: dict[str, Any], *, turn: dict[str, Any] |
                         'can_activate_now': False,
                         'disabled_reason': None,
                     })
+            elif effect.get('effect_kind') == 'fixed_move' and params.get('steps_options'):
+                available_steps = []
+                for value in params.get('steps_options') or []:
+                    normalized_step = _to_int_or_none(value)
+                    if normalized_step is None or normalized_step <= 0:
+                        continue
+                    if normalized_step not in available_steps:
+                        available_steps.append(normalized_step)
+                for steps in available_steps:
+                    action_variants.append({
+                        'action_id': _slug(f'fixed_move_{steps}'),
+                        'effect_kind': 'fixed_move',
+                        'label': f'Mover {steps} casa{"s" if steps != 1 else ""}',
+                        'params': {'steps': steps},
+                        'supported': True,
+                        'can_activate_now': False,
+                        'disabled_reason': None,
+                    })
+            elif effect.get('effect_kind') == 'repeat_previous_move':
+                previous_steps = _previous_player_movement_value(turn)
+                action_variants.append({
+                    'action_id': _slug('repeat_previous_move'),
+                    'effect_kind': 'fixed_move',
+                    'label': (
+                        f'Mover {previous_steps} casa{"s" if previous_steps != 1 else ""} como o jogador anterior'
+                        if previous_steps is not None
+                        else 'Repetir movimento do jogador anterior'
+                    ),
+                    'params': {'steps': previous_steps},
+                    'supported': True,
+                    'can_activate_now': False,
+                    'disabled_reason': None,
+                })
             else:
                 action_variants.append({
                     'action_id': _slug(f"{effect['effect_kind']}"),
@@ -432,6 +596,8 @@ def _attach_ability_snapshots(pokemon: dict[str, Any], *, turn: dict[str, Any] |
                     action['disabled_reason'] = 'Sem cargas restantes'
                 elif runtime_entry.get('used_this_turn'):
                     action['disabled_reason'] = 'Já usada neste turno'
+                elif effect.get('effect_kind') == 'repeat_previous_move' and int((action.get('params') or {}).get('steps') or 0) <= 0:
+                    action['disabled_reason'] = 'Ainda não há movimento válido do jogador anterior'
                 elif not is_owner_turn:
                     action['disabled_reason'] = 'Aguardando sua vez'
                 elif activation_mode == 'manual_before_roll':
@@ -446,7 +612,7 @@ def _attach_ability_snapshots(pokemon: dict[str, Any], *, turn: dict[str, Any] |
                     )
                     if effect['effect_kind'] == 'capture_free_next' and has_capture_flow and is_owner_turn:
                         action['can_activate_now'] = True
-                    elif effect['effect_kind'] == 'heal_other' and is_owner_turn and current_phase in ('roll', 'action') and can_interact:
+                    elif effect['effect_kind'] in ('heal_other', 'evolve_other', 'recharge_all_other_abilities', 'clone_in_game_pokemon') and is_owner_turn and current_phase in ('roll', 'action') and can_interact:
                         action['can_activate_now'] = True
                     else:
                         action['disabled_reason'] = 'Use na fase de ação apropriada'

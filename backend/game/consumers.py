@@ -7,12 +7,14 @@ from typing import ClassVar
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
+from django.utils import timezone
 
 from .engine import mechanics
 from .engine import state as game_state
 from .engine import cpu as cpu_engine
 from .engine.inventory import get_starting_resource_defaults
 from .models import GameRoom
+from .session_expiration import get_room_if_active, prune_expired_sessions
 from .socket_contract import SOCKET_HANDLER_NAMES
 from .state_schema import mark_saved, normalize_state
 
@@ -48,6 +50,19 @@ def _cpu_debug(level: str, message: str, *, state: dict | None = None, **fields)
     if state_text:
         parts.append(state_text)
     print(' '.join(parts))
+
+
+def _battle_roll_event(player_id: str, result: dict | None) -> dict:
+    event = {'type': 'battle_roll_registered', 'player_id': player_id}
+    if result and result.get('ignored'):
+        return {'type': 'battle_roll_registered', 'player_id': player_id, 'ignored': True}
+    if result and not result.get('reroll_required') and not result.get('awaiting_knockout_decision') and (
+        result.get('winner_id') is not None
+        or result.get('mode') in ('trainer', 'gym')
+        or result.get('battle_finished')
+    ):
+        return {'type': 'battle_resolved', 'result': result}
+    return event
 
 
 class GameConsumer(AsyncWebsocketConsumer):
@@ -101,6 +116,10 @@ class GameConsumer(AsyncWebsocketConsumer):
 
         try:
             async with self._room_lock():
+                if not await self.room_exists():
+                    await self.send_error('Sala não está mais disponível')
+                    await self.close(code=4004)
+                    return
                 await handler(data)
         except Exception as exc:
             await self.send_error(str(exc))
@@ -474,16 +493,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.send_error(result['error'])
             return
         saved_state = await self.save_game_state(new_state)
-
-        event = {'type': 'battle_roll_registered', 'player_id': self.player_id}
-        if result and not result.get('reroll_required') and (
-            result.get('winner_id') is not None
-            or result.get('mode') in ('trainer', 'gym')
-            or result.get('battle_finished')
-        ):
-            event = {'type': 'battle_resolved', 'result': result}
-        elif result and result.get('ignored'):
-            event = {'type': 'battle_roll_registered', 'player_id': self.player_id, 'ignored': True}
+        event = _battle_roll_event(self.player_id, result)
         await self.broadcast_state(saved_state, event)
 
     async def handle_use_ability(self, data):
@@ -848,15 +858,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             return
 
         saved_state = await self.save_game_state(new_state)
-        event = {'type': 'battle_roll_registered', 'player_id': game_state._DEBUG_TEST_PLAYER_ID}
-        if result and not result.get('reroll_required') and (
-            result.get('winner_id') is not None
-            or result.get('mode') in ('trainer', 'gym')
-            or result.get('battle_finished')
-        ):
-            event = {'type': 'battle_resolved', 'result': result}
-        elif result and result.get('ignored'):
-            event = {'type': 'battle_roll_registered', 'player_id': game_state._DEBUG_TEST_PLAYER_ID, 'ignored': True}
+        event = _battle_roll_event(game_state._DEBUG_TEST_PLAYER_ID, result)
         await self.broadcast_state(saved_state, event)
 
     async def handle_debug_resolve_pending_action_for_test_player(self, data):
@@ -1130,13 +1132,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 return None
             if result and result.get('ignored'):
                 return None
-            ev = {'type': 'battle_roll_registered', 'player_id': cpu_player_id}
-            if result and not result.get('reroll_required') and (
-                result.get('winner_id') is not None
-                or result.get('mode') in ('trainer', 'gym')
-                or result.get('battle_finished')
-            ):
-                ev = {'type': 'battle_resolved', 'result': result}
+            ev = _battle_roll_event(cpu_player_id, result)
             return new_state, ev
 
         if action_name == 'resolve_pending_action':
@@ -1286,15 +1282,15 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def room_exists(self):
+        prune_expired_sessions(room_code=self.room_code)
         return GameRoom.objects.filter(room_code=self.room_code).exists()
 
     @database_sync_to_async
     def get_game_state(self):
-        try:
-            room = GameRoom.objects.get(room_code=self.room_code)
+        room, _expired = get_room_if_active(self.room_code)
+        if room:
             return normalize_state(room.room_code, room.game_state)
-        except GameRoom.DoesNotExist:
-            return {}
+        return {}
 
     @database_sync_to_async
     def save_game_state(self, state):
@@ -1303,13 +1299,14 @@ class GameConsumer(AsyncWebsocketConsumer):
         GameRoom.objects.filter(room_code=self.room_code).update(
             game_state=normalized,
             status=normalized.get('status', 'waiting'),
+            updated_at=timezone.now(),
         )
         return normalized
 
     @database_sync_to_async
     def mark_player_disconnected(self):
-        try:
-            room = GameRoom.objects.get(room_code=self.room_code)
+        room, _expired = get_room_if_active(self.room_code)
+        if room:
             state = normalize_state(room.room_code, room.game_state)
             for player in state.get('players', []):
                 if player['id'] == self.player_id:
@@ -1317,5 +1314,3 @@ class GameConsumer(AsyncWebsocketConsumer):
                     break
             room.game_state = state
             room.save(update_fields=['game_state'])
-        except GameRoom.DoesNotExist:
-            pass
