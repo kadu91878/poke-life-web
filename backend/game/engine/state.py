@@ -827,6 +827,88 @@ def _get_player_pokemon_slot(player: dict, slot_key: str | None) -> dict | None:
     return None
 
 
+def _set_player_pokemon_slot(player: dict, slot_key: str | None, pokemon: dict | None) -> dict | None:
+    if not slot_key:
+        return None
+    sanitized = copy.deepcopy(pokemon) if isinstance(pokemon, dict) else None
+    if isinstance(sanitized, dict):
+        for transient_key in ('slot_key', 'battle_slot_key', 'is_starter_slot', 'slot_cost'):
+            sanitized.pop(transient_key, None)
+    if slot_key == 'starter':
+        player['starter_pokemon'] = sanitized
+        return sanitized
+    if not slot_key.startswith('pokemon:'):
+        return None
+    try:
+        index = int(slot_key.split(':', 1)[1])
+    except (TypeError, ValueError):
+        return None
+    pokemon_list = player.get('pokemon', [])
+    if 0 <= index < len(pokemon_list):
+        pokemon_list[index] = sanitized
+        return sanitized
+    return None
+
+
+def _build_trade_slot_label(player: dict, slot_key: str) -> str:
+    pokemon = _get_player_pokemon_slot(player, slot_key)
+    if not pokemon:
+        return slot_key
+    label = pokemon.get('name', slot_key)
+    if slot_key == 'starter':
+        label = f'{label} (Starter)'
+    if pokemon.get('knocked_out'):
+        label = f'{label} [KO]'
+    return label
+
+
+def _build_trade_options_for_player(player: dict) -> list[dict]:
+    options: list[dict] = []
+    for slot_key, pokemon in _iter_player_battle_slots(player, include_knocked_out=True):
+        options.append({
+            'id': slot_key,
+            'slot_key': slot_key,
+            'label': f"Trocar {_build_trade_slot_label(player, slot_key)}",
+            'pokemon_name': pokemon.get('name', slot_key),
+            'pokemon': copy.deepcopy(pokemon),
+        })
+    options.append({'id': 'decline', 'label': 'Recusar'})
+    return options
+
+
+def _get_trade_eligible_target_ids(state: dict, player_id: str) -> list[str]:
+    player = _get_player(state, player_id)
+    if not player:
+        return []
+
+    reachable_positions = {int(player.get('position', 0) or 0)}
+    movement = state.get('turn', {}).get('movement_context') or {}
+    try:
+        start_position = int(movement.get('start_position'))
+        end_position = int(movement.get('resolved_destination'))
+    except (TypeError, ValueError):
+        start_position = None
+        end_position = None
+    if start_position is not None and end_position is not None:
+        reachable_positions.update(get_positions_between(start_position, end_position))
+
+    eligible_ids: list[str] = []
+    for target in state.get('players', []):
+        if target.get('id') == player_id:
+            continue
+        if not target.get('is_active', True):
+            continue
+        if not target.get('is_connected', True) and not target.get('is_cpu', False):
+            continue
+        try:
+            target_position = int(target.get('position', 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if target_position in reachable_positions:
+            eligible_ids.append(target['id'])
+    return eligible_ids
+
+
 def _update_last_movement_roll(
     state: dict,
     *,
@@ -1483,6 +1565,70 @@ def _resolve_abra_transfer_offer(
     pending_action: dict,
     chosen: dict,
 ) -> tuple[dict | None, str | dict]:
+    proposer_id = pending_action.get('proposer_id')
+    if proposer_id is not None:
+        proposer = _get_player(state, proposer_id)
+        target = _get_player(state, player_id)
+        if not proposer or not target:
+            return None, 'Jogador não encontrado'
+
+        offered_slot_key = str(pending_action.get('offered_slot_key') or '').strip()
+        offered_snapshot = pending_action.get('offered_pokemon') or {}
+        offered_name = offered_snapshot.get('name', offered_slot_key or 'Pokémon')
+
+        _clear_pending_action(state)
+
+        if chosen.get('id') == 'decline':
+            _log(
+                state,
+                target.get('name', 'Jogador'),
+                f"Recusou a troca proposta por {proposer.get('name', 'Jogador')} ({offered_name}).",
+            )
+            return state, {
+                'type': 'trade_proposal',
+                'accepted': False,
+                'proposer_id': proposer_id,
+                'target_player_id': player_id,
+                'offered_pokemon': offered_name,
+            }
+
+        requested_slot_key = str(chosen.get('slot_key') or chosen.get('id') or '').strip()
+        offered_live = _get_player_pokemon_slot(proposer, offered_slot_key)
+        requested_live = _get_player_pokemon_slot(target, requested_slot_key)
+        if not offered_live or not requested_live:
+            return None, 'Um dos Pokémon da troca não está mais disponível'
+
+        proposer_free_slots = int(proposer.get('pokeballs', 0) or 0) + pokemon_slot_cost(offered_live) - pokemon_slot_cost(requested_live)
+        target_free_slots = int(target.get('pokeballs', 0) or 0) + pokemon_slot_cost(requested_live) - pokemon_slot_cost(offered_live)
+        if proposer_free_slots < 0 or target_free_slots < 0:
+            return None, 'A troca deixou um dos jogadores sem slots suficientes'
+
+        requested_name = requested_live.get('name', requested_slot_key or 'Pokémon')
+        proposer_incoming = copy.deepcopy(requested_live)
+        target_incoming = copy.deepcopy(offered_live)
+        _set_player_pokemon_slot(proposer, offered_slot_key, proposer_incoming)
+        _set_player_pokemon_slot(target, requested_slot_key, target_incoming)
+        proposer['pokeballs'] = proposer_free_slots
+        target['pokeballs'] = target_free_slots
+        sync_player_inventory(proposer)
+        sync_player_inventory(target)
+
+        _log(
+            state,
+            proposer.get('name', 'Jogador'),
+            f"Trocou {offered_name} com {target.get('name', 'Jogador')} por {requested_name}.",
+        )
+        return state, {
+            'type': 'trade_proposal',
+            'accepted': True,
+            'proposer_id': proposer_id,
+            'target_player_id': player_id,
+            'proposer_name': proposer.get('name', 'Jogador'),
+            'target_name': target.get('name', 'Jogador'),
+            'offered_pokemon': offered_name,
+            'requested_pokemon': requested_name,
+        }
+
     offer = pending_action.get('offer') or {}
     from_player_id = offer.get('from_player_id')
     loser_slot = offer.get('loser_slot')
@@ -5624,6 +5770,7 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
         'battle_reroll_decision',
         'battle_bp_swap_decision',
         'heal_other_choice',
+        'trade_proposal',
         'abra_transfer_offer',
     ):
         return None, 'Nenhuma escolha pendente'
@@ -5654,6 +5801,9 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
 
     if pending_type == 'heal_other_choice':
         return _resolve_heal_other_choice(state, player_id, pending_action, chosen)
+
+    if pending_type == 'trade_proposal':
+        return _resolve_abra_transfer_offer(state, player_id, pending_action, chosen)
 
     if pending_type == 'abra_transfer_offer':
         return _resolve_abra_transfer_offer(state, player_id, pending_action, chosen)
@@ -6900,6 +7050,68 @@ def _resolve_trainer_battle(state: dict) -> tuple[dict, dict]:
         'stayed_on_safe_tile': return_data.get('stayed_on_safe_tile', False),
         'recovery_pending': return_data.get('recovery_pending', False),
     }
+
+def propose_trade(
+    state: dict,
+    proposer_id: str,
+    target_id: str,
+    offered_slot_key: str | None,
+    requested_slot_key: str | None = None,
+) -> tuple[dict | None, str | dict]:
+    state = copy.deepcopy(state)
+    turn = state.get('turn', {})
+    proposer = _get_player(state, proposer_id)
+    target = _get_player(state, target_id)
+
+    if not proposer or not target:
+        return None, 'Jogador não encontrado'
+    if turn.get('current_player_id') != proposer_id:
+        return None, 'Não é seu turno'
+    if turn.get('phase') != 'action':
+        return None, 'Trocas só podem ser propostas na fase de ação'
+    if turn_has_blocking_interaction(turn):
+        return None, 'Não é possível trocar durante uma interação pendente'
+    if target_id not in _get_trade_eligible_target_ids(state, proposer_id):
+        return None, 'Este jogador não está disponível para troca agora'
+
+    offered_key = str(offered_slot_key or '').strip()
+    offered_pokemon = _get_player_pokemon_slot(proposer, offered_key)
+    if not offered_pokemon:
+        return None, 'Escolha um Pokémon seu para oferecer na troca'
+
+    offered_name = offered_pokemon.get('name', offered_key)
+    _set_pending_action(state, {
+        'type': 'trade_proposal',
+        'player_id': target_id,
+        'allowed_actions': ['resolve_pending_action'],
+        'proposer_id': proposer_id,
+        'proposer_name': proposer.get('name', 'Jogador'),
+        'target_player_id': target_id,
+        'target_name': target.get('name', 'Jogador'),
+        'offered_slot_key': offered_key,
+        'offered_pokemon': copy.deepcopy(offered_pokemon),
+        'prompt': (
+            f"{proposer.get('name', 'Jogador')} oferece {offered_name}. "
+            "Escolha qual dos seus Pokémon entrar na troca ou recuse."
+        ),
+        'options': _build_trade_options_for_player(target),
+    })
+    _log(
+        state,
+        proposer.get('name', 'Jogador'),
+        f"Propôs uma troca para {target.get('name', 'Jogador')} oferecendo {offered_name}.",
+    )
+    return state, {
+        'type': 'trade_proposal',
+        'success': True,
+        'proposer_id': proposer_id,
+        'target_player_id': target_id,
+        'proposer_name': proposer.get('name', 'Jogador'),
+        'target_name': target.get('name', 'Jogador'),
+        'offered_pokemon': offered_name,
+        'preferred_requested_slot_key': str(requested_slot_key or '').strip() or None,
+    }
+
 
 def start_duel(state: dict, challenger_id: str, defender_id: str) -> dict | None:
     """Inicia um duelo entre dois jogadores."""
