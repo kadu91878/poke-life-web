@@ -9,6 +9,12 @@
           Dados do Poké-Mart: {{ (pendingAction?.rolls ?? []).join(' → ') }}
         </div>
       </div>
+      <div v-if="pendingChoiceCards.length" class="pending-card-grid">
+        <div v-for="entry in pendingChoiceCards" :key="entry.id" class="event-card pending-card-preview">
+          <div class="event-title">{{ entry.label }}: {{ entry.card?.title }}</div>
+          <div class="event-description">{{ entry.card?.description }}</div>
+        </div>
+      </div>
       <button
         v-for="option in pendingAction.options ?? []"
         :key="option.id"
@@ -26,6 +32,12 @@
           <div class="event-description">{{ pendingAction.prompt }}</div>
           <div v-if="pendingAction?.type === 'pokemart_roll' && (pendingAction?.rolls?.length ?? 0)" class="safari-info">
             Dados do Poké-Mart: {{ (pendingAction?.rolls ?? []).join(' → ') }}
+          </div>
+        </div>
+        <div v-if="pendingChoiceCards.length" class="pending-card-grid">
+          <div v-for="entry in pendingChoiceCards" :key="entry.id" class="event-card pending-card-preview">
+            <div class="event-title">{{ entry.label }}: {{ entry.card?.title }}</div>
+            <div class="event-description">{{ entry.card?.description }}</div>
           </div>
         </div>
         <button
@@ -294,11 +306,13 @@
         <button class="btn-primary" @click="store.actions.resolveEvent(false)">✓ Confirmar Evento</button>
         <button v-if="canUseRunAway && isNegativeEvent" class="btn-secondary" @click="store.actions.resolveEvent(true)">🐭 Fugir (Run Away)</button>
       </template>
-      <template v-if="phase === 'item_choice' && pendingItemChoice">
+      <template v-if="phase === 'item_choice' && pendingItemChoice && pendingItemChoice.player_id === me?.id">
         <div class="event-card">
-          <div class="event-title">🎒 Inventário cheio</div>
+          <div class="event-title">{{ pendingItemChoice.is_lass ? '🧝 Event Lass' : '🎒 Inventário cheio' }}</div>
           <div class="event-description">
-            Você só pode manter {{ me?.item_capacity ?? 8 }} itens. Escolha um item para descartar.
+            {{ pendingItemChoice.is_lass
+              ? 'A Event Lass obriga todos os jogadores a descartar um item. Escolha qual descartar.'
+              : `Você só pode manter ${me?.item_capacity ?? 8} itens. Escolha um item para descartar.` }}
           </div>
         </div>
         <button
@@ -408,7 +422,16 @@
         <button :class="['tab-btn', logChatTab === 'log' ? 'tab-active' : '']" @click="logChatTab = 'log'">Log</button>
         <button :class="['tab-btn', logChatTab === 'chat' ? 'tab-active' : '']" @click="logChatTab = 'chat'">Chat</button>
       </div>
+      <button v-if="hasTaurosMoo" class="btn-secondary moo-btn" @click="spamTaurosMoo">
+        MOO!
+      </button>
       <div v-if="logChatTab === 'log'" class="mini-log">
+        <div v-if="highlightLogs.length" class="log-highlight-panel">
+          <div class="log-highlight-title">Últimos ganhos</div>
+          <div v-for="(entry, i) in highlightLogs" :key="`highlight-${i}`" class="log-highlight-entry">
+            <span class="log-player">{{ entry.player }}</span>: {{ entry.message }}
+          </div>
+        </div>
         <div v-for="(entry, i) in lastLogs" :key="i" class="log-entry">
           <span class="log-player">{{ entry.player }}</span>: {{ entry.message }}
         </div>
@@ -465,6 +488,7 @@ const ownsPendingReleaseChoice = computed(() => !!me.value && pendingReleaseChoi
 const hasForeignPendingAction = computed(() => !!pendingAction.value && !ownsPendingAction.value)
 const canHandlePendingChoice = computed(() => isPendingChoiceAction.value && ownsPendingAction.value)
 const canResolvePendingChoice = computed(() => pendingAllowedActions.value.has(gameActions.resolvePendingAction))
+const pendingChoiceCards = computed(() => Array.isArray(pendingAction.value?.cards) ? pendingAction.value.cards : [])
 const canRollPendingCapture = computed(() => pendingAllowedActions.value.has(gameActions.rollCaptureDice))
 const canSkipPendingCapture = computed(() => pendingAllowedActions.value.has(gameActions.skipAction))
 const hasBlockingTurnInteraction = computed(() =>
@@ -584,10 +608,19 @@ const canUseRunAway = computed(() => {
   return all.some(p => p.ability?.toLowerCase().replace(/\s+/g, '_') === 'run_away' && !p.ability_used)
 })
 
+function pokemonCanBattle(pokemon) {
+  if (!pokemon || pokemon.knocked_out) return false
+  if (pokemon.can_battle === false) return false
+  if ((pokemon.ability_description || '').toLowerCase().includes('cannot battle')) return false
+  return !(pokemon.abilities || []).some((ability) =>
+    (ability.effects || []).some((effect) => effect.effect_kind === 'cannot_battle' && effect.implemented),
+  )
+}
+
 function bestBP(player) {
-  const pool = [...(player.pokemon ?? [])].filter(pokemon => !pokemon?.knocked_out)
-  if (player.starter_pokemon) pool.push(player.starter_pokemon)
-  const usable = pool.filter(pokemon => !pokemon?.knocked_out)
+  const pool = [...(player.pokemon ?? [])].filter(pokemonCanBattle)
+  if (pokemonCanBattle(player.starter_pokemon)) pool.push(player.starter_pokemon)
+  const usable = pool.filter(pokemonCanBattle)
   if (!usable.length) return 'KO'
   return Math.max(...usable.map(p => p.battle_points ?? 0))
 }
@@ -635,7 +668,14 @@ const eventEffectClass = computed(() => {
   return 'effect--neutral'
 })
 
-const lastLogs = computed(() => (store.gameState?.log ?? []).slice(-5).reverse())
+const gameLogs = computed(() => store.gameState?.log ?? [])
+const lastLogs = computed(() => gameLogs.value.slice(-18).reverse())
+const highlightLogs = computed(() =>
+  gameLogs.value
+    .filter(entry => isHighlightLog(entry?.message))
+    .slice(-3)
+    .reverse()
+)
 
 const logChatTab  = ref('log')
 const chatInput   = ref('')
@@ -654,7 +694,13 @@ function sendChat() {
   store.actions.sendChat(text)
   chatInput.value = ''
 }
-
+function spamTaurosMoo() {
+  for (let index = 0; index < 3; index += 1) {
+    window.setTimeout(() => {
+      store.actions.sendChat('Moo, MOOO!')
+    }, index * 120)
+  }
+}
 function tradePokemonLabel(pokemon) {
   if (!pokemon) return 'Pokémon'
   const parts = [pokemon.name ?? 'Pokémon']
@@ -699,10 +745,14 @@ const phaseLabel = computed(() => PHASE_LABELS[phase.value] ?? phase.value)
 const pendingChoiceTitle = computed(() => {
   if (pendingAction.value?.type === 'ability_decision') return '✨ Habilidade de Pokémon'
   if (pendingAction.value?.type === 'heal_other_choice') return '💊 Curar Pokémon'
+  if (pendingAction.value?.type === 'mewtwo_clone_choice') return '🧬 Clonar Pokémon'
   if (pendingAction.value?.type === 'trade_proposal') return '🤝 Proposta de troca'
   if (pendingAction.value?.type === 'capture_choice_decision') return '✨ Habilidade de Captura'
   if (pendingAction.value?.type === 'capture_reroll_decision') return '✨ Rerrolar Captura'
   if (pendingAction.value?.type === 'battle_reroll_decision') return '✨ Rerrolar Batalha'
+  if (pendingAction.value?.type === 'event_copy_decision') return '🦊 Copiar Carta de Evento'
+  if (pendingAction.value?.type === 'knockout_redirect_decision') return '👻 Redirecionar Nocaute'
+  if (pendingAction.value?.type === 'wobbuffet_counter_decision') return '🛡️ Contra-Ataque do Wobbuffet'
   if (pendingAction.value?.type === 'gym_heal') return '🏆 Cura pós-ginásio'
   if (pendingAction.value?.type === 'pokecenter_heal') {
     if (pendingAction.value?.center_tile_name === 'Pallet Town') return '🏡 Cura em Pallet Town'
@@ -710,6 +760,7 @@ const pendingChoiceTitle = computed(() => {
     return '🏥 Cura de PokéCenter'
   }
   if (pendingAction.value?.type === 'pokemart_roll') return '🛒 Poké-Mart'
+  if (pendingAction.value?.type === 'articuno_event_choice') return '❄️ Escolha do Articuno'
   if (pendingAction.value?.type === 'miracle_stone_tile') return '💎 Miracle Stone'
   if (pendingAction.value?.type === 'bill_teleport') return "🧾 It's Bill!"
   if (pendingAction.value?.type === 'game_corner') return '🎰 Game Corner'
@@ -802,6 +853,9 @@ const fullRestoreTargets = computed(() => {
   }
   return targets
 })
+const hasTaurosMoo = computed(() =>
+  (me.value?.pokemon_inventory ?? []).some((pokemon) => pokemon?.name === 'Tauros')
+)
 const eligibleTradePlayers = computed(() => {
   if (phase.value !== 'action' || !isMyTurn.value || pendingAction.value || pendingPokemon.value) return []
   const myPosition = Number(me.value?.position ?? 0)
@@ -841,10 +895,25 @@ const canSubmitTrade = computed(() =>
   && !!tradeDraft.value.offeredSlotKey
 )
 
+function isHighlightLog(message) {
+  const normalized = String(message || '').toLowerCase()
+  return [
+    ' ganhou ',
+    'ganhou ',
+    ' recebeu ',
+    'recebeu ',
+    'capturou ',
+    'carta de evento revelada',
+    'carta de vitória revelada',
+    'carta de vitoria revelada',
+    'recuperou 1 carga',
+  ].some(fragment => normalized.includes(fragment))
+}
+
 function playerHasAvailablePokemon(player) {
   if (!player) return false
-  const team = [...(player.pokemon ?? [])].filter(pokemon => !pokemon?.knocked_out)
-  if (player.starter_pokemon && !player.starter_pokemon.knocked_out) {
+  const team = [...(player.pokemon ?? [])].filter(pokemonCanBattle)
+  if (pokemonCanBattle(player.starter_pokemon)) {
     team.push(player.starter_pokemon)
   }
   return team.length > 0
@@ -930,6 +999,8 @@ button { width:100%; }
 .duel-btn { display:flex; justify-content:space-between; align-items:center; padding:.5rem .8rem; }
 .duel-stats { font-size:.72rem; opacity:.75; }
 .event-card { background:var(--color-bg-card); border:1px solid var(--color-secondary); border-radius:var(--radius); padding:.65rem; }
+.pending-card-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:.55rem; }
+.pending-card-preview { align-self:stretch; }
 .event-title { font-weight:700; color:var(--color-accent); margin-bottom:.25rem; font-size:.9rem; }
 .event-description { font-size:.75rem; color:#aaa; margin-bottom:.3rem; }
 .event-effect { font-size:.8rem; font-weight:600; padding:.15rem .4rem; border-radius:4px; display:inline-block; }
@@ -974,11 +1045,29 @@ button { width:100%; }
 .log-chat-tabs { display:flex; gap:2px; padding:.25rem 0 0; }
 .tab-btn { flex:1; font-size:.7rem; padding:.2rem; background:transparent; border:1px solid rgba(255,255,255,.1); border-radius:4px 4px 0 0; color:var(--color-text-muted); cursor:pointer; }
 .tab-btn.tab-active { background:rgba(255,255,255,.08); color:var(--color-accent); border-color:var(--color-accent); }
-.mini-log { padding-top:.35rem; display:flex; flex-direction:column; gap:.18rem; max-height:100px; overflow-y:auto; }
-.log-entry { font-size:.68rem; color:var(--color-text-muted); line-height:1.3; }
+.mini-log { padding-top:.35rem; display:flex; flex-direction:column; gap:.3rem; max-height:240px; overflow-y:auto; }
+.log-highlight-panel {
+  display:flex;
+  flex-direction:column;
+  gap:.2rem;
+  padding:.45rem;
+  border-radius:10px;
+  background:rgba(255,224,102,.08);
+  border:1px solid rgba(255,224,102,.18);
+}
+.log-highlight-title {
+  font-size:.66rem;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  color:#fff3bf;
+  font-weight:700;
+}
+.log-highlight-entry,
+.log-entry { font-size:.7rem; color:var(--color-text-muted); line-height:1.35; }
 .log-player { color:var(--color-accent); font-weight:600; }
 .chat-panel { display:flex; flex-direction:column; gap:.3rem; padding-top:.3rem; }
 .chat-list { display:flex; flex-direction:column; gap:.15rem; max-height:90px; overflow-y:auto; }
+.moo-btn { font-weight:700; letter-spacing:.04em; }
 .chat-msg { font-size:.68rem; color:var(--color-text-muted); line-height:1.3; word-break:break-word; }
 .chat-msg--mine .chat-author { color:var(--color-secondary); }
 .chat-author { color:var(--color-accent); font-weight:600; }

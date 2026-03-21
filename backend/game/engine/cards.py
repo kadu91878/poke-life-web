@@ -124,6 +124,13 @@ def _metadata_to_pokemon(card: dict) -> dict:
     raw_name = card.get('real_name') or card.get('current_name') or card.get('id') or 'Unknown'
     printed_power = card.get('power')
     runtime_battle_points = printed_power if printed_power is not None else card.get('engine_battle_points')
+    ability_description = str(card.get('ability_description') or '')
+    can_battle = (printed_power is not None or card.get('engine_battle_points') is not None)
+    if 'cannot battle' in ability_description.lower():
+        can_battle = False
+    battle_effect = card.get('engine_battle_effect') or card.get('battle_effect')
+    if not battle_effect and 'total battle outcomes are always increased by 8' in ability_description.lower():
+        battle_effect = 'battle_plus_8'
     return {
         'id': card.get('id') or raw_name.lower().replace(' ', '_'),
         'pokedex_id': card.get('engine_pokedex_id'),
@@ -132,7 +139,7 @@ def _metadata_to_pokemon(card: dict) -> dict:
         'battle_points': max(1, _coerce_int(runtime_battle_points, 1)),
         'master_points': max(0, _coerce_int(card.get('points'), 0)),
         'ability': card.get('engine_ability_name') or card.get('ability') or 'none',
-        'ability_description': card.get('ability_description', ''),
+        'ability_description': ability_description,
         'ability_type': card.get('ability_type', 'passive') or 'passive',
         'evolves_to': card.get('evolves_to') or None,
         'evolution_method': card.get('evolution_method'),
@@ -140,10 +147,10 @@ def _metadata_to_pokemon(card: dict) -> dict:
         'is_legendary': bool(card.get('engine_is_legendary') or card.get('is_legendary')),
         'is_baby': bool(card.get('engine_is_baby') or card.get('is_baby')),
         'rarity': card.get('engine_rarity') or card.get('rarity') or ('legendary' if card.get('engine_is_legendary') else 'unknown'),
-        'battle_effect': card.get('engine_battle_effect') or card.get('battle_effect'),
+        'battle_effect': battle_effect,
         'ability_charges': card.get('charges'),
         'ability_charges_total': card.get('charges'),
-        'can_battle': printed_power is not None or card.get('engine_battle_points') is not None,
+        'can_battle': can_battle,
         'printed_power': printed_power,
         'reference_image': card.get('reference_image'),
         'image_path': _runtime_image_path(card),
@@ -548,6 +555,18 @@ def parse_gift_pokemon_choice_options(card: dict) -> tuple[list[dict], list[str]
     return options, unsupported
 
 
+def _extract_gift_pokemon_name(description: str) -> tuple[str | None, bool]:
+    name_match = re.search(
+        r'receive\s+(?:as many\s+)?(?:a\s+)?([A-Za-z][A-Za-z .\'-]*?)(?:\s+as you want)?!',
+        description or '',
+        re.IGNORECASE,
+    )
+    loop_reward = bool(re.search(r'as many.*as you want', description or '', re.IGNORECASE))
+    if not name_match:
+        return None, loop_reward
+    return name_match.group(1).strip(), loop_reward
+
+
 def build_trainer_battle_context(card: dict) -> dict:
     description = (card.get('description') or '').lower()
     trainer_name = (card.get('title') or 'Trainer').replace('Trainer ', '').strip()
@@ -814,16 +833,22 @@ def apply_event_effect(state: dict, player_id: str, card: dict) -> tuple[dict, d
             result['affected_pokemon'] = affected
             return state, result
         if effect_type == 'knock_out_two_pokemon':
-            # Remove até 2 Pokémon da coleção (não o starter)
-            pool = list(player.get('pokemon', []))
-            removed = []
-            for _ in range(2):
-                if pool:
-                    p = pool.pop(0)
-                    removed.append(p.get('name', '?'))
-            player['pokemon'] = pool
+            eligible_slots: list[tuple[str, dict]] = []
+            for index, pokemon in enumerate(player.get('pokemon', [])):
+                if pokemon.get('knocked_out'):
+                    continue
+                eligible_slots.append((f'pokemon:{index}', pokemon))
+            starter = player.get('starter_pokemon')
+            if starter and not starter.get('knocked_out'):
+                eligible_slots.append(('starter', starter))
+
+            knocked_out = []
+            for _slot_key, pokemon in random.sample(eligible_slots, k=min(2, len(eligible_slots))):
+                pokemon['knocked_out'] = True
+                knocked_out.append(pokemon.get('name', '?'))
+
             sync_player_inventory(player)
-            result['removed_pokemon'] = removed
+            result['affected_pokemon'] = knocked_out
             return state, result
         return state, result
 
@@ -889,28 +914,14 @@ def apply_victory_effect(state: dict, player_id: str, card: dict) -> tuple[dict,
         return state, result
 
     if category == 'gift_pokemon':
-        name_match = re.search(
-            r'receive\s+(?:as many\s+)?(?:a\s+)?([A-Za-z][A-Za-z .\'-]*?)(?:\s+as you want)?!',
-            description,
-            re.IGNORECASE,
-        )
-        loop_capture = bool(re.search(r'as many.*as you want', description, re.IGNORECASE))
-        if name_match:
-            pokemon_name = name_match.group(1).strip()
+        pokemon_name, loop_reward = _extract_gift_pokemon_name(description)
+        if pokemon_name:
             pokemon, support = resolve_supported_pokemon_reward(pokemon_name)
             result.update(support)
             if support['supported']:
-                result['effect'] = 'capture_attempt'
-                result['status'] = 'pending'
-                result['capture_action'] = {
-                    'mode': 'known_pokemon',
-                    'pokemon_name': pokemon['name'],
-                    'capture_context': 'victory_gift',
-                    'allowed_rolls': [],
-                    'source_card_id': card.get('id'),
-                    'source_card_title': card.get('title'),
-                    'loop_capture': loop_capture,
-                }
+                result['effect'] = 'reward_pokemon'
+                result['reward_pokemon_name'] = pokemon['name']
+                result['reward_loop'] = loop_reward
             else:
                 result['status'] = 'partial'
         return state, result
@@ -971,33 +982,7 @@ def apply_victory_effect(state: dict, player_id: str, card: dict) -> tuple[dict,
         return state, result
 
     if category == 'special_reward':
-        # "Jynx foresees luck in your future" — recompensa aleatória baseada em dado.
-        roll = random.randint(1, 6)
-        result['rolls'] = [roll]
-        result['effect'] = 'special_reward'
-        if roll == 1:
-            player['bonus_points'] = player.get('bonus_points', 0) + 10
-            player['bonus_master_points'] = player.get('bonus_master_points', 0) + 10
-            result['reward'] = {'type': 'gain_master_points', 'amount': 10}
-        elif roll == 2:
-            player['pokeballs'] = player.get('pokeballs', 0) + 1
-            result['reward'] = {'type': 'gain_pokeball', 'amount': 1}
-        elif roll == 3:
-            add_item(player, 'full_restore', 1)
-            result['reward'] = {'type': 'gain_item', 'item_key': 'full_restore'}
-        elif roll == 4:
-            player['bonus_points'] = player.get('bonus_points', 0) + 20
-            player['bonus_master_points'] = player.get('bonus_master_points', 0) + 20
-            result['reward'] = {'type': 'gain_master_points', 'amount': 20}
-        elif roll == 5:
-            add_item(player, 'pluspower', 1)
-            result['reward'] = {'type': 'gain_item', 'item_key': 'pluspower'}
-        else:  # roll == 6
-            player['bonus_points'] = player.get('bonus_points', 0) + 30
-            player['bonus_master_points'] = player.get('bonus_master_points', 0) + 30
-            player['pokeballs'] = player.get('pokeballs', 0) + 1
-            result['reward'] = {'type': 'jackpot', 'master_points': 30, 'pokeballs': 1}
-        sync_player_inventory(player)
+        result['effect'] = 'lucky_jynx_joke'
         return state, result
 
     return state, result

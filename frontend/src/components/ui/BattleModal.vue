@@ -22,7 +22,12 @@
     </Transition>
 
     <div class="modal" :class="{ 'modal-dimmed': showWinnerBanner }">
-      <h2>{{ battleTitle }}</h2>
+      <div class="modal-header">
+        <h2>{{ battleTitle }}</h2>
+        <button class="btn-ghost minimize-btn" @click="emit('minimize')">
+          Voltar ao tabuleiro
+        </button>
+      </div>
 
       <div class="battle-info">
         <span class="fighter">{{ challenger?.name }}</span>
@@ -179,6 +184,7 @@
 import { ref, computed, watch } from 'vue'
 import { useGameStore } from '@/stores/gameStore'
 
+const emit = defineEmits(['minimize'])
 const store = useGameStore()
 const selectedSlotKey = ref(null)
 const usePlusPower  = ref(false)
@@ -301,6 +307,15 @@ const waitingRollMessage = computed(() => {
   return 'Dado rolado! Aguardando oponente...'
 })
 
+function pokemonCanBattle(pokemon) {
+  if (!pokemon || pokemon.knocked_out) return false
+  if (pokemon.can_battle === false) return false
+  if ((pokemon.ability_description || '').toLowerCase().includes('cannot battle')) return false
+  return !(pokemon.abilities || []).some((ability) =>
+    (ability.effects || []).some((effect) => effect.effect_kind === 'cannot_battle' && effect.implemented),
+  )
+}
+
 const myPokemon = computed(() => {
   const player = localBattlePlayer.value
   if (!player) return []
@@ -317,7 +332,7 @@ const myPokemon = computed(() => {
       knocked_out: !!player.starter_pokemon.knocked_out || defeatedSlots.has('starter'),
     })
   }
-  return pool
+  return pool.filter(pokemonCanBattle)
 })
 const selectedPokemon = computed(() =>
   myPokemon.value.find(pokemon => pokemon.battle_slot_key === selectedSlotKey.value) ?? null
@@ -459,7 +474,25 @@ watch([myPokemon, subPhase], () => {
 }
 .modal.modal-dimmed { opacity: 0.15; pointer-events: none; }
 
-.modal h2 { text-align: center; color: var(--color-primary); }
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.modal h2 {
+  text-align: center;
+  color: var(--color-primary);
+  flex: 1;
+  margin: 0;
+}
+
+.minimize-btn {
+  width: auto;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 
 .battle-info {
   display: flex;
