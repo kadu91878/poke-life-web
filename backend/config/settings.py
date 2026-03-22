@@ -104,11 +104,13 @@ REDIS_URL: str = config('REDIS_URL', default='')
 CHANNEL_LAYERS_BACKEND = config('CHANNEL_LAYERS_BACKEND', default='memory')
 
 if CHANNEL_LAYERS_BACKEND == 'redis':
+    if not REDIS_URL:
+        raise RuntimeError('CHANNEL_LAYERS_BACKEND=redis requer REDIS_URL configurado explicitamente')
     CHANNEL_LAYERS = {
         'default': {
             'BACKEND': 'channels_redis.core.RedisChannelLayer',
             'CONFIG': {
-                'hosts': [REDIS_URL or 'redis://localhost:6379/0'],
+                'hosts': [REDIS_URL],
             },
         },
     }
@@ -132,3 +134,27 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],
     'DEFAULT_PARSER_CLASSES': ['rest_framework.parsers.JSONParser'],
 }
+
+# ── Logging ─────────────────────────────────────────────────────────────────
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'game.consumers': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'game.redis_client': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
+

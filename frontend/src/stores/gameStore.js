@@ -3,6 +3,13 @@ import { ref, computed } from 'vue'
 import axios from 'axios'
 import gameActions from '@/constants/gameActions'
 
+const WS_TRACE = import.meta.env.DEV || import.meta.env.VITE_DEBUG === 'True'
+
+function wsTrace(...args) {
+  if (!WS_TRACE) return
+  console.debug('[WS]', ...args)
+}
+
 export const useGameStore = defineStore('game', () => {
   // ── Estado ───────────────────────────────────────────────────────────────
   const roomCode    = ref(null)
@@ -144,6 +151,7 @@ export const useGameStore = defineStore('game', () => {
     ws.onopen = () => {
       if (socket !== ws) return
       wsStatus.value = 'connected'
+      wsTrace('open', { room: code })
       // Envia player_id salvo (se houver) para reconexão confiável por ID
       const savedId = sessionStorage.getItem(`playerId_${code}`) || ''
       send(gameActions.joinGame, { player_name: name, player_id: savedId })
@@ -152,6 +160,7 @@ export const useGameStore = defineStore('game', () => {
     ws.onmessage = (event) => {
       if (socket !== ws) return
       const msg = JSON.parse(event.data)
+      wsTrace('message', { type: msg.type, event: msg.event?.type ?? null })
       handleMessage(msg)
     }
 
@@ -159,11 +168,13 @@ export const useGameStore = defineStore('game', () => {
       if (socket !== ws) return
       wsStatus.value = 'error'
       errorMsg.value = 'Erro de conexão WebSocket'
+      wsTrace('error', { room: code })
     }
 
     ws.onclose = () => {
       if (socket !== ws) return
       wsStatus.value = 'disconnected'
+      wsTrace('close', { room: code })
       socket = null
       // Auto-reconnect after 3s if we have credentials
       if (code && name) {
@@ -186,6 +197,7 @@ export const useGameStore = defineStore('game', () => {
 
   function send(action, data = {}) {
     if (socket?.readyState === WebSocket.OPEN) {
+      wsTrace('send', { action, data })
       socket.send(JSON.stringify({ action, ...data }))
     } else {
       console.warn('[WS] send() descartado — socket não está aberto:', action, 'readyState:', socket?.readyState)
@@ -250,18 +262,26 @@ export const useGameStore = defineStore('game', () => {
     const knockedOutLabel = result.knocked_out_pokemon ? ` ${result.knocked_out_pokemon} ficou nocauteado.` : ''
     const returnLabel = result.returned_to_tile_name ? ` Voltou para ${result.returned_to_tile_name}.` : ''
 
+    const autoWinOutcome = (result.challenger_auto_win || result.defender_auto_win)
+      ? `${winnerName} venceu automaticamente por habilidade!`
+      : null
+
     if (result.mode === 'gym') {
-      const outcome = result.battle_finished
-        ? (result.gym_victory ? `${winnerName} venceu o ginasio!` : `${winnerName} venceu o desafio!`)
-        : `${winnerName} venceu o round!`
+      const outcome = autoWinOutcome ?? (
+        result.battle_finished
+          ? (result.gym_victory ? `${winnerName} venceu o ginasio!` : `${winnerName} venceu o desafio!`)
+          : `${winnerName} venceu o round!`
+      )
       return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${outcome}${knockedOutLabel}${returnLabel}`
     }
 
     if (result.mode === 'trainer') {
-      return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${winnerName} venceu a batalha!${knockedOutLabel}${returnLabel}`
+      const outcome = autoWinOutcome ?? `${winnerName} venceu a batalha!`
+      return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${outcome}${knockedOutLabel}${returnLabel}`
     }
 
-    return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${winnerName} venceu o duelo!${knockedOutLabel}${returnLabel}`
+    const outcome = autoWinOutcome ?? `${winnerName} venceu o duelo!`
+    return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${outcome}${knockedOutLabel}${returnLabel}`
   }
 
   function _showNotification(event) {

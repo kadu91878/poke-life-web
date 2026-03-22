@@ -17,16 +17,13 @@ services:
       DEBUG: ${POKEMON_LIFE_DEBUG:-False}
       ALLOWED_HOSTS: ${POKEMON_LIFE_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
       CORS_ALLOWED_ORIGINS: ${POKEMON_LIFE_CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
-      REDIS_URL: ${POKEMON_LIFE_REDIS_URL:-redis://redis:6379/0}
-      CHANNEL_LAYERS_BACKEND: ${POKEMON_LIFE_CHANNEL_LAYERS_BACKEND:-redis}
+      REDIS_URL: ${POKEMON_LIFE_REDIS_URL:-}
+      CHANNEL_LAYERS_BACKEND: ${POKEMON_LIFE_CHANNEL_LAYERS_BACKEND:-memory}
       SQLITE_PATH: ${POKEMON_LIFE_SQLITE_PATH:-/app/backend/runtime/db.sqlite3}
     ports:
       - "${POKEMON_LIFE_BACKEND_PORT:-8000}:8000"
     volumes:
       - backend_data:/app/backend/runtime
-    depends_on:
-      redis:
-        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/').read()"]

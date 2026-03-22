@@ -1,8 +1,13 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from channels.db import database_sync_to_async
+from channels.testing import WebsocketCommunicator
+
+from config.asgi import application
 from game.consumers import GameConsumer
 from game.engine import state as engine
+from game.models import GameRoom
 from game.state_schema import build_initial_state
 
 
@@ -594,3 +599,96 @@ class TestHostToolsWebsocket(unittest.IsolatedAsyncioTestCase):
                 consumer.send_error.assert_called()
                 consumer.broadcast_state.assert_not_called()
                 consumer.send_error.reset_mock()
+
+class TestRealtimeWebsocketFlow(unittest.IsolatedAsyncioTestCase):
+    @database_sync_to_async
+    def _reset_room(self, room_code: str):
+        GameRoom.objects.all().delete()
+        GameRoom.objects.create(
+            room_code=room_code,
+            status='waiting',
+            game_state=build_initial_state(room_code),
+        )
+
+    async def test_join_start_select_and_roll_flow_broadcasts_state_updates(self):
+        room_code = 'WS1234'
+        await self._reset_room(room_code)
+
+        with patch('game.redis_client.get_redis', AsyncMock(return_value=None)):
+            player1, player2, c1, c2 = None, None, None, None
+            try:
+                c1 = WebsocketCommunicator(application, f'/ws/game/{room_code}/')
+                connected1, _ = await c1.connect()
+                self.assertTrue(connected1)
+                init1 = await c1.receive_json_from()
+                self.assertEqual(init1['type'], 'game_state')
+
+                await c1.send_json_to({'action': 'join_game', 'player_name': 'Ash'})
+                joined_or_update = [await c1.receive_json_from(), await c1.receive_json_from()]
+                joined1 = next(msg for msg in joined_or_update if msg['type'] == 'joined')
+                self.assertTrue(any(msg['type'] == 'state_update' for msg in joined_or_update))
+                player1 = joined1['player_id']
+
+                c2 = WebsocketCommunicator(application, f'/ws/game/{room_code}/')
+                connected2, _ = await c2.connect()
+                self.assertTrue(connected2)
+                init2 = await c2.receive_json_from()
+                self.assertEqual(init2['type'], 'game_state')
+
+                await c2.send_json_to({'action': 'join_game', 'player_name': 'Misty'})
+                joined_or_update_2 = [await c2.receive_json_from(), await c2.receive_json_from()]
+                joined2 = next(msg for msg in joined_or_update_2 if msg['type'] == 'joined')
+                self.assertTrue(any(msg['type'] == 'state_update' for msg in joined_or_update_2))
+                player2 = joined2['player_id']
+
+                p1_lobby_update = await c1.receive_json_from()
+                self.assertEqual(p1_lobby_update['type'], 'state_update')
+                self.assertEqual(p1_lobby_update['event']['type'], 'player_joined')
+
+                await c1.send_json_to({'action': 'start_game'})
+                start_update_1 = await c1.receive_json_from()
+                start_update_2 = await c2.receive_json_from()
+                self.assertEqual(start_update_1['type'], 'state_update')
+                self.assertEqual(start_update_2['type'], 'state_update')
+                self.assertEqual(start_update_1['event']['type'], 'game_started')
+                self.assertEqual(start_update_1['state']['turn']['phase'], 'select_starter')
+
+                state = start_update_1['state']
+                first_player_id = state['turn']['current_player_id']
+                first_comm = c1 if first_player_id == player1 else c2
+                second_comm = c2 if first_comm is c1 else c1
+                first_starter_id = state['turn']['available_starters'][0]['id']
+
+                await first_comm.send_json_to({'action': 'select_starter', 'starter_id': first_starter_id})
+                first_select_updates = [await first_comm.receive_json_from(), await second_comm.receive_json_from()]
+                self.assertTrue(all(msg['type'] == 'state_update' for msg in first_select_updates))
+                self.assertTrue(all(msg['event']['type'] == 'starter_selected' for msg in first_select_updates))
+
+                state = first_select_updates[0]['state']
+                next_player_id = state['turn']['current_player_id']
+                next_comm = c1 if next_player_id == player1 else c2
+                waiting_comm = c2 if next_comm is c1 else c1
+                next_starter_id = state['turn']['available_starters'][0]['id']
+
+                await next_comm.send_json_to({'action': 'select_starter', 'starter_id': next_starter_id})
+                second_select_updates = [await next_comm.receive_json_from(), await waiting_comm.receive_json_from()]
+                self.assertTrue(all(msg['type'] == 'state_update' for msg in second_select_updates))
+                self.assertTrue(all(msg['event']['type'] == 'starter_selected' for msg in second_select_updates))
+                self.assertEqual(second_select_updates[0]['state']['turn']['phase'], 'roll')
+
+                roll_player_id = second_select_updates[0]['state']['turn']['current_player_id']
+                roll_comm = c1 if roll_player_id == player1 else c2
+                watch_comm = c2 if roll_comm is c1 else c1
+
+                with patch('game.engine.mechanics.roll_dice', return_value=4):
+                    await roll_comm.send_json_to({'action': 'roll_dice'})
+                    roll_updates = [await roll_comm.receive_json_from(), await watch_comm.receive_json_from()]
+
+                self.assertTrue(all(msg['type'] == 'state_update' for msg in roll_updates))
+                self.assertTrue(all(msg['event']['type'] == 'dice_rolled' for msg in roll_updates))
+            finally:
+                if c1 is not None:
+                    await c1.disconnect()
+                if c2 is not None:
+                    await c2.disconnect()
+
