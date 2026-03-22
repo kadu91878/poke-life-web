@@ -750,6 +750,7 @@ const pendingChoiceTitle = computed(() => {
   if (pendingAction.value?.type === 'capture_choice_decision') return '✨ Habilidade de Captura'
   if (pendingAction.value?.type === 'capture_reroll_decision') return '✨ Rerrolar Captura'
   if (pendingAction.value?.type === 'battle_reroll_decision') return '✨ Rerrolar Batalha'
+  if (pendingAction.value?.type === 'grass_duel_override') return '🥊 Escolha de Combate'
   if (pendingAction.value?.type === 'event_copy_decision') return '🦊 Copiar Carta de Evento'
   if (pendingAction.value?.type === 'knockout_redirect_decision') return '👻 Redirecionar Nocaute'
   if (pendingAction.value?.type === 'wobbuffet_counter_decision') return '🛡️ Contra-Ataque do Wobbuffet'

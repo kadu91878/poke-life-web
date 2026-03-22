@@ -421,7 +421,9 @@ watch(() => store.lastEvent, (event) => {
     const winnerId = result.winner_id
     const winnerPlayer = allPlayers.value.find(p => p.id === winnerId)
     winnerName.value = winnerPlayer?.name ?? result.winner_name ?? 'Vencedor'
-    if (result.mode === 'gym') {
+    if (result.challenger_auto_win || result.defender_auto_win) {
+      winnerSubtitle.value = 'venceu automaticamente por habilidade!'
+    } else if (result.mode === 'gym') {
       winnerSubtitle.value = result.battle_finished
         ? (result.gym_victory ? 'venceu o ginásio!' : 'venceu o desafio!')
         : 'venceu o round!'

@@ -95,15 +95,22 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# ── Redis ────────────────────────────────────────────────────────────────────
+# URL de conexão ao Redis. Deixe vazio ('') para desabilitar Redis completamente.
+# Em produção: redis://user:password@host:6379/0
+REDIS_URL: str = config('REDIS_URL', default='')
+
 # ── Channel Layers ──────────────────────────────────────────────────────────
 CHANNEL_LAYERS_BACKEND = config('CHANNEL_LAYERS_BACKEND', default='memory')
 
 if CHANNEL_LAYERS_BACKEND == 'redis':
+    if not REDIS_URL:
+        raise RuntimeError('CHANNEL_LAYERS_BACKEND=redis requer REDIS_URL configurado explicitamente')
     CHANNEL_LAYERS = {
         'default': {
             'BACKEND': 'channels_redis.core.RedisChannelLayer',
             'CONFIG': {
-                'hosts': [config('REDIS_URL', default='redis://localhost:6379/0')],
+                'hosts': [REDIS_URL],
             },
         },
     }
@@ -127,3 +134,27 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],
     'DEFAULT_PARSER_CLASSES': ['rest_framework.parsers.JSONParser'],
 }
+
+# ── Logging ─────────────────────────────────────────────────────────────────
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'game.consumers': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'game.redis_client': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
+

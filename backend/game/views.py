@@ -70,6 +70,7 @@ def _new_player(name: str, index: int) -> dict:
         'gyms_attempted': [],
         'gyms_defeated': [],
         'has_reached_league': False,
+        'league_attempt_completed': False,
     }
 
 

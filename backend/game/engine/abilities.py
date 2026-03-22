@@ -293,11 +293,6 @@ BATTLE_EFFECT_METADATA: dict[str, dict] = {
         'description': 'earthquake + perdedor perde 1 Full Restore',
         'implemented': True,
     },
-    'static_zapdos': {
-        'phase': 'score',
-        'description': 'Rola 2 dados extras; usa o melhor entre os 3',
-        'implemented': True,
-    },
     'multiscale': {
         'phase': 'score+pre',
         'description': 'earthquake + ignora habilidades/efeitos do oponente',

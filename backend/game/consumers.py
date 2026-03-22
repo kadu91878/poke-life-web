@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import re
 import uuid
 from typing import ClassVar
@@ -14,9 +15,12 @@ from .engine import state as game_state
 from .engine import cpu as cpu_engine
 from .engine.inventory import get_starting_resource_defaults
 from .models import GameRoom
+from . import redis_client
 from .session_expiration import get_room_if_active, prune_expired_sessions
 from .socket_contract import SOCKET_HANDLER_NAMES
 from .state_schema import mark_saved, normalize_state
+
+logger = logging.getLogger(__name__)
 
 
 def _format_debug_fields(**fields) -> str:
@@ -65,13 +69,18 @@ def _battle_roll_event(player_id: str, result: dict | None) -> dict:
     return event
 
 
+def _channel_layer_name(channel_layer) -> str:
+    if channel_layer is None:
+        return 'none'
+    return f'{channel_layer.__class__.__module__}.{channel_layer.__class__.__name__}'
+
+
 class GameConsumer(AsyncWebsocketConsumer):
     _room_locks: ClassVar[dict[str, asyncio.Lock]] = {}
 
-    def _room_lock(self) -> asyncio.Lock:
-        if self.room_code not in GameConsumer._room_locks:
-            GameConsumer._room_locks[self.room_code] = asyncio.Lock()
-        return GameConsumer._room_locks[self.room_code]
+    def _room_lock(self):
+        """Retorna context manager de lock por sala (Redis ou asyncio.Lock como fallback)."""
+        return redis_client.room_lock(self.room_code, fallback_locks=GameConsumer._room_locks)
 
     async def connect(self):
         self.room_code = self.scope['url_route']['kwargs']['room_code']
@@ -84,11 +93,24 @@ class GameConsumer(AsyncWebsocketConsumer):
 
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
         await self.accept()
+        logger.info(
+            '[WS] connected room=%s channel=%s layer=%s',
+            self.room_code,
+            self.channel_name,
+            _channel_layer_name(self.channel_layer),
+        )
 
         state = await self.get_game_state()
         await self.send_json({'type': 'game_state', 'state': state})
 
     async def disconnect(self, code):
+        logger.info(
+            '[WS] disconnected room=%s player=%s channel=%s code=%s',
+            self.room_code,
+            self.player_id,
+            self.channel_name,
+            code,
+        )
         if self.player_id:
             await self.mark_player_disconnected()
             await self.channel_layer.group_send(
@@ -114,14 +136,34 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.send_error(f'Ação desconhecida: {action}')
             return
 
+        logger.info(
+            '[WS] received action room=%s player=%s channel=%s action=%s',
+            self.room_code,
+            self.player_id,
+            self.channel_name,
+            action,
+        )
         try:
             async with self._room_lock():
                 if not await self.room_exists():
+                    logger.warning('[WS] room missing during action room=%s action=%s', self.room_code, action)
                     await self.send_error('Sala não está mais disponível')
                     await self.close(code=4004)
                     return
                 await handler(data)
+                logger.info(
+                    '[WS] processed action room=%s player=%s action=%s',
+                    self.room_code,
+                    self.player_id,
+                    action,
+                )
         except Exception as exc:
+            logger.exception(
+                '[WS] failed action room=%s player=%s action=%s',
+                self.room_code,
+                self.player_id,
+                action,
+            )
             await self.send_error(str(exc))
 
     async def handle_join_game(self, data):
@@ -189,6 +231,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             'gyms_attempted': [],
             'gyms_defeated': [],
             'has_reached_league': False,
+            'league_attempt_completed': False,
         }
         players.append(new_player)
         state['players'] = players
@@ -988,10 +1031,30 @@ class GameConsumer(AsyncWebsocketConsumer):
             pass
 
     async def broadcast_state(self, state, event=None):
-        await self.channel_layer.group_send(
-            self.room_group_name,
-            {'type': 'send_state_update', 'state': state, 'event': event or {}},
+        event_payload = event or {}
+        turn = (state or {}).get('turn') or {}
+        logger.info(
+            '[WS] broadcasting snapshot room=%s event=%s phase=%s current_player=%s layer=%s bytes=%s',
+            self.room_code,
+            event_payload.get('type'),
+            turn.get('phase'),
+            turn.get('current_player_id'),
+            _channel_layer_name(self.channel_layer),
+            len(json.dumps(state, default=str).encode('utf-8')) if state is not None else 0,
         )
+        try:
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {'type': 'send_state_update', 'state': state, 'event': event_payload},
+            )
+        except Exception:
+            logger.exception(
+                '[WS] failed to broadcast snapshot room=%s event=%s layer=%s',
+                self.room_code,
+                event_payload.get('type'),
+                _channel_layer_name(self.channel_layer),
+            )
+            raise
         self._schedule_cpu_actions(state)
 
     def _schedule_cpu_actions(self, state: dict) -> None:
@@ -1001,14 +1064,25 @@ class GameConsumer(AsyncWebsocketConsumer):
             delay = 1.5 + i * 1.2
             asyncio.create_task(self._delayed_cpu_action(cpu_id, delay))
 
-    async def _delayed_cpu_action(self, cpu_player_id: str, delay: float) -> None:
+    async def _delayed_cpu_action(self, cpu_player_id: str, delay: float, *, _attempt: int = 1) -> None:
         await asyncio.sleep(delay)
         try:
             async with self._room_lock():
                 state = await self.get_game_state()
+                # Re-check: state may have changed while waiting (another task or player acted first)
+                if cpu_player_id not in cpu_engine.needs_cpu_action(state):
+                    _cpu_debug('SKIP', 'ação já não é necessária', cpu_player_id=cpu_player_id, state=state)
+                    return
                 await self._execute_cpu_action(state, cpu_player_id)
         except Exception as exc:
-            _cpu_debug('ERROR', 'erro ao executar ação', cpu_player_id=cpu_player_id, error=str(exc))
+            import traceback
+            _cpu_debug('ERROR', f'erro ao executar ação (tentativa {_attempt}/3)',
+                       cpu_player_id=cpu_player_id, error=str(exc))
+            traceback.print_exc()
+            if _attempt < 3:
+                asyncio.create_task(
+                    self._delayed_cpu_action(cpu_player_id, 2.0 * _attempt, _attempt=_attempt + 1)
+                )
 
     async def _execute_cpu_action(self, state: dict, cpu_player_id: str) -> None:
         """Execute one CPU decision step, save, and broadcast."""
@@ -1175,17 +1249,36 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     async def send_state_update(self, message):
         try:
+            event = message.get('event') or {}
+            state = message.get('state') or {}
+            turn = state.get('turn') or {}
+            logger.info(
+                '[WS] sending snapshot room=%s player=%s event=%s phase=%s current_player=%s',
+                self.room_code,
+                self.player_id,
+                event.get('type'),
+                turn.get('phase'),
+                turn.get('current_player_id'),
+            )
             await self.send_json({'type': 'state_update', 'state': message['state'], 'event': message['event']})
         except Exception:
-            pass
+            logger.exception(
+                '[WS] failed to send snapshot room=%s player=%s event=%s',
+                self.room_code,
+                self.player_id,
+                (message.get('event') or {}).get('type'),
+            )
+            raise
 
     async def broadcast_event(self, message):
         try:
             await self.send_json({'type': 'event', 'event': message['event']})
         except Exception:
-            pass
+            logger.exception('[WS] failed to send event room=%s player=%s', self.room_code, self.player_id)
+            raise
 
     async def send_error(self, message):
+        logger.warning('[WS] sending error room=%s player=%s message=%s', self.room_code, self.player_id, message)
         await self.send_json({'type': 'error', 'message': message})
 
     async def send_json(self, data):
@@ -1292,8 +1385,14 @@ class GameConsumer(AsyncWebsocketConsumer):
             return normalize_state(room.room_code, room.game_state)
         return {}
 
+    async def save_game_state(self, state):
+        """Persiste estado no banco e atualiza atividade de sessão no Redis."""
+        saved = await self._db_save_game_state(state)
+        await redis_client.touch_session_activity(self.room_code)
+        return saved
+
     @database_sync_to_async
-    def save_game_state(self, state):
+    def _db_save_game_state(self, state):
         normalized = normalize_state(self.room_code, state)
         normalized = mark_saved(normalized)
         GameRoom.objects.filter(room_code=self.room_code).update(

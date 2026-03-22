@@ -185,6 +185,7 @@ _FORCED_STOP_LOG_LABELS = {
     'team_rocket': 'Equipe Rocket',
     'teleporter': 'Teleporter',
     'gym': 'ginásio',
+    'league': 'Liga Pokémon',
 }
 
 
@@ -1179,7 +1180,15 @@ def _resolve_move_roll_ability_decision(
     else:
         return None, 'Resolução de habilidade ainda não suportada'
 
-    mark_primary_ability_used(
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado após resolver a habilidade'
+    pokemon = _get_player_pokemon_slot(player, slot_key)
+    if not pokemon:
+        return None, 'Pokémon da habilidade não encontrado após resolver a habilidade'
+
+    _mark_pokemon_ability_usage(
+        player,
         pokemon,
         scope='turn',
         consume_charge=consume_charge,
@@ -1234,10 +1243,23 @@ def _queue_capture_choice_decision(
     """Fila uma decisão de capture_choice antes do dado de captura ser rolado."""
     pokemon_name = pokemon.get('name', 'Pokémon')
     ability_name = ability.get('name') or 'Habilidade'
-    options = [
-        {'id': str(val), 'label': f'Escolher {val}', 'value': val}
-        for val in range(1, 7)
-    ]
+    _cap_effect = next(
+        (e for e in (ability.get('effects') or []) if e.get('effect_kind') == 'capture_choice'),
+        None,
+    )
+    two_dice = bool((_cap_effect or {}).get('params', {}).get('two_dice'))
+    if two_dice:
+        dice1 = roll_dice()
+        dice2 = roll_dice()
+        dice_vals = sorted({dice1, dice2})
+        options = [{'id': str(val), 'label': f'Escolher {val}', 'value': val} for val in dice_vals]
+        prompt = f'{pokemon_name} pode usar {ability_name}. Você rolou {dice1} e {dice2}. Escolha um resultado:'
+    else:
+        options = [
+            {'id': str(val), 'label': f'Escolher {val}', 'value': val}
+            for val in range(1, 7)
+        ]
+        prompt = f'{pokemon_name} pode usar {ability_name}. Escolha o resultado do dado de captura:'
     options.append({'id': 'skip', 'label': 'Não usar habilidade', 'value': None})
     _set_pending_action(state, {
         'type': 'capture_choice_decision',
@@ -1249,7 +1271,7 @@ def _queue_capture_choice_decision(
         'has_charges': bool(ability.get('has_charges')),
         'use_full_restore': use_full_restore,
         'original_capture_action': copy.deepcopy(pending_capture_action),
-        'prompt': f'{pokemon_name} pode usar {ability_name}. Escolha o resultado do dado de captura:',
+        'prompt': prompt,
         'options': options,
         'allowed_actions': ['resolve_pending_action'],
     })
@@ -2490,6 +2512,75 @@ def _get_player_special_tile_flags(player: dict | None) -> dict:
     return flags
 
 
+def _get_player_consumed_stop_tiles(player: dict | None) -> list[str]:
+    if not player:
+        return []
+    consumed = [
+        str(tile_key)
+        for tile_key in (player.get('consumed_stop_tiles') or [])
+        if str(tile_key).strip()
+    ]
+    player['consumed_stop_tiles'] = consumed
+    return consumed
+
+
+def _build_stop_tile_key(
+    stop_kind: str,
+    tile: dict | None,
+    *,
+    gym_definition: dict | None = None,
+) -> str | None:
+    if not isinstance(tile, dict):
+        return None
+
+    tile_id = tile.get('id')
+    if tile_id is not None:
+        return f'{stop_kind}:{tile_id}'
+
+    if stop_kind == 'gym' and gym_definition and gym_definition.get('id'):
+        return f"gym:{gym_definition['id']}"
+
+    return None
+
+
+def _has_consumed_stop_tile(
+    player: dict | None,
+    stop_kind: str,
+    tile: dict | None,
+    *,
+    gym_definition: dict | None = None,
+) -> bool:
+    stop_key = _build_stop_tile_key(stop_kind, tile, gym_definition=gym_definition)
+    if not stop_key:
+        return False
+    return stop_key in set(_get_player_consumed_stop_tiles(player))
+
+
+def _mark_stop_tile_consumed(
+    player: dict | None,
+    stop_kind: str,
+    tile: dict | None,
+    *,
+    gym_definition: dict | None = None,
+) -> None:
+    stop_key = _build_stop_tile_key(stop_kind, tile, gym_definition=gym_definition)
+    if not stop_key:
+        return
+    consumed = _get_player_consumed_stop_tiles(player)
+    if stop_key not in consumed:
+        consumed.append(stop_key)
+
+
+def _get_consumed_stop_tile_kind(player: dict | None, tile: dict | None) -> str | None:
+    if not isinstance(tile, dict):
+        return None
+
+    if tile.get('type') == 'league' and _has_consumed_stop_tile(player, 'league', tile):
+        return 'league'
+
+    return None
+
+
 def _is_celadon_dept_store_tile(tile: dict | None) -> bool:
     if not isinstance(tile, dict):
         return False
@@ -3650,23 +3741,6 @@ def _find_available_event_copy_holder(player: dict) -> tuple[str, dict, dict] | 
     return None
 
 
-def _is_supported_immediate_event_copy(card: dict, result: dict) -> bool:
-    effect = result.get('effect')
-    effect_type = event_card_effect_type(card)
-    if effect in {
-        'capture_attempt',
-        'gift_pokemon_choice',
-        'teleporter_choice',
-        'mr_fuji_choice',
-        'oak_assistant_choice',
-        'trainer_battle',
-    }:
-        return False
-    if effect_type in {'move_backward_trigger', 'move_forward_trigger', 'all_discard_item'}:
-        return False
-    if result.get('category') == 'special_event' and effect == 'gift_pokemon_from_area':
-        return False
-    return True
 
 
 def _queue_next_event_copy_offer(state: dict) -> bool:
@@ -3767,23 +3841,6 @@ def _resolve_event_copy_decision(
     if not ability or (ability.get('has_charges') and int(ability.get('charges_remaining') or 0) <= 0):
         return None, 'Esta habilidade não possui cargas restantes'
 
-    trial_state = copy.deepcopy(state)
-    trial_state, result = apply_event_effect(trial_state, player_id, card)
-    if not _is_supported_immediate_event_copy(card, result):
-        _log_warning(
-            state,
-            player['name'],
-            f"a cópia de {card.get('title', 'Evento')} por {holder_name} exige um subtipo de resolução fora de turno que a engine ainda não suporta",
-        )
-        _queue_next_event_copy_offer(state)
-        return state, {
-            'type': 'event_copy_decision',
-            'used': False,
-            'pokemon': holder_name,
-            'card_title': card.get('title'),
-            'unsupported_copy': True,
-        }
-
     adjust_primary_ability_charges(pokemon, -1)
     state, result = apply_event_effect(state, player_id, card)
     state = _handle_event_result_followups(state, player_id, card, result)
@@ -3792,7 +3849,9 @@ def _resolve_event_copy_decision(
         player['name'],
         f"{holder_name} copiou {card.get('title', 'Evento')} -> {_describe_card_result_for_log(result)}.",
     )
-    _queue_next_event_copy_offer(state)
+    # Only advance the copy queue if no new pending action was created by the copied event
+    if not state['turn'].get('pending_action'):
+        _queue_next_event_copy_offer(state)
     return state, {
         'type': 'event_copy_decision',
         'used': True,
@@ -4306,6 +4365,37 @@ def _find_available_capture_ability(
     return None
 
 
+def _find_available_tile_override_abilities(
+    player: dict,
+    *,
+    from_type: str | None = None,
+    to_type: str | None = None,
+) -> list[tuple[str, dict, dict, dict]]:
+    """Encontra habilidades tile_type_override disponíveis para o jogador.
+
+    Retorna tuplas (slot_key, pokemon, ability_snapshot, effect_snapshot).
+    """
+    available: list[tuple[str, dict, dict, dict]] = []
+    for slot_key, pokemon in _iter_player_battle_slots(player, include_knocked_out=False):
+        sync_pokemon_ability_state(pokemon)
+        for ability in (pokemon.get('abilities') or []):
+            effect = _get_ability_effect(ability, 'tile_type_override')
+            if not effect:
+                continue
+            params = effect.get('params') or {}
+            if from_type is not None and params.get('from') != from_type:
+                continue
+            if to_type is not None and params.get('to') != to_type:
+                continue
+            runtime = ability.get('runtime') or {}
+            if runtime.get('used_this_turn'):
+                continue
+            if ability.get('has_charges') and int(ability.get('charges_remaining') or 0) <= 0:
+                continue
+            available.append((slot_key, pokemon, ability, effect))
+    return available
+
+
 def _find_available_battle_reroll_ability(
     player: dict,
     battle_choice: dict,
@@ -4533,12 +4623,14 @@ def _build_debug_visual_player() -> tuple[dict | None, str | None]:
         'special_tile_flags': {
             'celadon_dept_store_bonus_claimed': False,
         },
+        'consumed_stop_tiles': [],
         'items': copy.deepcopy(starting_defaults['items']),
         'badges': [],
         'master_points': 0,
         'bonus_points': 0,
         'league_bonus': 0,
         'has_reached_league': False,
+        'league_attempt_completed': False,
         'skip_turns': 0,
     }
 
@@ -4856,10 +4948,15 @@ def _find_forced_special_stop(
         tile = get_tile(board_data, position)
         if tile.get('type') == 'gym':
             gym_definition = get_gym_definition(tile_id=tile.get('id'))
-            if _should_force_stop_at_gym(player, gym_definition):
+            if (
+                _should_force_stop_at_gym(player, gym_definition)
+                and not _has_consumed_stop_tile(player, 'gym', tile, gym_definition=gym_definition)
+            ):
                 return position, tile, 'gym'
-        if _is_team_rocket_tile(tile):
+        if _is_team_rocket_tile(tile) and not _has_consumed_stop_tile(player, 'team_rocket', tile):
             return position, tile, 'team_rocket'
+        if tile.get('type') == 'league' and not _has_consumed_stop_tile(player, 'league', tile):
+            return position, tile, 'league'
         if _is_teleporter_tile(tile):
             return position, tile, 'teleporter'
     return None, None, None
@@ -4881,10 +4978,13 @@ def process_move(state: dict, player_id: str, dice_result: int) -> dict:
     natural_destination = calculate_new_position(old_pos, dice_result, board_data)
     forced_stop_position, forced_tile, forced_stop_kind = _find_forced_special_stop(player, old_pos, dice_result, board_data)
     new_pos = forced_stop_position if forced_stop_position is not None else natural_destination
+    if forced_tile and forced_stop_kind in {'gym', 'team_rocket', 'league'}:
+        _mark_stop_tile_consumed(player, forced_stop_kind, forced_tile)
     player['position'] = new_pos
 
     tile = get_tile(board_data, new_pos)
     effect = get_tile_effect(tile)
+    consumed_stop_kind = _get_consumed_stop_tile_kind(player, tile) if forced_stop_kind is None else None
 
     state['turn']['dice_result'] = dice_result
     state['turn']['current_tile'] = tile
@@ -4917,8 +5017,163 @@ def process_move(state: dict, player_id: str, dice_result: int) -> dict:
     ):
         return state
 
+    if consumed_stop_kind:
+        _log(
+            state,
+            player['name'],
+            f"{tile.get('name', 'Este tile')} já acionou sua parada obrigatória anteriormente; o efeito obrigatório não foi ativado novamente.",
+        )
+        state['turn']['phase'] = 'end'
+        return end_turn(state)
+
     # Resolve o efeito da casa automaticamente ou aguarda ação do jogador
     return _resolve_tile_effect(state, player_id, tile, effect)
+
+
+def _resolve_grass_tile(state: dict, player_id: str, tile: dict) -> dict:
+    encounters = tile.get('data', {}).get('encounters', [])
+    if encounters:
+        return _queue_board_encounter(state, player_id, tile, tile.get('data', {}).get('terrain', 'grass'))
+
+    card, new_deck, new_discard = draw_card(
+        state['decks']['pokemon_deck'],
+        state['decks']['pokemon_discard'],
+    )
+    state['decks']['pokemon_deck'] = new_deck
+    state['decks']['pokemon_discard'] = new_discard
+    if card:
+        state = _queue_capture_attempt(
+            state,
+            player_id,
+            pokemon=card,
+            capture_context='grass',
+            source='tile_draw',
+        )
+    return state
+
+
+def _queue_grass_duel_override_choice(
+    state: dict,
+    player_id: str,
+    tile: dict,
+    holders: list[tuple[str, dict, dict, dict]],
+) -> dict:
+    state['turn']['phase'] = 'action'
+    state['turn']['capture_context'] = None
+    state['turn']['pending_pokemon'] = None
+
+    options = []
+    for slot_key, pokemon, ability, _effect in holders:
+        options.append({
+            'id': f'use:{slot_key}:{ability.get("id", "primary")}',
+            'label': f"{pokemon.get('name', 'Pokémon')} · Tratar como combate",
+            'slot_key': slot_key,
+            'ability_id': ability.get('id', 'primary'),
+            'pokemon_name': pokemon.get('name'),
+        })
+    options.append({
+        'id': 'keep_grass',
+        'label': 'Continuar como grass',
+    })
+
+    _set_pending_action(state, {
+        'type': 'grass_duel_override',
+        'player_id': player_id,
+        'prompt': f"Você caiu em {tile.get('name', 'uma casa de grama')}. Quer tratá-la como um tile de combate?",
+        'tile': copy.deepcopy(tile),
+        'options': options,
+        'allowed_actions': ['resolve_pending_action'],
+    })
+    return state
+
+
+def _resolve_grass_duel_override_choice(
+    state: dict,
+    player_id: str,
+    pending_action: dict,
+    chosen: dict,
+) -> tuple[dict | None, str | dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+
+    tile = copy.deepcopy(pending_action.get('tile') or state['turn'].get('current_tile'))
+    if not isinstance(tile, dict) or not tile:
+        return None, 'Casa atual inválida'
+
+    tile_name = tile.get('name', 'a casa atual')
+
+    if chosen.get('id') == 'keep_grass':
+        _clear_pending_action(state)
+        state['turn']['pending_pokemon'] = None
+        state['turn']['current_tile'] = copy.deepcopy(tile)
+        _log(state, player['name'], f"Decidiu manter {tile_name} como casa de grama.")
+        state = _resolve_grass_tile(state, player_id, tile)
+        return state, {
+            'success': True,
+            'type': 'tile_type_override',
+            'used': False,
+            'resolved_tile_type': 'grass',
+        }
+
+    slot_key = chosen.get('slot_key')
+    pokemon = _get_player_pokemon_slot(player, slot_key)
+    if not pokemon:
+        return None, 'Pokémon da habilidade não encontrado'
+
+    sync_pokemon_ability_state(pokemon)
+    ability_id = chosen.get('ability_id') or 'primary'
+    ability = next((item for item in (pokemon.get('abilities') or []) if item.get('id') == ability_id), None)
+    effect = _get_ability_effect(ability, 'tile_type_override') if ability else None
+    if not effect:
+        return None, 'Habilidade indisponível'
+
+    params = effect.get('params') or {}
+    if params.get('from') not in (None, tile.get('type')):
+        return None, 'Esta habilidade não pode alterar esta casa'
+    target_type = params.get('to')
+    if target_type != 'duel':
+        return None, 'Esta habilidade não pode transformar esta casa em combate'
+
+    runtime = ability.get('runtime') or {}
+    if runtime.get('used_this_turn'):
+        return None, 'Habilidade já utilizada neste turno'
+    if ability.get('has_charges') and int(ability.get('charges_remaining') or 0) <= 0:
+        return None, 'Sem cargas restantes'
+
+    consume_charge = bool(ability.get('has_charges'))
+    limit_scope = effect.get('limit_scope')
+    if limit_scope in ('turn', 'battle', 'game'):
+        mark_primary_ability_used(
+            pokemon,
+            scope=limit_scope,
+            consume_charge=consume_charge,
+        )
+    elif consume_charge:
+        adjust_primary_ability_charges(pokemon, -1)
+
+    _clear_pending_action(state)
+    state['turn']['pending_pokemon'] = None
+
+    overridden_tile = copy.deepcopy(tile)
+    overridden_tile['original_type'] = tile.get('type')
+    overridden_tile['type'] = target_type
+    state['turn']['current_tile'] = overridden_tile
+
+    _log(
+        state,
+        player['name'],
+        f"Usou {ability.get('name', 'a habilidade')} de {pokemon.get('name', 'um Pokémon')} e tratou {tile_name} como uma casa de duelo.",
+    )
+    state = _resolve_tile_effect(state, player_id, overridden_tile, {'type': target_type})
+    return state, {
+        'success': True,
+        'type': 'tile_type_override',
+        'used': True,
+        'pokemon': pokemon.get('name'),
+        'ability_name': ability.get('name'),
+        'resolved_tile_type': target_type,
+    }
 
 
 def _resolve_tile_effect(state: dict, player_id: str, tile: dict, effect: dict) -> dict:
@@ -4926,24 +5181,14 @@ def _resolve_tile_effect(state: dict, player_id: str, tile: dict, effect: dict) 
     tile_type = effect['type']
 
     if tile_type == 'grass':
-        encounters = tile.get('data', {}).get('encounters', [])
-        if encounters:
-            state = _queue_board_encounter(state, player_id, tile, tile.get('data', {}).get('terrain', 'grass'))
-        else:
-            card, new_deck, new_discard = draw_card(
-                state['decks']['pokemon_deck'],
-                state['decks']['pokemon_discard'],
-            )
-            state['decks']['pokemon_deck'] = new_deck
-            state['decks']['pokemon_discard'] = new_discard
-            if card:
-                state = _queue_capture_attempt(
-                    state,
-                    player_id,
-                    pokemon=card,
-                    capture_context='grass',
-                    source='tile_draw',
-                )
+        tile_override_holders = _find_available_tile_override_abilities(
+            player,
+            from_type='grass',
+            to_type='duel',
+        )
+        if tile_override_holders:
+            return _queue_grass_duel_override_choice(state, player_id, tile, tile_override_holders)
+        return _resolve_grass_tile(state, player_id, tile)
 
     elif tile_type == 'event':
         articuno_holder = _find_player_effect_holder(player, 'event_tile_double_draw_choice', include_knocked_out=False)
@@ -5295,16 +5540,38 @@ def _resolve_safari_zone_tile(state: dict, player_id: str, tile: dict) -> dict:
         return state
 
     tile_data = tile.get('data') or {}
+
+    # Tile de entrada: sem captura, apenas passa pelo tile
+    if tile_data.get('is_entrance'):
+        _log(state, player['name'], f"Entrou na {tile.get('name', 'Safari Zone')}.")
+        state['turn']['phase'] = 'end'
+        return end_turn(state)
+
+    pokemon_name = tile_data.get('displayed_pokemon_name')
+    pokemon = load_pokemon_by_name(pokemon_name) if pokemon_name else None
+    allowed_rolls = tile_data.get('allowed_rolls') or []
+
+    # Tile de saída: se houver Pokémon, oferecer captura antes de sair;
+    # caso contrário, saída imediata (comportamento original)
     if tile_data.get('is_exit'):
         return_to_tile_id = int(tile_data.get('return_to_tile_id', tile.get('id', 0)) or tile.get('id', 0))
+        if pokemon:
+            state['turn']['safari_exit_return_to'] = return_to_tile_id
+            _log(state, player['name'],
+                 f"Chegou ao fim da Safari Zone e pode tentar capturar {pokemon['name']} antes de sair.")
+            return _queue_capture_attempt(
+                state, player_id,
+                pokemon=pokemon,
+                capture_context='safari',
+                source='safari_zone_tile',
+                allowed_rolls=allowed_rolls,
+            )
         player['position'] = return_to_tile_id
         state['turn']['current_tile'] = get_tile(state.get('board', {}), return_to_tile_id)
         _log(state, player['name'], f"Chegou ao fim da Safari Zone e voltou para {state['turn']['current_tile'].get('name', 'a House')}.")
         state['turn']['phase'] = 'end'
         return end_turn(state)
 
-    pokemon_name = tile_data.get('displayed_pokemon_name')
-    pokemon = load_pokemon_by_name(pokemon_name) if pokemon_name else None
     if not pokemon:
         _log(state, player['name'], f"A Safari Zone mostrou {pokemon_name or 'um Pokémon desconhecido'}, mas ele não possui suporte jogável no estado atual.")
         state['turn']['phase'] = 'end'
@@ -5317,6 +5584,7 @@ def _resolve_safari_zone_tile(state: dict, player_id: str, tile: dict) -> dict:
         pokemon=pokemon,
         capture_context='safari',
         source='safari_zone_tile',
+        allowed_rolls=allowed_rolls,
     )
 
 
@@ -5581,7 +5849,7 @@ def resolve_event(state: dict, player_id: str, use_run_away: bool = False) -> tu
             return None, 'Rattata com Run Away não disponível'
         if not is_negative_event_card(card):
             return None, 'Run Away só funciona em eventos negativos'
-        _mark_legacy_ability_usage(rattata)
+        _mark_legacy_ability_usage(player, rattata)
         _log(state, player['name'], f"Usou Run Away! Fugiu do evento: {card.get('title', '?')}")
     else:
         state, result = apply_event_effect(state, player_id, card)
@@ -5610,11 +5878,47 @@ def resolve_event(state: dict, player_id: str, use_run_away: bool = False) -> tu
 # Os handlers podem chamar _resolve_tile_effect, end_turn, _log etc.
 # definidos posteriormente no módulo (Python resolve nomes em tempo de chamada).
 
-def _mark_legacy_ability_usage(pokemon: dict, *, scope: str = 'turn') -> None:
+_SQUIRTLE_LINE_SHARED_MOVE_REROLL_NAMES = frozenset({'squirtle', 'wartortle', 'blastoise'})
+
+
+def _is_squirtle_line_shared_move_reroll_pokemon(pokemon: dict | None) -> bool:
+    if not isinstance(pokemon, dict):
+        return False
+    return str(pokemon.get('name') or '').strip().lower() in _SQUIRTLE_LINE_SHARED_MOVE_REROLL_NAMES
+
+
+def _mark_pokemon_ability_usage(
+    player: dict | None,
+    pokemon: dict,
+    *,
+    scope: str = 'turn',
+    consume_charge: bool = False,
+    decision_id: str | None = None,
+) -> None:
+    mark_primary_ability_used(
+        pokemon,
+        scope=scope,
+        consume_charge=consume_charge,
+        decision_id=decision_id,
+    )
+    if (
+        scope != 'turn'
+        or not isinstance(player, dict)
+        or not _is_squirtle_line_shared_move_reroll_pokemon(pokemon)
+    ):
+        return
+
+    for _, teammate in _iter_player_battle_slots(player, include_knocked_out=True):
+        if teammate is pokemon or not _is_squirtle_line_shared_move_reroll_pokemon(teammate):
+            continue
+        mark_primary_ability_used(teammate, scope='turn', consume_charge=False)
+
+
+def _mark_legacy_ability_usage(player: dict, pokemon: dict, *, scope: str = 'turn') -> None:
     sync_pokemon_ability_state(pokemon)
     primary = next(iter(pokemon.get('abilities') or []), None)
     consume_charge = bool(primary and primary.get('charges_total') is not None)
-    mark_primary_ability_used(pokemon, scope=scope, consume_charge=consume_charge)
+    _mark_pokemon_ability_usage(player, pokemon, scope=scope, consume_charge=consume_charge)
 
 def _handle_movement_replace(state: dict, player: dict, pokemon: dict, steps: int, **kw) -> tuple:
     """Base compartilhada para habilidades que substituem o rolar do dado."""
@@ -5629,7 +5933,7 @@ def _handle_movement_replace(state: dict, player: dict, pokemon: dict, steps: in
     effect = get_tile_effect(tile)
     turn['dice_result'] = steps
     turn['current_tile'] = tile
-    _mark_legacy_ability_usage(pokemon)
+    _mark_legacy_ability_usage(player, pokemon)
     _log(state, player['name'],
          f"Usou {pokemon['ability']}! Avançou {steps} casas para {tile['name']}")
     if _handle_pokecenter_pass_through(
@@ -5663,7 +5967,7 @@ def _handle_extreme_speed(state: dict, player: dict, pokemon: dict, **kw) -> tup
     turn['pending_action'] = None
     turn['capture_context'] = None
     turn['current_tile'] = tile
-    _mark_legacy_ability_usage(pokemon)
+    _mark_legacy_ability_usage(player, pokemon)
     _log(state, player['name'],
          f"Usou Extreme Speed! Avançou para a próxima casa: {tile['name']}")
     if _handle_pokecenter_pass_through(
@@ -5694,7 +5998,7 @@ def _handle_teleport(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
     effect = get_tile_effect(tile)
     turn['dice_result'] = target_position
     turn['current_tile'] = tile
-    _mark_legacy_ability_usage(pokemon)
+    _mark_legacy_ability_usage(player, pokemon)
     _log(state, player['name'],
          f"Usou Teleport! Voltou para casa {target_position}: {tile['name']}")
     state = _resolve_tile_effect(state, player['id'], tile, effect)
@@ -5728,7 +6032,7 @@ def _handle_compound_eyes(state: dict, player: dict, pokemon: dict, **kw) -> tup
     if not turn.get('pending_pokemon'):
         return None, 'Não há Pokémon disponível para capturar agora'
     turn['compound_eyes_active'] = True
-    _mark_legacy_ability_usage(pokemon)
+    _mark_legacy_ability_usage(player, pokemon)
     _log(state, player['name'], 'Usou Compound Eyes! Próxima captura não gasta Pokébola')
     return state, {}
 
@@ -5741,7 +6045,7 @@ def _handle_run_away(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
     if not card or not is_negative_event_card(card):
         return None, 'Run Away só funciona em eventos negativos'
     turn['pending_event'] = None
-    _mark_legacy_ability_usage(pokemon)
+    _mark_legacy_ability_usage(player, pokemon)
     _log(state, player['name'],
          f"Usou Run Away! Fugiu do evento: {card.get('title', '?')}")
     turn['phase'] = 'end'
@@ -5768,7 +6072,7 @@ def _handle_psychic(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
     effect = get_tile_effect(tile)
     turn['dice_result'] = target_pos
     turn['current_tile'] = tile
-    _mark_legacy_ability_usage(pokemon)
+    _mark_legacy_ability_usage(player, pokemon)
     _log(state, player['name'],
          f"Usou Psychic! Teletransportou para a posição de {target['name']}: {tile['name']}")
     if _handle_pokecenter_pass_through(
@@ -5805,7 +6109,7 @@ def _handle_psybeam(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
     effect = get_tile_effect(tile)
     turn['dice_result'] = target_pos
     turn['current_tile'] = tile
-    _mark_legacy_ability_usage(pokemon)
+    _mark_legacy_ability_usage(player, pokemon)
     _log(state, player['name'],
          f"Usou Psybeam! Voltou para a casa de evento mais próxima: {tile['name']} (posição {target_pos})")
     state = _resolve_tile_effect(state, player['id'], tile, effect)
@@ -5841,21 +6145,16 @@ def _handle_torrent(state: dict, player: dict, pokemon: dict, **kw) -> tuple:
 # Para adicionar uma nova habilidade: crie _handle_xxx acima e registre aqui.
 _ACTIVE_ABILITY_HANDLERS: dict[str, callable] = {
     'hurricane':      _handle_hurricane,
-    'extreme_speed':  _handle_extreme_speed,
-    'flash_fire':     _handle_extreme_speed,   # Growlithe: mesma lógica do Extreme Speed
     'teleport':       _handle_teleport,
     'water_gun':      _handle_water_gun,
     'hydro_pump':     _handle_hydro_pump,
     'compound_eyes':  _handle_compound_eyes,
     'run_away':       _handle_run_away,
-    'psychic':        _handle_psychic,
-    'psybeam':        _handle_psybeam,
     'static':         _handle_move_3,
     'thunder':        _handle_move_3,
     'move_3':         _handle_move_3,          # Pichu: ability slug 'Move 3'
     'torrent':        _handle_torrent,
     'volt_absorb':    _handle_move_2,          # Jolteon: mover 2 casas
-    'synchronize':    _handle_move_1,          # Mew: mover 1 casa
 }
 
 
@@ -6093,6 +6392,189 @@ def use_pokemon_ability(
             'awaiting_target': True,
         }
 
+    if effect_kind == 'advance_after_landing':
+        if state['turn'].get('phase') != 'action':
+            return None, 'Use após cair em uma casa (fase de ação)'
+        board_data = state.get('board', {})
+        old_pos = player['position']
+        new_pos = calculate_new_position(old_pos, 1, board_data)
+        player['position'] = new_pos
+        tile = get_tile(board_data, new_pos)
+        effect = get_tile_effect(tile)
+        state['turn']['pending_pokemon'] = None
+        state['turn']['pending_action'] = None
+        state['turn']['capture_context'] = None
+        state['turn']['current_tile'] = tile
+        mark_primary_ability_used(pokemon, scope='turn', consume_charge=consume_charge)
+        _log(state, player['name'],
+             f'Usou {ability_name} de {pokemon_name}! Avançou para a próxima casa: {tile["name"]}')
+        if _handle_pokecenter_pass_through(
+            state, player_id,
+            start_position=old_pos, end_position=new_pos,
+            final_tile=tile, final_effect=effect,
+        ):
+            return state, {
+                'type': 'manual_pokemon_ability',
+                'pokemon': pokemon_name,
+                'ability_name': ability_name,
+                'effect_kind': effect_kind,
+                'new_position': new_pos,
+            }
+        state = _resolve_tile_effect(state, player_id, tile, effect)
+        return state, {
+            'type': 'manual_pokemon_ability',
+            'pokemon': pokemon_name,
+            'ability_name': ability_name,
+            'effect_kind': effect_kind,
+            'new_position': new_pos,
+        }
+
+    if effect_kind == 'targeted_move':
+        mode = (action.get('params') or {}).get('mode')
+        if mode == 'player_teleport':
+            forward_only = bool((action.get('params') or {}).get('forward_only', False))
+            max_steps = (action.get('params') or {}).get('max_steps')
+            current_pos = player['position']
+            other_players = [
+                p for p in state.get('players', [])
+                if p.get('is_active') and p['id'] != player_id
+            ]
+            if forward_only:
+                other_players = [p for p in other_players if p['position'] > current_pos]
+            if max_steps is not None:
+                other_players = [p for p in other_players if abs(p['position'] - current_pos) <= int(max_steps)]
+            if not other_players:
+                return None, 'Não há jogadores elegíveis para se mover'
+            options = [
+                {'id': p['id'], 'label': f"Posição de {p['name']} (casa {p['position']})"}
+                for p in other_players
+            ]
+            _set_pending_action(state, {
+                'type': 'alakazam_teleport_choice',
+                'player_id': player_id,
+                'slot_key': slot_key,
+                'ability_name': ability_name,
+                'has_charges': consume_charge,
+                'prompt': f'{pokemon_name} pode teletransportar para a posição de outro jogador:',
+                'options': options,
+                'allowed_actions': ['resolve_pending_action'],
+            })
+            return state, {
+                'type': 'manual_pokemon_ability',
+                'pokemon': pokemon_name,
+                'ability_name': ability_name,
+                'effect_kind': effect_kind,
+                'awaiting_target': True,
+            }
+        if mode == 'backward_event_tile':
+            board_data = state.get('board', {})
+            current_pos = player['position']
+            target_pos = None
+            for pos in range(current_pos - 1, -1, -1):
+                candidate = get_tile(board_data, pos)
+                if candidate.get('type') == 'event':
+                    target_pos = pos
+                    break
+            if target_pos is None:
+                return None, 'Não há casa de evento atrás da sua posição atual'
+            old_pos = current_pos
+            player['position'] = target_pos
+            tile = get_tile(board_data, target_pos)
+            effect = get_tile_effect(tile)
+            state['turn']['dice_result'] = target_pos
+            state['turn']['current_tile'] = tile
+            mark_primary_ability_used(pokemon, scope='turn', consume_charge=consume_charge)
+            _log(state, player['name'],
+                 f'Usou {ability_name} de {pokemon_name}! Voltou para a casa de evento mais próxima: {tile["name"]} (posição {target_pos})')
+            state = _resolve_tile_effect(state, player_id, tile, effect)
+            return state, {
+                'type': 'manual_pokemon_ability',
+                'pokemon': pokemon_name,
+                'ability_name': ability_name,
+                'effect_kind': effect_kind,
+                'target_position': target_pos,
+            }
+        return None, 'Modo de movimento direcionado não suportado'
+
+    if effect_kind == 'draw_victory':
+        if (action.get('params') or {}).get('after_duel_loss'):
+            return None, 'Esta habilidade é ativada automaticamente após perder um duelo'
+        mark_primary_ability_used(pokemon, scope='turn', consume_charge=consume_charge)
+        _log(state, player['name'], f'Usou {ability_name} de {pokemon_name}! Comprando carta de vitória.')
+        state = _award_victory_cards(state, player_id, 1, source='pokemon_ability')
+        return state, {
+            'type': 'manual_pokemon_ability',
+            'pokemon': pokemon_name,
+            'ability_name': ability_name,
+            'effect_kind': effect_kind,
+        }
+
+    if effect_kind == 'draw_event':
+        from_discard = bool((action.get('params') or {}).get('from_discard', False))
+        if from_discard:
+            event_tile_only = bool((action.get('params') or {}).get('event_tile_only', False))
+            if event_tile_only and (state['turn'].get('current_tile') or {}).get('type') != 'event':
+                return None, 'Quagsire só pode usar esta habilidade em uma casa de evento'
+            discard_pile = state.get('decks', {}).get('event_discard', [])
+            if not discard_pile:
+                return None, 'O descarte de eventos está vazio'
+            top_card = discard_pile[-1]
+            state['decks']['event_discard'] = discard_pile[:-1]
+            mark_primary_ability_used(pokemon, scope='turn', consume_charge=consume_charge)
+            reveal_card(state, player_id, top_card, 'event', resolved=True)
+            state.setdefault('consumed', {}).setdefault('events', []).append(top_card.get('id'))
+            state, result = apply_event_effect(state, player_id, top_card)
+            state['decks']['event_discard'] = append_to_discard(state['decks']['event_discard'], top_card)
+            _log(state, player['name'],
+                 f'Usou {ability_name} de {pokemon_name}! Comprou carta do descarte de eventos: {_describe_card_for_log(top_card)}')
+            state = _handle_event_result_followups(state, player_id, top_card, result)
+            return state, {
+                'type': 'manual_pokemon_ability',
+                'pokemon': pokemon_name,
+                'ability_name': ability_name,
+                'effect_kind': effect_kind,
+                'card': top_card,
+            }
+        else:
+            mark_primary_ability_used(pokemon, scope='turn', consume_charge=consume_charge)
+            _log(state, player['name'], f'Usou {ability_name} de {pokemon_name}! Comprando carta de evento.')
+            state = _draw_event_cards(state, player_id, 1, source='pokemon_ability')
+            return state, {
+                'type': 'manual_pokemon_ability',
+                'pokemon': pokemon_name,
+                'ability_name': ability_name,
+                'effect_kind': effect_kind,
+            }
+
+    if effect_kind == 'event_peek':
+        event_deck = state.get('decks', {}).get('event_deck', [])
+        event_discard = state.get('decks', {}).get('event_discard', [])
+        peek_card = event_deck[0] if event_deck else (event_discard[-1] if event_discard else None)
+        _log(state, player['name'], f'Usou {ability_name} de {pokemon_name}! Espreitou o topo da pilha de eventos.')
+        return state, {
+            'type': 'manual_pokemon_ability',
+            'pokemon': pokemon_name,
+            'ability_name': ability_name,
+            'effect_kind': effect_kind,
+            'peek_card': peek_card,
+        }
+
+    if effect_kind == 'area_capture_free':
+        tile = state['turn'].get('current_tile') or get_tile(state['board'], player.get('position', 0))
+        if not tile:
+            return None, 'Não foi possível determinar a casa atual'
+        if not tile.get('data', {}).get('encounters'):
+            return None, 'Não há Pokémon disponíveis para captura nesta área'
+        mark_primary_ability_used(pokemon, scope='turn', consume_charge=consume_charge)
+        _log(state, player['name'], f'Usou {ability_name} de {pokemon_name}! Iniciando captura de Pokémon da área atual.')
+        state = _queue_board_encounter(state, player_id, tile, 'aerodactyl_ability')
+        return state, {
+            'type': 'manual_pokemon_ability',
+            'pokemon': pokemon_name,
+            'ability_name': ability_name,
+            'effect_kind': effect_kind,
+        }
+
     return None, 'Esta ação de habilidade ainda não foi implementada com segurança'
 
 
@@ -6170,14 +6652,32 @@ def _build_league_member_team(member: dict) -> list[dict]:
     return [_build_leader_pokemon(entry, idx) for idx, entry in enumerate(member['team'])]
 
 
+def _player_completed_league_attempt(player: dict | None) -> bool:
+    return bool(player and player.get('league_attempt_completed'))
+
+
+def _mark_league_attempt_completed(player: dict | None, *, failed: bool) -> None:
+    if not player:
+        return
+    player['has_reached_league'] = True
+    player['league_attempt_completed'] = True
+    if failed:
+        player['league_failed'] = True
+
+
+def _all_active_players_completed_league_attempt(state: dict) -> bool:
+    active = _get_active_players(state)
+    return bool(active) and all(_player_completed_league_attempt(player) for player in active)
+
+
 def _resolve_league(state: dict, player_id: str) -> dict:
     """Inicia a batalha interativa da Liga Pokémon (Elite Four + Campeão)."""
     player = _get_player(state, player_id)
     if not player:
         return state
 
-    if player.get('league_failed'):
-        _log(state, player['name'], 'Você já foi eliminado da Liga Pokémon e não pode reentrar.')
+    if _player_completed_league_attempt(player):
+        _log(state, player['name'], 'Você já concluiu sua tentativa na Liga Pokémon e não pode acioná-la novamente.')
         state['turn']['phase'] = 'end'
         state = end_turn(state)
         return state
@@ -6276,6 +6776,7 @@ def _finalize_league_member_victory(state: dict, battle: dict, result: dict) -> 
 
     # Derrotou o Campeão — fim da Liga
     if player:
+        _mark_league_attempt_completed(player, failed=False)
         _log(state, player['name'], f"Derrotou o Campeão {member_name}! Pokémon League concluída!")
 
     state['turn']['battle'] = None
@@ -6301,8 +6802,8 @@ def _finalize_league_member_loss(state: dict, battle: dict, result: dict) -> tup
     player = _get_player(state, battle['challenger_id'])
     member_name = battle.get('defender_name', '')
     if player:
-        player['league_failed'] = True
-        _log(state, player['name'], f"Perdeu para {member_name}. Eliminado da Liga Pokémon — não pode reentrar.")
+        _mark_league_attempt_completed(player, failed=True)
+        _log(state, player['name'], f"Perdeu para {member_name}. Sua tentativa na Liga Pokémon foi encerrada.")
 
     state['turn']['battle'] = None
     _check_league_end(state, battle['challenger_id'])
@@ -6313,6 +6814,7 @@ def _finalize_league_member_loss(state: dict, battle: dict, result: dict) -> tup
         'battle_finished': True,
         'continues': False,
         'league_failed': True,
+        'league_attempt_completed': True,
     }
 
 
@@ -6360,10 +6862,8 @@ def confirm_league_intermission(state: dict, player_id: str) -> tuple[dict | Non
 
 
 def _check_league_end(state: dict, player_id: str) -> None:
-    """Verifica se o jogo deve encerrar (todos chegaram na liga) e avança o turno."""
-    active = _get_active_players(state)
-    all_done = all(p.get('has_reached_league') for p in active)
-    if all_done:
+    """Verifica se todos concluíram sua única tentativa na Liga e encerra o jogo quando aplicável."""
+    if _all_active_players_completed_league_attempt(state):
         state.update(_finish_game(state))
     else:
         state['turn']['phase'] = 'end'
@@ -6450,6 +6950,18 @@ def _resolve_successful_capture(
             'master_ball_consumed': master_ball_consumed,
         }
 
+    safari_exit_return_to = state['turn'].pop('safari_exit_return_to', None)
+    if safari_exit_return_to is not None and capture_context == 'safari':
+        player['position'] = safari_exit_return_to
+        state['turn']['current_tile'] = get_tile(state.get('board', {}), safari_exit_return_to)
+        _log(state, player['name'], f"Saiu da Safari Zone e voltou para {state['turn']['current_tile'].get('name', 'a House')}.")
+        state['turn']['pending_safari'] = None
+        state['turn']['capture_context'] = None
+        state['turn']['phase'] = 'end'
+        state = end_turn(state)
+        return state, {**result, 'capture_roll': capture_roll, 'safari_exit': True,
+                       'used_master_ball': use_master_ball, 'master_ball_consumed': master_ball_consumed}
+
     loop_pokemon_name = state['turn'].get('loop_capture_pokemon_name')
     if loop_pokemon_name:
         loop_player = _get_player(state, player_id)
@@ -6523,6 +7035,19 @@ def _resolve_failed_capture(state: dict, player_id: str, capture_roll: dict, rea
             'used_master_ball': used_master_ball,
             'master_ball_preserved': used_master_ball,
         }
+
+    safari_exit_return_to = state['turn'].pop('safari_exit_return_to', None)
+    if safari_exit_return_to is not None and state['turn'].get('capture_context') == 'safari':
+        failed_player = _get_player(state, player_id)
+        if failed_player:
+            failed_player['position'] = safari_exit_return_to
+            state['turn']['current_tile'] = get_tile(state.get('board', {}), safari_exit_return_to)
+            _log(state, failed_player['name'], f"Saiu da Safari Zone e voltou para {state['turn']['current_tile'].get('name', 'a House')}.")
+        state['turn']['pending_safari'] = None
+        state['turn']['capture_context'] = None
+        state = end_turn(state)
+        return state, {'success': False, 'capture_roll': capture_roll, 'safari_exit': True,
+                       'used_master_ball': used_master_ball, 'master_ball_preserved': used_master_ball}
 
     state['turn']['pending_safari'] = None
     state['turn']['capture_context'] = None
@@ -7017,10 +7542,61 @@ def skip_action(state: dict, player_id: str) -> dict:
         # Mantém fase de ação para próxima captura opcional
         return state
 
+    safari_exit_return_to = turn.pop('safari_exit_return_to', None)
+    if safari_exit_return_to is not None and capture_context == 'safari':
+        skip_player = _get_player(state, player_id)
+        if skip_player:
+            skip_player['position'] = safari_exit_return_to
+            state['turn']['current_tile'] = get_tile(state.get('board', {}), safari_exit_return_to)
+            _log(state, skip_player['name'], f"Pulou a captura e saiu da Safari Zone, voltando para {state['turn']['current_tile'].get('name', 'a House')}.")
+        turn['pending_safari'] = None
+        turn['capture_context'] = None
+        return end_turn(state)
+
     # Limpa estados e encerra turno
     turn['pending_safari'] = None
     turn['capture_context'] = None
     return end_turn(state)
+
+
+def _resolve_alakazam_teleport_choice(
+    state: dict,
+    player_id: str,
+    pending_action: dict,
+    chosen: dict,
+) -> tuple[dict | None, str | dict]:
+    player = _get_player(state, player_id)
+    if not player:
+        return None, 'Jogador não encontrado'
+    target_id = chosen.get('id')
+    target = _get_player(state, target_id)
+    if not target or not target.get('is_active') or target_id == player_id:
+        return None, 'Alvo inválido'
+    board_data = state.get('board', {})
+    old_pos = player['position']
+    target_pos = target['position']
+    player['position'] = target_pos
+    tile = get_tile(board_data, target_pos)
+    effect = get_tile_effect(tile)
+    state['turn']['dice_result'] = target_pos
+    state['turn']['current_tile'] = tile
+    slot_key = pending_action.get('slot_key')
+    ability_name = pending_action.get('ability_name', 'Psychic')
+    pokemon = _get_player_pokemon_slot(player, slot_key)
+    if pokemon:
+        sync_pokemon_ability_state(pokemon)
+        mark_primary_ability_used(pokemon, scope='turn', consume_charge=bool(pending_action.get('has_charges')))
+    _clear_pending_action(state)
+    _log(state, player['name'],
+         f'Usou {ability_name}! Teletransportou para a posição de {target["name"]}: {tile["name"]}')
+    if _handle_pokecenter_pass_through(
+        state, player_id,
+        start_position=old_pos, end_position=target_pos,
+        final_tile=tile, final_effect=effect,
+    ):
+        return state, {'type': 'alakazam_teleport', 'target_id': target_id, 'new_position': target_pos}
+    state = _resolve_tile_effect(state, player_id, tile, effect)
+    return state, {'type': 'alakazam_teleport', 'target_id': target_id, 'new_position': target_pos}
 
 
 def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple[dict | None, str | dict]:
@@ -7048,6 +7624,7 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
         'capture_reroll_decision',
         'battle_reroll_decision',
         'battle_bp_swap_decision',
+        'grass_duel_override',
         'heal_other_choice',
         'evolve_other_choice',
         'mewtwo_clone_choice',
@@ -7057,6 +7634,7 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
         'knockout_redirect_decision',
         'wobbuffet_counter_decision',
         'trainer_repeat_decision',
+        'alakazam_teleport_choice',
     ):
         return None, 'Nenhuma escolha pendente'
     if pending_action.get('player_id') != player_id:
@@ -7087,6 +7665,9 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
     if pending_type == 'battle_bp_swap_decision':
         return _resolve_battle_bp_swap_decision(state, player_id, pending_action, chosen)
 
+    if pending_type == 'grass_duel_override':
+        return _resolve_grass_duel_override_choice(state, player_id, pending_action, chosen)
+
     if pending_type == 'heal_other_choice':
         return _resolve_heal_other_choice(state, player_id, pending_action, chosen)
 
@@ -7095,6 +7676,9 @@ def resolve_pending_action(state: dict, player_id: str, option_id: str) -> tuple
 
     if pending_type == 'mewtwo_clone_choice':
         return _resolve_mewtwo_clone_choice(state, player_id, pending_action, chosen)
+
+    if pending_type == 'alakazam_teleport_choice':
+        return _resolve_alakazam_teleport_choice(state, player_id, pending_action, chosen)
 
     if pending_type == 'raikou_victory_bonus':
         return _resolve_raikou_victory_bonus_action(state, player_id, pending_action, chosen)
@@ -8804,11 +9388,6 @@ def _apply_post_battle_effects(
             _log(state, winner['name'],
                  f"Hyper Voice: {loser['name']} é imune ao recuo (Rock Head)!")
 
-    # ── Dynamic Punch: perdedor perde 1 item ────────────────────────────────
-    # Pendente: sistema de itens (ItemCard) não implementado ainda
-    elif winner_effect == 'dynamic_punch':
-        _log(state, winner['name'],
-             f"Dynamic Punch: {loser['name']} perdeu 1 item! (sistema de itens pendente)")
 
 
 def _knock_out_player_slot_with_log(state: dict, player: dict, slot_key: str | None) -> dict | None:
@@ -8848,6 +9427,13 @@ def _finalize_player_duel_outcome(
     state['turn']['phase'] = 'end'
     state = _award_victory_cards(state, winner['id'], 1, source='duel')
 
+    # Dewgong / Seel: consolation victory card after losing a duel
+    _loser_desc = (loser_pokemon.get('ability_description') or '').lower()
+    if 'take a victory card after losing a duel' in _loser_desc:
+        state = _award_victory_cards(state, loser['id'], 1, source='consolation_duel_loss')
+        _log(state, loser['name'],
+             f"{loser_pokemon.get('name')} usou sua habilidade de consolação e comprou uma carta de vitória após perder o duelo.")
+
     _apply_post_battle_effects(state, winner, loser, winner_pokemon, loser_pokemon)
     _queue_item_choice(state, winner['id'], 'Efeito de batalha')
 
@@ -8866,6 +9452,26 @@ def _finalize_player_duel_outcome(
         'recovery_pending': False,
         'turn_ended': False,
     }
+    # Vaporeon: when KO'd in battle, may heal one other pokémon (once per battle)
+    if knocked_out and knocked_out.get('name') == 'Vaporeon' and _player_has_any_conscious_pokemon(loser):
+        _vaporeon_heal_options = _build_heal_other_options(loser, loser_slot)
+        if _vaporeon_heal_options:
+            _set_pending_action(state, {
+                'type': 'heal_other_choice',
+                'player_id': loser['id'],
+                'healer_slot_key': loser_slot,
+                'healer_name': 'Vaporeon',
+                'ability_name': loser_pokemon.get('ability') or 'Hydration',
+                'heal_limit': 1,
+                'remaining_heals': 1,
+                'healed_pokemon_names': [],
+                'has_charges': False,
+                'prompt': 'Vaporeon foi nocauteado! Você pode curar um dos seus outros Pokémon.',
+                'options': _vaporeon_heal_options,
+                'allowed_actions': ['resolve_pending_action'],
+            })
+            return_data['recovery_pending'] = True
+
     if not _player_has_any_conscious_pokemon(loser):
         state, return_data = _handle_total_knockout_recovery(
             state,
@@ -9993,6 +10599,12 @@ def end_turn(state: dict) -> dict:
     visited = 0
     while next_id and visited < max(1, len(active_ids)):
         next_player = _get_player(state, next_id)
+        if next_player and _player_completed_league_attempt(next_player) and not _all_active_players_completed_league_attempt(state):
+            _log(state, next_player['name'], 'Já concluiu sua tentativa na Liga Pokémon e terá o turno pulado até o fim do jogo.')
+            turn['current_player_id'] = next_id
+            visited += 1
+            next_id = _next_player_id(state)
+            continue
         if not next_player or int(next_player.get('skip_turns', 0) or 0) <= 0:
             break
         next_player['skip_turns'] = max(0, int(next_player.get('skip_turns', 0)) - 1)

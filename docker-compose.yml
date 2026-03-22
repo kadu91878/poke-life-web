@@ -1,13 +1,23 @@
 services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     environment:
       SECRET_KEY: ${POKEMON_LIFE_SECRET_KEY:-django-insecure-docker-dev}
-      DEBUG: ${POKEMON_LIFE_DEBUG:-True}
+      DEBUG: ${POKEMON_LIFE_DEBUG:-False}
       ALLOWED_HOSTS: ${POKEMON_LIFE_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
       CORS_ALLOWED_ORIGINS: ${POKEMON_LIFE_CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      REDIS_URL: ${POKEMON_LIFE_REDIS_URL:-}
       CHANNEL_LAYERS_BACKEND: ${POKEMON_LIFE_CHANNEL_LAYERS_BACKEND:-memory}
       SQLITE_PATH: ${POKEMON_LIFE_SQLITE_PATH:-/app/backend/runtime/db.sqlite3}
     ports:
@@ -27,7 +37,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_DEBUG: ${POKEMON_LIFE_DEBUG:-True}
+        VITE_DEBUG: ${POKEMON_LIFE_DEBUG:-False}
     depends_on:
       - backend
     ports:
