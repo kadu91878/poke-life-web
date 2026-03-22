@@ -584,12 +584,13 @@ def _infer_effects_from_description(pokemon: dict[str, Any]) -> list[dict[str, A
 
     # tile_type_override: any grass tile → duel (machop / machoke / machamp)
     if 'treat any grass tile as a duel tile' in normalized:
-        if 'you may always' in normalized or 'always treat' in normalized:
-            add('tile_type_override', activation_mode='automatic_passive', implemented=False,
-                params={'from': 'grass', 'to': 'duel'})
-        else:
-            add('tile_type_override', activation_mode='manual_action', implemented=False,
-                params={'from': 'grass', 'to': 'duel'}, limit_scope='turn')
+        add(
+            'tile_type_override',
+            activation_mode='manual_action',
+            implemented=True,
+            params={'from': 'grass', 'to': 'duel'},
+            limit_scope='turn' if ('one charge' in normalized or '1 charge' in normalized) else None,
+        )
 
     # tile_type_override: landed tile → duel (tentacool / tentacruel)
     if 'treat the tile you landed on as if it were a duel tile' in normalized:

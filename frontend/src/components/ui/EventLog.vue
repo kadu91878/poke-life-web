@@ -34,18 +34,26 @@ function formatBattleToast(event) {
       : ` Voltou para ${result.returned_to_tile_name}.`)
     : ''
 
+  const autoWinOutcome = (result.challenger_auto_win || result.defender_auto_win)
+    ? `${winnerName} venceu automaticamente por habilidade!`
+    : null
+
   if (result.mode === 'gym') {
-    const outcome = result.battle_finished
-      ? (result.gym_victory ? `${winnerName} venceu o ginasio!` : `${winnerName} venceu o desafio!`)
-      : `${winnerName} venceu o round!`
+    const outcome = autoWinOutcome ?? (
+      result.battle_finished
+        ? (result.gym_victory ? `${winnerName} venceu o ginasio!` : `${winnerName} venceu o desafio!`)
+        : `${winnerName} venceu o round!`
+    )
     return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${outcome}${knockedOutLabel}${returnLabel}`
   }
 
   if (result.mode === 'trainer') {
-    return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${winnerName} venceu a batalha!${knockedOutLabel}${returnLabel}`
+    const outcome = autoWinOutcome ?? `${winnerName} venceu a batalha!`
+    return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${outcome}${knockedOutLabel}${returnLabel}`
   }
 
-  return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${winnerName} venceu o duelo!${knockedOutLabel}${returnLabel}`
+  const outcome = autoWinOutcome ?? `${winnerName} venceu o duelo!`
+  return `${challengerName}: ${challengerScore} x ${defenderName}: ${defenderScore}. ${outcome}${knockedOutLabel}${returnLabel}`
 }
 
 watch(() => store.lastEvent, (event) => {

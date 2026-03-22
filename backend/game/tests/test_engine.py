@@ -42,10 +42,12 @@ def _make_player(name: str, host: bool = False, **kwargs) -> dict:
         'special_tile_flags': {
             'celadon_dept_store_bonus_claimed': False,
         },
+        'consumed_stop_tiles': [],
         'items': {'pokeballs': 6, 'full_restores': 2},
         'badges': [],
         'master_points': 0,
         'has_reached_league': False,
+        'league_attempt_completed': False,
     }
     p.update(kwargs)
     return p
@@ -553,6 +555,46 @@ class TestTeamRocketTile(TestCase):
         self.assertEqual([entry['roll_type'] for entry in recent_rolls], ['movimento', 'Equipe Rocket'])
         self.assertEqual(recent_rolls[1]['context'], 'team_rocket_tile')
 
+    def test_team_rocket_forced_stop_is_consumed_per_player(self):
+        state, p1_id, p2_id = self._ready_state()
+
+        player_a = next(p for p in state['players'] if p['id'] == p1_id)
+        player_a['position'] = 36
+        state = engine.process_move(state, p1_id, 4)
+
+        player_a = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertEqual(player_a['position'], 38)
+        self.assertEqual((state['turn'].get('pending_action') or {}).get('type'), 'team_rocket_roll')
+        self.assertIn('team_rocket:38', player_a.get('consumed_stop_tiles', []))
+
+        state['turn']['current_player_id'] = p1_id
+        state['turn']['phase'] = 'roll'
+        state['turn']['battle'] = None
+        state['turn']['pending_action'] = None
+        state['turn']['pending_event'] = None
+        state['turn']['pending_pokemon'] = None
+        player_a['position'] = 36
+        state = engine.process_move(state, p1_id, 4)
+
+        player_a = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertEqual(player_a['position'], 40)
+        self.assertNotEqual((state['turn'].get('pending_action') or {}).get('type'), 'team_rocket_roll')
+
+        state['turn']['current_player_id'] = p2_id
+        state['turn']['phase'] = 'roll'
+        state['turn']['battle'] = None
+        state['turn']['pending_action'] = None
+        state['turn']['pending_event'] = None
+        state['turn']['pending_pokemon'] = None
+        player_b = next(p for p in state['players'] if p['id'] == p2_id)
+        player_b['position'] = 36
+        state = engine.process_move(state, p2_id, 4)
+
+        player_b = next(p for p in state['players'] if p['id'] == p2_id)
+        self.assertEqual(player_b['position'], 38)
+        self.assertEqual((state['turn'].get('pending_action') or {}).get('type'), 'team_rocket_roll')
+        self.assertIn('team_rocket:38', player_b.get('consumed_stop_tiles', []))
+
     def test_team_rocket_roll_1_steals_only_captured_pokemon_and_keeps_starter(self):
         state, p1_id, _ = self._ready_state()
         player = self._set_team(state, p1_id, [self._captured_pokemon('Caterpie', sequence=1, bp=2)])
@@ -776,6 +818,41 @@ class TestGymBattles(TestCase):
         self.assertEqual(new_state['turn']['battle']['mode'], 'gym')
         self.assertEqual(new_state['turn']['battle']['gym_id'], 'brock')
         self.assertIn('brock', player_after['gyms_attempted'])
+
+    def test_gym_forced_stop_is_consumed_per_player(self):
+        state, p1_id, p2_id = self._ready_state()
+        team = [{**_make_pokemon(name='Squirtle', bp=6), 'types': ['Water']}]
+        self._set_team(state, p1_id, team)
+        self._set_team(state, p2_id, copy.deepcopy(team))
+
+        self._prime_turn(state, p1_id)
+        player_a = next(p for p in state['players'] if p['id'] == p1_id)
+        player_a['position'] = 144
+        state = engine.process_move(state, p1_id, 4)
+
+        player_a = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertEqual(player_a['position'], 147)
+        self.assertEqual(state['turn']['battle']['mode'], 'gym')
+        self.assertIn('gym:147', player_a.get('consumed_stop_tiles', []))
+
+        self._prime_turn(state, p1_id)
+        player_a = next(p for p in state['players'] if p['id'] == p1_id)
+        player_a['position'] = 144
+        state = engine.process_move(state, p1_id, 4)
+
+        player_a = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertEqual(player_a['position'], 148)
+        self.assertNotEqual((state['turn'].get('battle') or {}).get('mode'), 'gym')
+
+        self._prime_turn(state, p2_id)
+        player_b = next(p for p in state['players'] if p['id'] == p2_id)
+        player_b['position'] = 144
+        state = engine.process_move(state, p2_id, 4)
+
+        player_b = next(p for p in state['players'] if p['id'] == p2_id)
+        self.assertEqual(player_b['position'], 147)
+        self.assertEqual(state['turn']['battle']['mode'], 'gym')
+        self.assertIn('gym:147', player_b.get('consumed_stop_tiles', []))
 
     def test_gym_victory_awards_badge_master_points_victory_card_and_heal(self):
         state, p1_id, _ = self._ready_state()
@@ -3833,14 +3910,6 @@ class TestBattleEffects(TestCase):
         # max(2, 6) = 6 → 5 * 6 = 30
         self.assertEqual(score, 30)
 
-    def test_static_zapdos_uses_best_of_three(self):
-        """Static Zapdos: rola 2 extras, usa melhor dos 3."""
-        pokemon = self._make_pokemon_with_effect(bp=9, battle_effect='static_zapdos')
-        with patch('game.engine.mechanics.random.randint', side_effect=[5, 6]):
-            score = calculate_battle_score(pokemon, 1)
-        # max(1, 5, 6) = 6 → 9 * 6 = 54
-        self.assertEqual(score, 54)
-
     def test_shadow_ball_uses_critical_hit_scoring(self):
         """Shadow Ball: usa critical_hit para score."""
         pokemon = self._make_pokemon_with_effect(bp=8, battle_effect='shadow_ball')
@@ -5159,6 +5228,173 @@ class TestPokemonAbilityRuntime(TestCase):
                 self.assertIsNotNone(retry_state)
                 self.assertEqual(retry_result['ability'], ability_action)
 
+    def test_squirtle_line_move_reroll_prompt_is_shared_across_the_entire_line_per_turn(self):
+        state, p1_id, _ = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Squirtle')
+        state = self._give_runtime_pokemon(state, p1_id, 'Wartortle', sequence=2)
+        state = self._give_runtime_pokemon(state, p1_id, 'Blastoise', sequence=3)
+
+        with patch('game.engine.state.roll_movement_dice', side_effect=[2, 4]):
+            rolled_state, _ = engine.perform_movement_roll(state, p1_id)
+
+            pending = rolled_state['turn']['pending_action']
+            selected_option_id = next(
+                option['id']
+                for option in pending['options']
+                if option.get('pokemon_name') == 'Squirtle'
+            )
+            resolved_state, result = engine.resolve_pending_action(rolled_state, p1_id, selected_option_id)
+
+        self.assertTrue(result['used'])
+        self.assertEqual(result['pokemon'], 'Squirtle')
+        self.assertTrue(result['awaiting_follow_up'])
+
+        player_after = next(player for player in resolved_state['players'] if player['id'] == p1_id)
+        self.assertTrue(player_after['pokemon'][0]['ability_runtime']['abilities']['primary']['used_this_turn'])
+        self.assertTrue(player_after['pokemon'][1]['ability_runtime']['abilities']['primary']['used_this_turn'])
+        self.assertTrue(player_after['pokemon'][2]['ability_runtime']['abilities']['primary']['used_this_turn'])
+
+        follow_up = resolved_state['turn'].get('pending_action')
+        self.assertIsNotNone(follow_up)
+        remaining_line_options = [
+            option
+            for option in follow_up['options']
+            if option.get('pokemon_name') in {'Squirtle', 'Wartortle', 'Blastoise'}
+        ]
+        self.assertEqual(remaining_line_options, [])
+
+    def test_squirtle_line_legacy_move_ability_is_shared_across_variants_in_the_same_turn(self):
+        variants = (
+            ('Squirtle', 'torrent', 'Wartortle', 'water_gun'),
+            ('Wartortle', 'water_gun', 'Blastoise', 'hydro_pump'),
+            ('Blastoise', 'hydro_pump', 'Squirtle', 'torrent'),
+        )
+
+        for first_name, first_action, second_name, second_action in variants:
+            with self.subTest(first=first_name, second=second_name):
+                state, p1_id, _ = self._ready_to_roll()
+                state = self._give_runtime_pokemon(state, p1_id, first_name)
+                state = self._give_runtime_pokemon(state, p1_id, second_name, sequence=2)
+
+                with patch('game.engine.state.roll_movement_dice', return_value=2):
+                    used_state, result = engine.use_ability(state, p1_id, first_action)
+
+                self.assertEqual(result['ability'], first_action)
+                used_state['turn']['current_player_id'] = p1_id
+                used_state['turn']['phase'] = 'roll'
+
+                retry_state, retry_error = engine.use_ability(used_state, p1_id, second_action)
+
+                self.assertIsNone(retry_state)
+                self.assertEqual(retry_error, 'Habilidade já utilizada')
+
+    def test_squirtle_line_shared_turn_lock_resets_for_the_next_turn(self):
+        state, p1_id, _ = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Squirtle')
+        state = self._give_runtime_pokemon(state, p1_id, 'Wartortle', sequence=2)
+
+        with patch('game.engine.state.roll_movement_dice', return_value=2):
+            used_state, result = engine.use_ability(state, p1_id, 'torrent')
+
+        self.assertEqual(result['ability'], 'torrent')
+        used_state['turn']['current_player_id'] = p1_id
+        used_state['turn']['phase'] = 'action'
+        used_state['turn']['pending_action'] = None
+        used_state['turn']['pending_event'] = None
+        used_state['turn']['pending_pokemon'] = None
+        used_state['turn']['pending_item_choice'] = None
+        used_state['turn']['pending_release_choice'] = None
+        used_state['turn']['battle'] = None
+
+        next_player_state = engine.end_turn(used_state)
+        next_turn_state = engine.end_turn(next_player_state)
+        next_turn_state['turn']['current_player_id'] = p1_id
+        next_turn_state['turn']['phase'] = 'roll'
+
+        player_before_retry = next(player for player in next_turn_state['players'] if player['id'] == p1_id)
+        self.assertFalse(player_before_retry['pokemon'][0]['ability_runtime']['abilities']['primary']['used_this_turn'])
+        self.assertFalse(player_before_retry['pokemon'][1]['ability_runtime']['abilities']['primary']['used_this_turn'])
+
+        with patch('game.engine.state.roll_movement_dice', return_value=3):
+            retry_state, retry_result = engine.use_ability(next_turn_state, p1_id, 'water_gun')
+
+        self.assertIsNotNone(retry_state)
+        self.assertEqual(retry_result['ability'], 'water_gun')
+
+    def test_machop_in_grass_shows_duel_override_option(self):
+        state, p1_id, _ = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Machop')
+
+        state = _land_on_tile(state, p1_id, 85)
+
+        pending = state['turn']['pending_action']
+        self.assertEqual(pending['type'], 'grass_duel_override')
+        self.assertTrue(any(option.get('pokemon_name') == 'Machop' for option in pending['options']))
+        self.assertTrue(any(option.get('id') == 'keep_grass' for option in pending['options']))
+
+    def test_machoke_in_grass_shows_duel_override_option(self):
+        state, p1_id, _ = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Machoke')
+
+        state = _land_on_tile(state, p1_id, 85)
+
+        pending = state['turn']['pending_action']
+        self.assertEqual(pending['type'], 'grass_duel_override')
+        self.assertTrue(any(option.get('pokemon_name') == 'Machoke' for option in pending['options']))
+
+    def test_machamp_in_grass_shows_duel_override_option(self):
+        state, p1_id, _ = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Machamp')
+
+        state = _land_on_tile(state, p1_id, 85)
+
+        pending = state['turn']['pending_action']
+        self.assertEqual(pending['type'], 'grass_duel_override')
+        self.assertTrue(any(option.get('pokemon_name') == 'Machamp' for option in pending['options']))
+
+    def test_other_pokemon_in_grass_does_not_show_duel_override_option(self):
+        state, p1_id, _ = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Doduo')
+
+        state = _land_on_tile(state, p1_id, 85)
+
+        pending = state['turn']['pending_action']
+        self.assertEqual(pending['type'], 'capture_attempt')
+
+    def test_grass_duel_override_choice_treats_tile_as_duel(self):
+        state, p1_id, _ = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Machop')
+
+        state = _land_on_tile(state, p1_id, 85)
+        pending = state['turn']['pending_action']
+        option_id = next(option['id'] for option in pending['options'] if option.get('pokemon_name') == 'Machop')
+
+        new_state, result = engine.resolve_pending_action(state, p1_id, option_id)
+
+        self.assertIsNotNone(new_state)
+        self.assertTrue(result['used'])
+        self.assertEqual(result['resolved_tile_type'], 'duel')
+        self.assertEqual(new_state['turn']['phase'], 'action')
+        self.assertEqual(new_state['turn']['capture_context'], 'duel')
+        self.assertEqual(new_state['turn']['current_tile']['type'], 'duel')
+        self.assertEqual(new_state['turn']['current_tile']['original_type'], 'grass')
+        self.assertIsNone(new_state['turn'].get('pending_action'))
+
+    def test_grass_duel_override_skip_keeps_normal_grass_flow(self):
+        state, p1_id, _ = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Machop')
+
+        state = _land_on_tile(state, p1_id, 85)
+
+        new_state, result = engine.resolve_pending_action(state, p1_id, 'keep_grass')
+
+        self.assertIsNotNone(new_state)
+        self.assertFalse(result['used'])
+        self.assertEqual(result['resolved_tile_type'], 'grass')
+        self.assertEqual(new_state['turn']['current_tile']['type'], 'grass')
+        self.assertEqual((new_state['turn'].get('pending_action') or {}).get('type'), 'capture_attempt')
+        self.assertEqual(new_state['turn']['capture_context'], 'grass')
+
     def test_celebi_boosts_teammates_and_stays_out_of_the_battle_pool(self):
         state, p1_id, _ = self._ready_to_roll()
         state = self._give_runtime_pokemon(state, p1_id, 'Celebi', sequence=1)
@@ -5489,10 +5725,10 @@ class TestPokemonAbilityRuntime(TestCase):
         self.assertEqual(player_after['pokemon'][0]['ability_charges'], 0)
         self.assertEqual(player_after['pokemon'][1]['ability_charges'], 2)
 
-    def test_zapdos_wins_automatically_against_pokemon_with_seven_or_less_bp(self):
+    def test_zapdos_wins_automatically_against_pokemon_with_seven_bp(self):
         state, p1_id, p2_id = self._ready_to_roll()
         state = self._give_runtime_pokemon(state, p1_id, 'Zapdos', sequence=1)
-        state = self._give_runtime_pokemon(state, p2_id, 'Rattata', sequence=1)
+        state = self._give_runtime_pokemon(state, p2_id, 'Fearow', sequence=1)
 
         state = self._start_runtime_duel(
             state,
@@ -5508,7 +5744,74 @@ class TestPokemonAbilityRuntime(TestCase):
 
         self.assertEqual(battle_result['winner_id'], p1_id)
         self.assertTrue(battle_result['challenger_auto_win'])
+        self.assertFalse(battle_result['defender_auto_win'])
         self.assertEqual(battle_result['winner_pokemon'], 'Zapdos')
+
+    def test_zapdos_wins_automatically_against_pokemon_with_six_bp(self):
+        state, p1_id, p2_id = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Zapdos', sequence=1)
+        state = self._give_runtime_pokemon(state, p2_id, 'Seel', sequence=1)
+
+        state = self._start_runtime_duel(
+            state,
+            p1_id,
+            p2_id,
+            challenger_slot_key='pokemon:0',
+            defender_slot_key='pokemon:0',
+        )
+
+        with patch('game.engine.state.roll_battle_dice', side_effect=[1, 6]):
+            state, _ = engine.register_battle_roll(state, p1_id)
+            state, battle_result = engine.register_battle_roll(state, p2_id)
+
+        self.assertEqual(battle_result['winner_id'], p1_id)
+        self.assertTrue(battle_result['challenger_auto_win'])
+        self.assertFalse(battle_result['defender_auto_win'])
+        self.assertEqual(battle_result['winner_pokemon'], 'Zapdos')
+
+    def test_zapdos_plays_a_normal_battle_against_pokemon_with_eight_bp(self):
+        state, p1_id, p2_id = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Zapdos', sequence=1)
+        state = self._give_runtime_pokemon(state, p2_id, 'Aerodactyl', sequence=1)
+
+        state = self._start_runtime_duel(
+            state,
+            p1_id,
+            p2_id,
+            challenger_slot_key='pokemon:0',
+            defender_slot_key='pokemon:0',
+        )
+
+        with patch('game.engine.state.roll_battle_dice', side_effect=[1, 6]):
+            state, _ = engine.register_battle_roll(state, p1_id)
+            state, battle_result = engine.register_battle_roll(state, p2_id)
+
+        self.assertEqual(battle_result['winner_id'], p2_id)
+        self.assertFalse(battle_result['challenger_auto_win'])
+        self.assertFalse(battle_result['defender_auto_win'])
+        self.assertEqual(battle_result['winner_pokemon'], 'Aerodactyl')
+
+    def test_non_zapdos_keeps_normal_battle_rules_against_pokemon_with_seven_bp(self):
+        state, p1_id, p2_id = self._ready_to_roll()
+        state = self._give_runtime_pokemon(state, p1_id, 'Doduo', sequence=1)
+        state = self._give_runtime_pokemon(state, p2_id, 'Fearow', sequence=1)
+
+        state = self._start_runtime_duel(
+            state,
+            p1_id,
+            p2_id,
+            challenger_slot_key='pokemon:0',
+            defender_slot_key='pokemon:0',
+        )
+
+        with patch('game.engine.state.roll_battle_dice', side_effect=[1, 6]):
+            state, _ = engine.register_battle_roll(state, p1_id)
+            state, battle_result = engine.register_battle_roll(state, p2_id)
+
+        self.assertEqual(battle_result['winner_id'], p2_id)
+        self.assertFalse(battle_result['challenger_auto_win'])
+        self.assertFalse(battle_result['defender_auto_win'])
+        self.assertEqual(battle_result['winner_pokemon'], 'Fearow')
 
     def test_moltres_recharges_all_other_pokemon_abilities_but_not_its_own(self):
         state, p1_id, _ = self._ready_to_roll()
@@ -6082,6 +6385,41 @@ class TestPokemonLeague(TestCase):
         self.assertEqual(state['turn']['phase'], 'battle')
         self.assertEqual(p1['has_reached_league'], True)
 
+    def test_league_forced_stop_is_consumed_per_player(self):
+        state, p1_id, p2_id = self._ready_state()
+        team = [_make_pokemon(name='Dragonite', bp=12)]
+        self._set_team(state, p1_id, team)
+        self._set_team(state, p2_id, copy.deepcopy(team))
+
+        self._prime_turn(state, p1_id)
+        p1 = next(p for p in state['players'] if p['id'] == p1_id)
+        p1['position'] = 166
+        state = engine.process_move(state, p1_id, 4)
+
+        p1 = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertEqual(p1['position'], 169)
+        self.assertEqual(state['turn']['battle']['mode'], 'league')
+        self.assertIn('league:169', p1.get('consumed_stop_tiles', []))
+
+        self._prime_turn(state, p1_id)
+        p1 = next(p for p in state['players'] if p['id'] == p1_id)
+        p1['position'] = 166
+        state = engine.process_move(state, p1_id, 4)
+
+        p1 = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertEqual(p1['position'], 169)
+        self.assertNotEqual((state['turn'].get('battle') or {}).get('mode'), 'league')
+
+        self._prime_turn(state, p2_id)
+        p2 = next(p for p in state['players'] if p['id'] == p2_id)
+        p2['position'] = 166
+        state = engine.process_move(state, p2_id, 4)
+
+        p2 = next(p for p in state['players'] if p['id'] == p2_id)
+        self.assertEqual(p2['position'], 169)
+        self.assertEqual(state['turn']['battle']['mode'], 'league')
+        self.assertIn('league:169', p2.get('consumed_stop_tiles', []))
+
     def test_league_battle_choice_and_roll_work(self):
         """Escolha de Pokémon e rolagem de dado funcionam na Liga."""
         state, p1_id, p2_id = self._ready_state()
@@ -6130,8 +6468,8 @@ class TestPokemonLeague(TestCase):
         p1 = next(p for p in state['players'] if p['id'] == p1_id)
         self.assertGreater(p1['master_points'], 0)
 
-    def test_league_loss_sets_failed_flag(self):
-        """Perder para um membro da Liga seta league_failed."""
+    def test_league_loss_marks_attempt_completed(self):
+        """Perder para um membro da Liga marca a tentativa como concluída."""
         state, p1_id, p2_id = self._ready_state()
         self._set_team(state, p1_id, [_make_pokemon(name='Magikarp', bp=1)])
         self._prime_turn(state, p1_id)
@@ -6146,14 +6484,42 @@ class TestPokemonLeague(TestCase):
 
         p1 = next(p for p in state['players'] if p['id'] == p1_id)
         self.assertTrue(p1.get('league_failed'))
+        self.assertTrue(p1.get('league_attempt_completed'))
         self.assertIsNone(state['turn'].get('battle'))
 
-    def test_league_failed_blocks_reentry(self):
-        """Player com league_failed não pode reentrar na Liga."""
+    def test_league_victory_marks_attempt_completed(self):
+        state, p1_id, p2_id = self._ready_state()
+        self._set_team(state, p1_id, [_make_pokemon(name='Dragonite', bp=12)])
+        self._prime_turn(state, p1_id)
+        p1 = next(p for p in state['players'] if p['id'] == p1_id)
+        p1['position'] = 168
+        state['decks']['victory_deck'] = []
+        state['decks']['victory_discard'] = []
+
+        single_member_league = [{
+            'name': 'Lorelei',
+            'team': [
+                {'name': 'Magikarp', 'battle_points': 1, 'types': ['Water']},
+            ],
+        }]
+
+        with patch.object(engine, '_LEAGUE_MEMBERS', single_member_league):
+            state = engine.process_move(state, p1_id, 1)
+            state, _ = engine.register_battle_choice(state, p1_id, 0)
+            with patch('game.engine.state.roll_battle_dice', side_effect=[6, 1]):
+                state, result = engine.register_battle_roll(state, p1_id)
+
+        p1 = next(p for p in state['players'] if p['id'] == p1_id)
+        self.assertTrue(p1.get('league_attempt_completed'))
+        self.assertTrue(result.get('league_completed'))
+        self.assertIsNone(state['turn'].get('battle'))
+
+    def test_completed_league_attempt_blocks_reentry(self):
+        """Player que já concluiu sua tentativa na Liga não pode reentrar."""
         state, p1_id, p2_id = self._ready_state()
         self._set_team(state, p1_id, [_make_pokemon(name='Magikarp', bp=1)])
         p1 = next(p for p in state['players'] if p['id'] == p1_id)
-        p1['league_failed'] = True
+        p1['league_attempt_completed'] = True
         p1['has_reached_league'] = True
 
         state['turn']['current_player_id'] = p1_id
@@ -6163,6 +6529,53 @@ class TestPokemonLeague(TestCase):
 
         state = engine.process_move(state, p1_id, 1)
         self.assertIsNone(state['turn'].get('battle'))
+
+    def test_completed_league_players_have_turns_skipped(self):
+        state, p1_id, p2_id = self._ready_state()
+        self._set_team(state, p1_id, [_make_pokemon(name='Magikarp', bp=1)])
+        self._set_team(state, p2_id, [_make_pokemon(name='Dragonite', bp=12)])
+        self._prime_turn(state, p1_id)
+        p1 = next(p for p in state['players'] if p['id'] == p1_id)
+        p1['position'] = 168
+        state['decks']['victory_deck'] = []
+
+        state = engine.process_move(state, p1_id, 1)
+        state, _ = engine.register_battle_choice(state, p1_id, 0)
+        with patch('game.engine.state.roll_battle_dice', side_effect=[1, 6]):
+            state, _ = engine.register_battle_roll(state, p1_id)
+
+        self.assertEqual(state['turn']['current_player_id'], p2_id)
+
+        state['turn']['phase'] = 'action'
+        state['turn']['pending_action'] = None
+        state['turn']['pending_event'] = None
+        state['turn']['pending_pokemon'] = None
+        state = engine.end_turn(state)
+
+        self.assertEqual(state['turn']['current_player_id'], p2_id)
+
+    def test_game_finishes_when_all_players_complete_league_attempt(self):
+        state, p1_id, p2_id = self._ready_state()
+        self._set_team(state, p1_id, [_make_pokemon(name='Magikarp', bp=1)])
+        self._set_team(state, p2_id, [_make_pokemon(name='Dragonite', bp=12)])
+        p2 = next(p for p in state['players'] if p['id'] == p2_id)
+        p2['league_attempt_completed'] = True
+        p2['has_reached_league'] = True
+
+        self._prime_turn(state, p1_id)
+        p1 = next(p for p in state['players'] if p['id'] == p1_id)
+        p1['position'] = 168
+        state['decks']['victory_deck'] = []
+
+        state = engine.process_move(state, p1_id, 1)
+        state, _ = engine.register_battle_choice(state, p1_id, 0)
+        with patch('game.engine.state.roll_battle_dice', side_effect=[1, 6]):
+            state, _ = engine.register_battle_roll(state, p1_id)
+
+        self.assertEqual(state['status'], 'finished')
+        self.assertIn('final_scores', state)
+        expected_scores = calculate_final_scores([player for player in state['players'] if player.get('is_active', True)])
+        self.assertEqual(state['final_scores'], expected_scores)
 
     def test_starting_items_include_two_full_restores(self):
         """Cada jogador começa com 2 Full Restores."""

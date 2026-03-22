@@ -8,7 +8,6 @@ Convenção de battle_effect:
     swift           — +2 flat ao score
     shadow_ball     — critical_hit + pós-batalha: perdedor perde 1 FR
     flame_body      — earthquake + pós-batalha: perdedor perde 1 FR
-    static_zapdos   — rola 2 dados extras, usa o melhor
     multiscale      — earthquake + ignora habilidades do oponente
     solar_beam      — +3 BP de bônus (ativo pelo jogador)
 
@@ -115,11 +114,6 @@ def _score_with_effect(bp: int, roll: int, battle_effect: str | None) -> int:
         # Rola dado extra; usa o maior resultado
         extra = random.randint(1, 6)
         return bp * max(roll, extra)
-
-    if battle_effect == 'static_zapdos':
-        # Rola 2 dados extras; usa o melhor entre os 3
-        extra1, extra2 = random.randint(1, 6), random.randint(1, 6)
-        return bp * max(roll, extra1, extra2)
 
     if battle_effect in ('earthquake', 'flame_body', 'multiscale'):
         # +1x BP de bônus

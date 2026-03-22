@@ -25,7 +25,6 @@ SCORE_EFFECTS = frozenset({
     'battle_plus_8',    # +8 flat ao score total
     'shadow_ball',      # critical_hit + pós-batalha: perdedor perde 1 FR
     'flame_body',       # earthquake + pós-batalha: perdedor perde 1 FR
-    'static_zapdos',    # critical_hit com 2 dados extras
     'multiscale',       # earthquake + ignora habilidades do oponente
     'solar_beam',       # +3 BP de bônus (ativado pelo jogador)
 })

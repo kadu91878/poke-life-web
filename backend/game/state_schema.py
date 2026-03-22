@@ -205,7 +205,13 @@ def _normalize_player(player: dict[str, Any], index: int) -> dict[str, Any]:
     normalized.setdefault('league_bonus', 0)
     normalized.setdefault('gyms_attempted', [])
     normalized.setdefault('gyms_defeated', [])
+    normalized['consumed_stop_tiles'] = [
+        str(tile_key)
+        for tile_key in (normalized.get('consumed_stop_tiles') or [])
+        if str(tile_key).strip()
+    ]
     normalized.setdefault('has_reached_league', False)
+    normalized.setdefault('league_attempt_completed', False)
     normalized.setdefault('league_failed', False)
     normalized.setdefault('skip_turns', 0)
     return sync_player_inventory(normalized)
